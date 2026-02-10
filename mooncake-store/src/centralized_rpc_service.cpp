@@ -289,33 +289,6 @@ WrappedCentralizedMasterService::BatchPutRevoke(
     return results;
 }
 
-tl::expected<void, ErrorCode> WrappedCentralizedMasterService::MountSegment(
-    const Segment& segment, const UUID& client_id) {
-    return execute_rpc(
-        "MountSegment",
-        [&] { return master_service_.MountSegment(segment, client_id); },
-        [&](auto& timer) {
-            timer.LogRequest("base=", segment.base, ", size=", segment.size,
-                             ", segment_name=", segment.name,
-                             ", id=", segment.id);
-        },
-        [] { MasterMetricManager::instance().inc_mount_segment_requests(); },
-        [] { MasterMetricManager::instance().inc_mount_segment_failures(); });
-}
-
-tl::expected<void, ErrorCode> WrappedCentralizedMasterService::ReMountSegment(
-    const std::vector<Segment>& segments, const UUID& client_id) {
-    return execute_rpc(
-        "ReMountSegment",
-        [&] { return master_service_.ReMountSegment(segments, client_id); },
-        [&](auto& timer) {
-            timer.LogRequest("segments_count=", segments.size(),
-                             ", client_id=", client_id);
-        },
-        [] { MasterMetricManager::instance().inc_remount_segment_requests(); },
-        [] { MasterMetricManager::instance().inc_remount_segment_failures(); });
-}
-
 tl::expected<std::string, ErrorCode>
 WrappedCentralizedMasterService::GetFsdir() {
     ScopedVLogTimer timer(1, "GetFsdir");
@@ -454,12 +427,7 @@ void RegisterCentralizedRpcService(
     server.register_handler<
         &mooncake::WrappedCentralizedMasterService::BatchPutRevoke>(
         &wrapped_master_service);
-    server.register_handler<
-        &mooncake::WrappedCentralizedMasterService::MountSegment>(
-        &wrapped_master_service);
-    server.register_handler<
-        &mooncake::WrappedCentralizedMasterService::ReMountSegment>(
-        &wrapped_master_service);
+
     server
         .register_handler<&mooncake::WrappedCentralizedMasterService::GetFsdir>(
             &wrapped_master_service);

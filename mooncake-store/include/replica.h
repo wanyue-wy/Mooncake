@@ -15,6 +15,7 @@
 #include "types.h"
 #include "allocator.h"
 #include "master_metric_manager.h"
+#include "tiered_cache/cache_tier.h"
 
 namespace mooncake {
 
@@ -22,9 +23,10 @@ namespace mooncake {
  * @brief Type of buffer allocator used in the system
  */
 enum class ReplicaType {
-    MEMORY,     // Memory replica
-    DISK,       // Disk replica
-    LOCAL_DISK  // Local disk replica
+    MEMORY,      // Memory replica
+    DISK,        // Disk replica
+    LOCAL_DISK,  // Local disk replica
+    P2P_PROXY,   // routing replica (only for P2P structure)
 };
 
 /**
@@ -34,7 +36,9 @@ inline std::ostream& operator<<(std::ostream& os,
                                 const ReplicaType& replicaType) noexcept {
     static const std::unordered_map<ReplicaType, std::string_view>
         replica_type_strings{{ReplicaType::MEMORY, "MEMORY"},
-                             {ReplicaType::DISK, "DISK"}};
+                             {ReplicaType::DISK, "DISK"},
+                             {ReplicaType::LOCAL_DISK, "LOCAL_DISK"},
+                             {ReplicaType::P2P_PROXY, "P2P_PROXY"}};
 
     os << (replica_type_strings.count(replicaType)
                ? replica_type_strings.at(replicaType)
@@ -119,6 +123,14 @@ struct LocalDiskReplicaData {
     std::string transport_endpoint;
 };
 
+struct P2PProxyReplicaData {
+    UUID client_id;
+    UUID segment_id;
+    MemoryType storage_type;
+    std::string ip_address;
+    uint16_t rpc_port = 0;
+};
+
 struct MemoryDescriptor {
     AllocatedBuffer::Descriptor buffer_descriptor;
     YLT_REFL(MemoryDescriptor, buffer_descriptor);
@@ -135,6 +147,16 @@ struct LocalDiskDescriptor {
     uint64_t object_size = 0;
     std::string transport_endpoint;
     YLT_REFL(LocalDiskDescriptor, client_id, object_size, transport_endpoint);
+};
+
+struct P2PProxyDescriptor {
+    UUID client_id;
+    UUID segment_id;
+    MemoryType storage_type;
+    std::string ip_address;
+    uint16_t rpc_port = 0;
+    YLT_REFL(P2PProxyDescriptor, client_id, segment_id, storage_type,
+             ip_address, rpc_port);
 };
 
 class Replica {
@@ -158,6 +180,9 @@ class Replica {
         : data_(LocalDiskReplicaData{client_id, object_size,
                                      std::move(transport_endpoint)}),
           status_(status) {}
+
+    Replica(P2PProxyReplicaData proxy_data, ReplicaStatus status)
+        : data_(std::move(proxy_data)), status_(status) {}
 
     ~Replica() {
         if (status_ != ReplicaStatus::UNDEFINED && is_disk_replica()) {
@@ -220,6 +245,10 @@ class Replica {
         return std::holds_alternative<LocalDiskReplicaData>(data_);
     }
 
+    [[nodiscard]] bool is_p2p_proxy_replica() const {
+        return std::holds_alternative<P2PProxyReplicaData>(data_);
+    }
+
     [[nodiscard]] bool has_invalid_mem_handle() const {
         if (is_memory_replica()) {
             const auto& mem_data = std::get<MemoryReplicaData>(data_);
@@ -240,6 +269,9 @@ class Replica {
 
     [[nodiscard]] std::vector<std::optional<std::string>> get_segment_names()
         const;
+
+    // only memory replica and p2p proxy replica have segment id
+    [[nodiscard]] std::optional<UUID> get_segment_id() const;
 
     void mark_complete() {
         if (status_ == ReplicaStatus::PROCESSING) {
@@ -263,10 +295,14 @@ class Replica {
         ReplicaType operator()(const LocalDiskReplicaData&) const {
             return ReplicaType::LOCAL_DISK;
         }
+        ReplicaType operator()(const P2PProxyReplicaData&) const {
+            return ReplicaType::P2P_PROXY;
+        }
     };
 
     struct Descriptor {
-        std::variant<MemoryDescriptor, DiskDescriptor, LocalDiskDescriptor>
+        std::variant<MemoryDescriptor, DiskDescriptor, LocalDiskDescriptor,
+                     P2PProxyDescriptor>
             descriptor_variant;
         ReplicaStatus status;
         YLT_REFL(Descriptor, descriptor_variant, status);
@@ -295,6 +331,16 @@ class Replica {
 
         bool is_local_disk_replica() const noexcept {
             return std::holds_alternative<LocalDiskDescriptor>(
+                descriptor_variant);
+        }
+
+        bool is_p2p_proxy_replica() noexcept {
+            return std::holds_alternative<P2PProxyDescriptor>(
+                descriptor_variant);
+        }
+
+        bool is_p2p_proxy_replica() const noexcept {
+            return std::holds_alternative<P2PProxyDescriptor>(
                 descriptor_variant);
         }
 
@@ -343,10 +389,27 @@ class Replica {
             }
             throw std::runtime_error("Expected LocalDiskDescriptor");
         }
+
+        P2PProxyDescriptor& get_p2p_proxy_descriptor() {
+            if (auto* desc =
+                    std::get_if<P2PProxyDescriptor>(&descriptor_variant)) {
+                return *desc;
+            }
+            throw std::runtime_error("Expected P2PProxyDescriptor");
+        }
+
+        const P2PProxyDescriptor& get_p2p_proxy_descriptor() const {
+            if (auto* desc =
+                    std::get_if<P2PProxyDescriptor>(&descriptor_variant)) {
+                return *desc;
+            }
+            throw std::runtime_error("Expected P2PProxyDescriptor");
+        }
     };
 
    private:
-    std::variant<MemoryReplicaData, DiskReplicaData, LocalDiskReplicaData>
+    std::variant<MemoryReplicaData, DiskReplicaData, LocalDiskReplicaData,
+                 P2PProxyReplicaData>
         data_;
     ReplicaStatus status_{ReplicaStatus::UNDEFINED};
 };
@@ -380,6 +443,15 @@ inline Replica::Descriptor Replica::get_descriptor() const {
         local_disk_desc.object_size = disk_data.object_size;
         local_disk_desc.transport_endpoint = disk_data.transport_endpoint;
         desc.descriptor_variant = std::move(local_disk_desc);
+    } else if (is_p2p_proxy_replica()) {
+        const auto& proxy_data = std::get<P2PProxyReplicaData>(data_);
+        P2PProxyDescriptor proxy_desc;
+        proxy_desc.client_id = proxy_data.client_id;
+        proxy_desc.segment_id = proxy_data.segment_id;
+        proxy_desc.storage_type = proxy_data.storage_type;
+        proxy_desc.ip_address = proxy_data.ip_address;
+        proxy_desc.rpc_port = proxy_data.rpc_port;
+        desc.descriptor_variant = std::move(proxy_desc);
     }
 
     return desc;
@@ -400,6 +472,19 @@ inline std::vector<std::optional<std::string>> Replica::get_segment_names()
     return std::vector<std::optional<std::string>>();
 }
 
+inline std::optional<UUID> Replica::get_segment_id() const {
+    if (is_memory_replica()) {
+        const auto& mem_data = std::get<MemoryReplicaData>(data_);
+        if (mem_data.buffer) {
+            return mem_data.buffer->getSegmentId();
+        }
+    } else if (is_p2p_proxy_replica()) {
+        const auto& proxy_data = std::get<P2PProxyReplicaData>(data_);
+        return proxy_data.segment_id;
+    }
+    return std::nullopt;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const Replica& replica) {
     os << "Replica: { status: " << replica.status_ << ", ";
 
@@ -414,6 +499,15 @@ inline std::ostream& operator<<(std::ostream& os, const Replica& replica) {
         const auto& disk_data = std::get<DiskReplicaData>(replica.data_);
         os << "type: DISK, file_path: " << disk_data.file_path
            << ", object_size: " << disk_data.object_size;
+    } else if (replica.is_local_disk_replica()) {
+        const auto& disk_data = std::get<LocalDiskReplicaData>(replica.data_);
+        os << "type: LOCAL_DISK, client_id: " << disk_data.client_id
+           << ", object_size: " << disk_data.object_size;
+    } else if (replica.is_p2p_proxy_replica()) {
+        const auto& proxy_data = std::get<P2PProxyReplicaData>(replica.data_);
+        os << "type: P2P_PROXY, client_id: " << proxy_data.client_id
+           << ", segment_id: " << proxy_data.segment_id
+           << ", ip: " << proxy_data.ip_address << ":" << proxy_data.rpc_port;
     }
 
     os << " }";

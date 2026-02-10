@@ -1,62 +1,38 @@
 #include "p2p_client_manager.h"
+#include "p2p_client_meta.h"
 #include <glog/logging.h>
 
 namespace mooncake {
 
-P2PClientManager::P2PClientManager(const int64_t client_live_ttl_sec)
-    : ClientManager(client_live_ttl_sec) {}
+P2PClientManager::P2PClientManager(const int64_t disconnect_timeout_sec,
+                                   const int64_t crash_timeout_sec,
+                                   const ViewVersionId view_version)
+    : ClientManager(disconnect_timeout_sec, crash_timeout_sec, view_version) {}
 
-auto P2PClientManager::UnmountSegment(const UUID& segment_id,
-                                      const UUID& client_id)
-    -> tl::expected<void, ErrorCode> {
-    // TODO
-    return {};
+std::shared_ptr<ClientMeta> P2PClientManager::CreateClientMeta(
+    const RegisterClientRequest& req) {
+    auto meta = std::make_shared<P2PClientMeta>(
+        req.client_id, req.ip_address.value_or(""), req.rpc_port.value_or(0));
+    return meta;
 }
 
-void P2PClientManager::ClientMonitorFunc() {
-    while (client_monitor_running_) {
-        // TODO
+HeartbeatTaskResult P2PClientManager::ProcessTask(const UUID& client_id,
+                                                  const HeartbeatTask& task) {
+    HeartbeatTaskResult result;
+    result.type = task.type_;
+
+    switch (task.type_) {
+        case HeartbeatTaskType::SYNC_SEGMENT_META: {
+            // TODO: wanyue-wy
+            // P2P client reports its own segment status
+            result.error = ErrorCode::OK;
+            break;
+        }
+        default:
+            result.error = ErrorCode::NOT_IMPLEMENTED;
+            break;
     }
-}
-
-auto P2PClientManager::InnerMountSegment(const Segment& segment,
-                                         const UUID& client_id,
-                                         std::function<ErrorCode()>& pre_func)
-    -> tl::expected<void, ErrorCode> {
-    // TODO
-    return {};
-}
-
-auto P2PClientManager::InnerReMountSegment(const std::vector<Segment>& segments,
-                                           const UUID& client_id,
-                                           std::function<ErrorCode()>& pre_func)
-    -> tl::expected<void, ErrorCode> {
-    // TODO
-    return {};
-}
-
-auto P2PClientManager::GetAllSegments()
-    -> tl::expected<std::vector<std::string>, ErrorCode> {
-    // TODO
-    return {};
-}
-
-auto P2PClientManager::QuerySegments(const std::string& segment)
-    -> tl::expected<std::pair<size_t, size_t>, ErrorCode> {
-    // TODO
-    return {};
-}
-
-auto P2PClientManager::QueryIp(const UUID& client_id)
-    -> tl::expected<std::vector<std::string>, ErrorCode> {
-    // TODO
-    return {};
-}
-
-auto P2PClientManager::Ping(const UUID& client_id)
-    -> tl::expected<ClientStatus, ErrorCode> {
-    // TODO
-    return ClientStatus::OK;
+    return result;
 }
 
 }  // namespace mooncake

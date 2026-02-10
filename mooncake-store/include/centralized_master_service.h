@@ -25,6 +25,9 @@
 #include "replica.h"
 
 namespace mooncake {
+namespace test {
+class MasterServiceTest;
+}
 
 /**
  * @brief The CentralizedMasterService is centralized service implementation for
@@ -40,32 +43,6 @@ class CentralizedMasterService final : public MasterService {
     CentralizedMasterService();
     explicit CentralizedMasterService(const MasterServiceConfig& config);
     ~CentralizedMasterService() override;
-
-    /**
-     * @brief Mount a memory segment for buffer allocation. This function is
-     * idempotent.
-     * @return ErrorCode::OK on success,
-     *         ErrorCode::INVALID_PARAMS on invalid parameters,
-     *         ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS if the segment cannot
-     *         be mounted temporarily,
-     *         ErrorCode::INTERNAL_ERROR on internal errors.
-     */
-    auto MountSegment(const Segment& segment, const UUID& client_id)
-        -> tl::expected<void, ErrorCode>;
-
-    /**
-     * @brief Re-mount segments, invoked when the client is the first time to
-     * connect to the master or the client Ping TTL is expired and need
-     * to remount. This function is idempotent. Client should retry if the
-     * return code is not ErrorCode::OK.
-     * @return ErrorCode::OK means either all segments are remounted
-     * successfully or the fail is not solvable by a new remount request.
-     *         ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS if the segment cannot
-     *         be mounted temporarily.
-     *         ErrorCode::INTERNAL_ERROR if something temporary error happens.
-     */
-    auto ReMountSegment(const std::vector<Segment>& segments,
-                        const UUID& client_id) -> tl::expected<void, ErrorCode>;
 
     auto GetReplicaList(std::string_view key)
         -> tl::expected<GetReplicaListResponse, ErrorCode>;
@@ -181,6 +158,8 @@ class CentralizedMasterService final : public MasterService {
     void OnObjectHit(const ObjectMetadata& metadata) override;
     void OnReplicaRemoved(const Replica& replica) override;
 
+    void OnSegmentRemoved(const UUID& segment_id) override;
+
    private:
     // Resolve the key to a sanitized format for storage
     std::string SanitizeKey(const std::string& key) const;
@@ -195,12 +174,6 @@ class CentralizedMasterService final : public MasterService {
     // evict_ratio_lowerbound, the second pass will be triggered and try to
     // fulfill evict ratio lowerbound.
     void BatchEvict(double evict_ratio_target, double evict_ratio_lowerbound);
-
-    // Clear invalid handles in all shards
-    void ClearInvalidHandles();
-
-    // Helper to clean up stale handles pointing to unmounted segments
-    bool CleanupStaleHandles(ObjectMetadata& metadata);
 
     /**
      * @brief Helper to discard expired processing keys.
@@ -324,7 +297,7 @@ class CentralizedMasterService final : public MasterService {
     }
     static constexpr size_t kNumShards = 1024;  // Number of metadata shards
     // Helper to get shard index from key
-    size_t getShardIndex(const std::string& key) const override {
+    size_t GetShardIndex(const std::string& key) const override {
         return std::hash<std::string>{}(key) % kNumShards;
     }
     size_t GetShardCount() const override { return kNumShards; }
@@ -337,17 +310,7 @@ class CentralizedMasterService final : public MasterService {
                                     const std::string& key)
             : MasterService::MetadataAccessor(service, key),
               c_shard_(static_cast<CentralizedMetadataShard&>(shard_)),
-              processing_it_(c_shard_.processing_keys.find(key)) {
-            // Automatically clean up invalid handles
-            if (Exists()) {
-                if (service->CleanupStaleHandles(Get())) {
-                    Erase();
-                    if (InProcessing()) {
-                        EraseFromProcessing();
-                    }
-                }
-            }
-        }
+              processing_it_(c_shard_.processing_keys.find(key)) {}
 
         CentralizedObjectMetadata& Get() NO_THREAD_SAFETY_ANALYSIS {
             return static_cast<CentralizedObjectMetadata&>(
@@ -453,6 +416,7 @@ class CentralizedMasterService final : public MasterService {
     const std::chrono::seconds put_start_discard_timeout_sec_;
     const std::chrono::seconds put_start_release_timeout_sec_;
     friend class CentralizedMetadataAccessor;
+    friend class test::MasterServiceTest;
 };
 
 }  // namespace mooncake

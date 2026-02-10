@@ -2,6 +2,7 @@
 
 #include <boost/functional/hash.hpp>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 #include <ylt/util/tl/expected.hpp>
@@ -23,11 +24,35 @@ class MasterService {
    public:
     MasterService(const MasterServiceConfig& config);
     virtual ~MasterService() = default;
+
     /**
-     * @brief Unmount a memory segment. This function is idempotent.
+     * @brief Register a client with its segments.
+     */
+    auto RegisterClient(const RegisterClientRequest& req)
+        -> tl::expected<RegisterClientResponse, ErrorCode>;
+
+    /**
+     * @brief heartbeat interface for client to sync its status
+     * @param req HeartbeatRequest containing client_id and tasks
+     * @return HeartbeatResponse containing client status, view_version,
+     *         and task results
+     */
+    auto Heartbeat(const HeartbeatRequest& req)
+        -> tl::expected<HeartbeatResponse, ErrorCode>;
+
+    /**
+     * @brief Mount a memory segment.
+     * @return ErrorCode::SEGMENT_ALREADY_EXISTS if it is already mounted.
+     *         ErrorCode::CLIENT_UNHEALTHY if the client is unhealthy.
+     */
+    auto MountSegment(const Segment& segment, const UUID& client_id)
+        -> tl::expected<void, ErrorCode>;
+
+    /**
+     * @brief Unmount a memory segment.
      * @return ErrorCode::OK on success,
-     *         ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS if the segment is
-     *         currently unmounting.
+     *         ErrorCode::SEGMENT_NOT_FOUND if the segment doesn't exist
+     *         ErrorCode::CLIENT_UNHEALTHY if the client is unhealthy
      */
     auto UnmountSegment(const UUID& segment_id, const UUID& client_id)
         -> tl::expected<void, ErrorCode>;
@@ -149,15 +174,6 @@ class MasterService {
      */
     size_t GetKeyCount() const;
 
-    /**
-     * @brief Heartbeat from client
-     * @param client_id The uuid of the client
-     * @return PingResponse containing view version and client status
-     * @return ErrorCode::OK on success, ErrorCode::INTERNAL_ERROR if the client
-     *         ping queue is full
-     */
-    auto Ping(const UUID& client_id) -> tl::expected<PingResponse, ErrorCode>;
-
    protected:
     struct ObjectMetadata {
        public:
@@ -231,23 +247,43 @@ class MasterService {
     };
 
    protected:
-    // Attention:
     // Sharded metadata maps and their mutexes.
-    // Each subclass of MasterService should define its own shard and provide
-    // the accessor functions.
+    // Attention:
+    // 1. Each subclass of MasterService should define its own shard and provide
+    //    the accessor functions.
+    // 2. `segment_key_index` is a reverse index for `metadata` and segment.
+    //    Due to the object key in `segment_key_index` is a string_view acquired
+    //    from `metadata`, when removing an entry from `metadata`, you MUST
+    //    first remove the corresponding key from `segment_key_index`.
     struct MetadataShard {
         mutable Mutex mutex;
         std::unordered_map<std::string, std::unique_ptr<ObjectMetadata>>
             metadata GUARDED_BY(mutex);
 
-       protected:
-        MetadataShard() = default;
+        // segment_id -> { key -> replica_reference_count }.
+        std::unordered_map<UUID, std::unordered_map<std::string_view, size_t>,
+                           boost::hash<UUID>>
+            segment_key_index GUARDED_BY(mutex);
     };
     // Virtual function to access shards
     virtual MetadataShard& GetShard(size_t idx) = 0;
     virtual const MetadataShard& GetShard(size_t idx) const = 0;
-    virtual size_t getShardIndex(const std::string& key) const = 0;
+    virtual size_t GetShardIndex(const std::string& key) const = 0;
     virtual size_t GetShardCount() const = 0;
+
+    // Helpers for maintaining per-shard segment_key_index.
+    // 1. Must be called while holding shard.mutex.
+    // 2. When add or remove a replica, must call the following functions to
+    //    update the segment_key_index.
+    void AddReplicaToSegmentIndex(MetadataShard& shard, const std::string& key,
+                                  const Replica& replica)
+        NO_THREAD_SAFETY_ANALYSIS;
+    void RemoveReplicaFromSegmentIndex(
+        MetadataShard& shard, const std::string& key,
+        const std::vector<Replica>& replicas) NO_THREAD_SAFETY_ANALYSIS;
+    void RemoveReplicaFromSegmentIndex(
+        MetadataShard& shard, const std::string& key,
+        const Replica& replica) NO_THREAD_SAFETY_ANALYSIS;
 
    protected:
     // Helper class for accessing metadata with automatic locking
@@ -256,7 +292,7 @@ class MasterService {
         MetadataAccessor(MasterService* service, const std::string& key)
             : service_(service),
               key_(key),
-              shard_idx_(service_->getShardIndex(key)),
+              shard_idx_(service_->GetShardIndex(key)),
               shard_(service_->GetShard(shard_idx_)),
               lock_(&shard_.mutex),
               it_(shard_.metadata.find(key)) {}
@@ -268,13 +304,25 @@ class MasterService {
             return it_ != shard_.metadata.end();
         }
 
+        MetadataShard& GetShard() NO_THREAD_SAFETY_ANALYSIS { return shard_; }
+
+        const std::string& GetKey() const NO_THREAD_SAFETY_ANALYSIS {
+            return it_->first;
+        }
+
         // Get metadata (only call when Exists() is true)
         ObjectMetadata& Get() NO_THREAD_SAFETY_ANALYSIS { return *it_->second; }
 
-        // Delete current metadata (for PutRevoke or Remove operations)
+        // Delete current metadata.
+        // To prevent dangling string_views in segment_key_index, segment index
+        // should be cleaned up before erasing the metadata entry.
         void Erase() NO_THREAD_SAFETY_ANALYSIS {
-            shard_.metadata.erase(it_);
-            it_ = shard_.metadata.end();
+            if (it_ != shard_.metadata.end()) {
+                service_->RemoveReplicaFromSegmentIndex(shard_, it_->first,
+                                                        it_->second->replicas_);
+                shard_.metadata.erase(it_);
+                it_ = shard_.metadata.end();
+            }
         }
 
        protected:
@@ -310,6 +358,10 @@ class MasterService {
 
     // Triggered when the replica is removed
     virtual void OnReplicaRemoved(const Replica& replica) = 0;
+
+    // Callback for segment removal (triggered by ClientManager via
+    // SegmentManager)
+    virtual void OnSegmentRemoved(const UUID& segment_id);
 
    protected:
     // if high availability features enabled

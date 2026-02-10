@@ -281,14 +281,39 @@ tl::expected<void, ErrorCode> WrappedMasterService::UnmountSegment(
         [] { MasterMetricManager::instance().inc_unmount_segment_failures(); });
 }
 
-tl::expected<PingResponse, ErrorCode> WrappedMasterService::Ping(
-    const UUID& client_id) {
-    ScopedVLogTimer timer(1, "Ping");
-    timer.LogRequest("client_id=", client_id);
+tl::expected<void, ErrorCode> WrappedMasterService::MountSegment(
+    const Segment& segment, const UUID& client_id) {
+    return execute_rpc(
+        "MountSegment",
+        [&] { return GetMasterService().MountSegment(segment, client_id); },
+        [&](auto& timer) {
+            timer.LogRequest("segment_name=", segment.name,
+                             ", client_id=", client_id);
+        },
+        [] { MasterMetricManager::instance().inc_mount_segment_requests(); },
+        [] { MasterMetricManager::instance().inc_mount_segment_failures(); });
+}
 
-    MasterMetricManager::instance().inc_ping_requests();
+tl::expected<HeartbeatResponse, ErrorCode> WrappedMasterService::Heartbeat(
+    const HeartbeatRequest& req) {
+    ScopedVLogTimer timer(1, "Heartbeat");
+    timer.LogRequest("client_id=", req.client_id);
 
-    auto result = GetMasterService().Ping(client_id);
+    MasterMetricManager::instance().inc_heartbeat_requests();
+
+    auto result = GetMasterService().Heartbeat(req);
+
+    timer.LogResponseExpected(result);
+    return result;
+}
+
+tl::expected<RegisterClientResponse, ErrorCode>
+WrappedMasterService::RegisterClient(const RegisterClientRequest& req) {
+    ScopedVLogTimer timer(1, "RegisterClient");
+    timer.LogRequest("client_id=", req.client_id,
+                     ", segments=", req.segments.size());
+
+    auto result = GetMasterService().RegisterClient(req);
 
     timer.LogResponseExpected(result);
     return result;
@@ -318,7 +343,11 @@ void RegisterRpcService(
         &wrapped_master_service);
     server.register_handler<&mooncake::WrappedMasterService::UnmountSegment>(
         &wrapped_master_service);
-    server.register_handler<&mooncake::WrappedMasterService::Ping>(
+    server.register_handler<&mooncake::WrappedMasterService::MountSegment>(
+        &wrapped_master_service);
+    server.register_handler<&mooncake::WrappedMasterService::Heartbeat>(
+        &wrapped_master_service);
+    server.register_handler<&mooncake::WrappedMasterService::RegisterClient>(
         &wrapped_master_service);
     server.register_handler<&mooncake::WrappedMasterService::BatchExistKey>(
         &wrapped_master_service);

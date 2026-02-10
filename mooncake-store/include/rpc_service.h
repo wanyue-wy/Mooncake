@@ -56,7 +56,14 @@ class WrappedMasterService {
     tl::expected<void, ErrorCode> UnmountSegment(const UUID& segment_id,
                                                  const UUID& client_id);
 
-    tl::expected<PingResponse, ErrorCode> Ping(const UUID& client_id);
+    tl::expected<void, ErrorCode> MountSegment(const Segment& segment,
+                                               const UUID& client_id);
+
+    tl::expected<HeartbeatResponse, ErrorCode> Heartbeat(
+        const HeartbeatRequest& req);
+
+    tl::expected<RegisterClientResponse, ErrorCode> RegisterClient(
+        const RegisterClientRequest& req);
 
     tl::expected<std::string, ErrorCode> ServiceReady();
 

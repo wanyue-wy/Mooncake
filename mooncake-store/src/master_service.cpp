@@ -26,10 +26,36 @@ MasterService::ObjectMetadata::ObjectMetadata(const UUID& client_id,
 MasterService::MasterService(const MasterServiceConfig& config)
     : enable_ha_(config.enable_ha), view_version_(config.view_version) {}
 
+auto MasterService::MountSegment(const Segment& segment, const UUID& client_id)
+    -> tl::expected<void, ErrorCode> {
+    auto client = GetClientManager().GetClient(client_id);
+    if (!client) {
+        LOG(ERROR) << "MountSegment: client not found"
+                   << ", client_id=" << client_id;
+        return tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
+    }
+
+    auto result = client->MountSegment(segment);
+    if (!result) {
+        LOG(ERROR) << "fail to mount segment"
+                   << ", segment=" << segment.name
+                   << ", client_id=" << client_id << ", ret=" << result.error();
+        return result;
+    }
+    return {};
+}
+
 auto MasterService::UnmountSegment(const UUID& segment_id,
                                    const UUID& client_id)
     -> tl::expected<void, ErrorCode> {
-    auto result = GetClientManager().UnmountSegment(segment_id, client_id);
+    auto client = GetClientManager().GetClient(client_id);
+    if (!client) {
+        LOG(ERROR) << "UnmountSegment: client not found"
+                   << ", client_id=" << client_id;
+        return tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
+    }
+
+    auto result = client->UnmountSegment(segment_id);
     if (!result) {
         LOG(ERROR) << "fail to unmount segment"
                    << ", segment_id=" << segment_id
@@ -37,6 +63,119 @@ auto MasterService::UnmountSegment(const UUID& segment_id,
         return result;
     }
     return {};
+}
+
+// As a callback, called by SegmentManager when a segment is removed:
+// 1. remove reverse index of segment
+// 2. remove the replica in metadata about the segment
+void MasterService::OnSegmentRemoved(const UUID& segment_id) {
+    for (size_t i = 0; i < GetShardCount(); ++i) {
+        auto& shard = GetShard(i);
+        MutexLocker lock(&shard.mutex);
+
+        auto idx_it = shard.segment_key_index.find(segment_id);
+        if (idx_it == shard.segment_key_index.end()) {
+            continue;
+        }
+
+        // the reverse index using string_view acquired from metadata.
+        // before remove the reverse index, we should acquire the key copier.
+        std::vector<std::string> affected_keys;
+        affected_keys.reserve(idx_it->second.size());
+        for (const auto& item : idx_it->second) {
+            affected_keys.emplace_back(item.first);
+        }
+
+        // 1. Remove the segment from the reverse index
+        shard.segment_key_index.erase(idx_it);
+
+        // 2. Remove the replica in metadata about the segment
+        for (const auto& key : affected_keys) {
+            auto meta_it = shard.metadata.find(key);
+            if (meta_it == shard.metadata.end()) {
+                continue;
+            }
+
+            auto& metadata = *meta_it->second;
+            auto& replicas = metadata.replicas_;
+
+            for (int k = replicas.size() - 1; k >= 0; --k) {
+                auto id = replicas[k].get_segment_id();
+                if (id.has_value() && id.value() == segment_id) {
+                    OnReplicaRemoved(replicas[k]);
+                    replicas.erase(replicas.begin() + k);
+                    break;
+                }
+            }
+
+            if (replicas.empty()) {
+                OnObjectRemoved(metadata);
+                shard.metadata.erase(meta_it);
+            }
+        }
+    }  // end for
+}
+
+void MasterService::AddReplicaToSegmentIndex(MetadataShard& shard,
+                                             const std::string& key,
+                                             const Replica& replica) {
+    if (replica.status() != ReplicaStatus::COMPLETE) {
+        return;
+    }
+    auto seg_id = replica.get_segment_id();
+    if (seg_id.has_value()) {
+        shard.segment_key_index[seg_id.value()][std::string_view(key)]++;
+    }
+}
+
+void MasterService::RemoveReplicaFromSegmentIndex(
+    MetadataShard& shard, const std::string& key,
+    const std::vector<Replica>& replicas) {
+    for (const auto& replica : replicas) {
+        RemoveReplicaFromSegmentIndex(shard, key, replica);
+    }
+}
+
+void MasterService::RemoveReplicaFromSegmentIndex(MetadataShard& shard,
+                                                  const std::string& key,
+                                                  const Replica& replica) {
+    if (replica.status() != ReplicaStatus::COMPLETE) {
+        return;
+    }
+
+    auto seg_id = replica.get_segment_id();
+    if (seg_id.has_value()) {
+        auto seg_it = shard.segment_key_index.find(seg_id.value());
+        if (seg_it != shard.segment_key_index.end()) {
+            auto key_it = seg_it->second.find(key);
+            if (key_it != seg_it->second.end()) {
+                if (--key_it->second == 0) {
+                    seg_it->second.erase(key_it);
+                }
+                if (seg_it->second.empty()) {
+                    shard.segment_key_index.erase(seg_it);
+                }
+            } else {
+                LOG(WARNING)
+                    << "RemoveReplicaFromSegmentIndex: key not found"
+                    << ", segment_id=" << seg_id.value() << ", key=" << key;
+            }
+        } else {
+            LOG(WARNING) << "RemoveReplicaFromSegmentIndex: segment not found"
+                         << ", segment_id=" << seg_id.value()
+                         << ", key=" << key;
+        }
+    }
+}
+
+auto MasterService::RegisterClient(const RegisterClientRequest& req)
+    -> tl::expected<RegisterClientResponse, ErrorCode> {
+    return GetClientManager().RegisterClient(req);
+}
+
+auto MasterService::Heartbeat(const HeartbeatRequest& req)
+    -> tl::expected<HeartbeatResponse, ErrorCode> {
+    return GetClientManager().Heartbeat(req);
 }
 
 auto MasterService::ExistKey(const std::string& key)
@@ -206,12 +345,15 @@ auto MasterService::BatchReplicaClear(
                 continue;
             }
 
+            // Collect removed replicas for batch index update
+            auto& shard = GetShard(GetShardIndex(key));
+            // Remove replicas in reverse order to keep indices valid
             for (auto it = replicas_to_remove.rbegin();
                  it != replicas_to_remove.rend(); ++it) {
-                size_t idx = *it;
-                const auto& replica = metadata.replicas_[idx];
+                auto& replica = metadata.replicas_[*it];
+                RemoveReplicaFromSegmentIndex(shard, key, replica);
                 OnReplicaRemoved(replica);
-                metadata.replicas_.erase(metadata.replicas_.begin() + idx);
+                metadata.replicas_.erase(metadata.replicas_.begin() + *it);
             }
 
             if (metadata.replicas_.empty()) {
@@ -354,6 +496,8 @@ auto MasterService::RemoveByRegex(const std::string& regex_pattern)
                 VLOG(1) << "key=" << it->first
                         << " matched by regex. Removing.";
                 OnObjectRemoved(*it->second);
+                RemoveReplicaFromSegmentIndex(shard, it->first,
+                                              it->second->replicas_);
                 it = shard.metadata.erase(it);
                 removed_count++;
             } else {
@@ -377,6 +521,8 @@ long MasterService::RemoveAll() {
         while (it != shard.metadata.end()) {
             if (it->second->IsObjectRemovable()) {
                 OnObjectRemoved(*it->second);
+                RemoveReplicaFromSegmentIndex(shard, it->first,
+                                              it->second->replicas_);
                 it = shard.metadata.erase(it);
                 removed_count++;
             } else {
@@ -398,18 +544,6 @@ size_t MasterService::GetKeyCount() const {
         total += shard.metadata.size();
     }
     return total;
-}
-
-auto MasterService::Ping(const UUID& client_id)
-    -> tl::expected<PingResponse, ErrorCode> {
-    auto res = GetClientManager().Ping(client_id);
-    if (!res.has_value()) {
-        LOG(ERROR) << "fail to ping client"
-                   << ", client_id=" << client_id << ", ret=" << res.error();
-        return tl::make_unexpected(res.error());
-    }
-
-    return PingResponse(view_version_, res.value());
 }
 
 }  // namespace mooncake

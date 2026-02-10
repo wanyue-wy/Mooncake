@@ -14,10 +14,8 @@
 #include <ylt/coro_io/client_pool.hpp>
 
 #include "client_metric.h"
-#include "replica.h"
 #include "types.h"
 #include "rpc_types.h"
-#include "master_metric_manager.h"
 
 namespace mooncake {
 
@@ -136,11 +134,29 @@ class MasterClient {
         const UUID& segment_id);
 
     /**
-     * @brief Pings master to check its availability
-     * @return tl::expected<PingResponse, ErrorCode>
+     * @brief Sends heartbeat to master to maintain client liveness
+     * @return tl::expected<HeartbeatResponse, ErrorCode>
      * containing view version and client status
      */
-    [[nodiscard]] tl::expected<PingResponse, ErrorCode> Ping();
+    [[nodiscard]] tl::expected<HeartbeatResponse, ErrorCode> Heartbeat(
+        const HeartbeatRequest& req);
+
+    /**
+     * @brief Registers a segment to master for allocation
+     * @param segment Segment to register
+     * @return tl::expected<void, ErrorCode> indicating success/failure
+     */
+    [[nodiscard]] tl::expected<void, ErrorCode> MountSegment(
+        const Segment& segment);
+
+    /**
+     * @brief Register client with the master on startup.
+     * Client calls this to register its UUID and local segments.
+     * @param segments Segments to register
+     * @return tl::expected<RegisterClientResponse, ErrorCode>
+     */
+    [[nodiscard]] tl::expected<RegisterClientResponse, ErrorCode>
+    RegisterClient(const std::vector<Segment>& segments);
 
    protected:
     MasterClient(const UUID& client_id, MasterClientMetric* metrics = nullptr)

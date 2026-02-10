@@ -1830,9 +1830,10 @@ RealClient::batch_get_into_multi_buffers_internal(
     return results;
 }
 
-tl::expected<PingResponse, ErrorCode> RealClient::ping(const UUID &client_id) {
+tl::expected<HeartbeatResponse, ErrorCode> RealClient::ping(
+    const UUID& client_id) {
     std::shared_lock<std::shared_mutex> lock(dummy_client_mutex_);
-    ClientStatus client_status = ClientStatus::OK;
+    ClientStatus client_status = ClientStatus::HEALTH;
 
     PodUUID pod_client_id = {client_id.first, client_id.second};
     if (!dummy_client_ping_queue_.push(pod_client_id)) {
@@ -1841,7 +1842,10 @@ tl::expected<PingResponse, ErrorCode> RealClient::ping(const UUID &client_id) {
                    << ", error=dummy_client_ping_queue_";
         return tl::make_unexpected(ErrorCode::INTERNAL_ERROR);
     }
-    return PingResponse(view_version_, client_status);
+    HeartbeatResponse resp;
+    resp.status = client_status;
+    resp.view_version = view_version_;
+    return resp;
 }
 
 void RealClient::dummy_client_monitor_func() {

@@ -413,7 +413,7 @@ class RealClient : public PyClient {
     batch_get_replica_desc(const std::vector<std::string> &keys);
     std::vector<Replica::Descriptor> get_replica_desc(const std::string &key);
 
-    tl::expected<PingResponse, ErrorCode> ping(const UUID &client_id);
+    tl::expected<HeartbeatResponse, ErrorCode> ping(const UUID& client_id);
 
     std::unique_ptr<AutoPortBinder> port_binder_ = nullptr;
 

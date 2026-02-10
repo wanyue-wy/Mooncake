@@ -24,6 +24,7 @@ struct MasterConfig {
     double eviction_ratio;
     double eviction_high_watermark_ratio;
     int64_t client_live_ttl_sec;
+    int64_t client_crashed_ttl_sec = -1;
 
     bool enable_ha;
     bool enable_offload;
@@ -62,6 +63,7 @@ class MasterServiceSupervisorConfig {
     RequiredParam<double> eviction_high_watermark_ratio{
         "eviction_high_watermark_ratio"};
     RequiredParam<int64_t> client_live_ttl_sec{"client_live_ttl_sec"};
+    RequiredParam<int64_t> client_crashed_ttl_sec{"client_crashed_ttl_sec"};
     RequiredParam<bool> enable_offload{"enable_offload"};
     RequiredParam<int> rpc_port{"rpc_port"};
     RequiredParam<size_t> rpc_thread_num{"rpc_thread_num"};
@@ -97,6 +99,7 @@ class MasterServiceSupervisorConfig {
         eviction_ratio = config.eviction_ratio;
         eviction_high_watermark_ratio = config.eviction_high_watermark_ratio;
         client_live_ttl_sec = config.client_live_ttl_sec;
+        client_crashed_ttl_sec = config.client_crashed_ttl_sec;
         enable_offload = config.enable_offload;
         rpc_port = static_cast<int>(config.rpc_port);
         rpc_thread_num = static_cast<size_t>(config.rpc_thread_num);
@@ -163,6 +166,9 @@ class MasterServiceSupervisorConfig {
         if (!client_live_ttl_sec.IsSet()) {
             throw std::runtime_error("client_live_ttl_sec is not set");
         }
+        if (!client_crashed_ttl_sec.IsSet()) {
+            throw std::runtime_error("client_crashed_ttl_sec is not set");
+        }
         if (!rpc_port.IsSet()) {
             throw std::runtime_error("rpc_port is not set");
         }
@@ -188,6 +194,7 @@ class WrappedMasterServiceConfig {
         DEFAULT_EVICTION_HIGH_WATERMARK_RATIO;
     ViewVersionId view_version = 0;
     int64_t client_live_ttl_sec = DEFAULT_CLIENT_LIVE_TTL_SEC;
+    int64_t client_crashed_ttl_sec = DEFAULT_CLIENT_CRASHED_TTL_SEC;
     bool enable_ha = false;
     bool enable_offload = false;
     std::string cluster_id = DEFAULT_CLUSTER_ID;
@@ -217,6 +224,7 @@ class WrappedMasterServiceConfig {
         eviction_high_watermark_ratio = config.eviction_high_watermark_ratio;
         view_version = view_version_param;
         client_live_ttl_sec = config.client_live_ttl_sec;
+        client_crashed_ttl_sec = config.client_crashed_ttl_sec;
         enable_ha = config.enable_ha;
         enable_offload = config.enable_offload;
         cluster_id = config.cluster_id;
@@ -282,6 +290,10 @@ class MasterServiceConfigBuilder {
         DEFAULT_EVICTION_HIGH_WATERMARK_RATIO;
     ViewVersionId view_version_ = 0;
     int64_t client_live_ttl_sec_ = DEFAULT_CLIENT_LIVE_TTL_SEC;
+    // We use a separate flag to track if crashed ttl is explicitly set
+    bool client_crashed_ttl_sec_set_ = false;
+    int64_t client_crashed_ttl_sec_ = DEFAULT_CLIENT_CRASHED_TTL_SEC;
+
     bool enable_ha_ = false;
     bool enable_offload_ = false;
     std::string cluster_id_ = DEFAULT_CLUSTER_ID;
@@ -330,6 +342,12 @@ class MasterServiceConfigBuilder {
 
     MasterServiceConfigBuilder& set_client_live_ttl_sec(int64_t ttl) {
         client_live_ttl_sec_ = ttl;
+        return *this;
+    }
+
+    MasterServiceConfigBuilder& set_client_crashed_ttl_sec(int64_t ttl) {
+        client_crashed_ttl_sec_ = ttl;
+        client_crashed_ttl_sec_set_ = true;
         return *this;
     }
 
@@ -391,6 +409,7 @@ class MasterServiceConfig {
         DEFAULT_EVICTION_HIGH_WATERMARK_RATIO;
     ViewVersionId view_version = 0;
     int64_t client_live_ttl_sec = DEFAULT_CLIENT_LIVE_TTL_SEC;
+    int64_t client_crashed_ttl_sec = DEFAULT_CLIENT_CRASHED_TTL_SEC;
     bool enable_ha = false;
     bool enable_offload = false;
     std::string cluster_id = DEFAULT_CLUSTER_ID;
@@ -414,6 +433,7 @@ class MasterServiceConfig {
         eviction_high_watermark_ratio = config.eviction_high_watermark_ratio;
         view_version = config.view_version;
         client_live_ttl_sec = config.client_live_ttl_sec;
+        client_crashed_ttl_sec = config.client_crashed_ttl_sec;
         enable_ha = config.enable_ha;
         enable_offload = config.enable_offload;
         cluster_id = config.cluster_id;
@@ -440,6 +460,7 @@ inline MasterServiceConfig MasterServiceConfigBuilder::build() const {
     config.eviction_high_watermark_ratio = eviction_high_watermark_ratio_;
     config.view_version = view_version_;
     config.client_live_ttl_sec = client_live_ttl_sec_;
+    config.client_crashed_ttl_sec = client_crashed_ttl_sec_;
     config.enable_ha = enable_ha_;
     config.enable_offload = enable_offload_;
     config.cluster_id = cluster_id_;
@@ -450,6 +471,19 @@ inline MasterServiceConfig MasterServiceConfigBuilder::build() const {
     config.put_start_release_timeout_sec = put_start_release_timeout_sec_;
     config.enable_disk_eviction = enable_disk_eviction_;
     config.quota_bytes = quota_bytes_;
+
+    // Logic for client_crashed_ttl_sec
+    if (client_crashed_ttl_sec_set_) {
+        // User explicitly set it, so we must validate it is >= live ttl
+        if (config.client_crashed_ttl_sec < config.client_live_ttl_sec) {
+            throw std::invalid_argument(
+                "client_crashed_ttl_sec must be >= client_live_ttl_sec");
+        }
+    } else {
+        // User did not set it, defaults to 3 * live ttl
+        config.client_crashed_ttl_sec = config.client_live_ttl_sec * 3;
+    }
+
     return config;
 }
 

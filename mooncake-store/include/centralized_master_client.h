@@ -97,25 +97,6 @@ class CentralizedMasterClient final : public MasterClient {
         const std::vector<std::string>& keys);
 
     /**
-     * @brief Registers a segment to master for allocation
-     * @param segment Segment to register
-     * @return tl::expected<void, ErrorCode> indicating success/failure
-     */
-    [[nodiscard]] tl::expected<void, ErrorCode> MountSegment(
-        const Segment& segment);
-
-    /**
-     * @brief Re-mount segments, invoked when the client is the first time to
-     * connect to the master or the client Ping TTL is expired and need
-     * to remount. This function is idempotent. Client should retry if the
-     * return code is not ErrorCode::OK.
-     * @param segments Segments to remount
-     * @return tl::expected<void, ErrorCode> indicating success/failure
-     */
-    [[nodiscard]] tl::expected<void, ErrorCode> ReMountSegment(
-        const std::vector<Segment>& segments);
-
-    /**
      * @brief Gets the cluster ID for the current client to use as subdirectory
      * name
      * @return GetClusterIdResponse containing the cluster ID
