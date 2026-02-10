@@ -118,9 +118,9 @@ auto CentralizedClientManager::Ping(const UUID& client_id)
     ClientStatus client_status;
     auto it = ok_client_.find(client_id);
     if (it != ok_client_.end()) {
-        client_status = ClientStatus::OK;
+        client_status = ClientStatus::HEALTH;
     } else {
-        client_status = ClientStatus::NEED_REMOUNT;
+        client_status = ClientStatus::UNDEFINED;
     }
     PodUUID pod_client_id = {client_id.first, client_id.second};
     if (!client_ping_queue_.push(pod_client_id)) {

@@ -100,7 +100,7 @@ class SegmentClient {
         }
 
         if (ping_result.value().client_status ==
-                mooncake::ClientStatus::NEED_REMOUNT &&
+                mooncake::ClientStatus::UNDEFINED &&
             !remount_future_.valid()) {
             remount_future_ = std::async(std::launch::async, [&]() {
                 auto remount_ec = master_client_.ReMountSegment({segment_});

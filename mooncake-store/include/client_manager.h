@@ -3,6 +3,7 @@
 #include <atomic>
 #include <boost/functional/hash.hpp>
 #include <boost/lockfree/queue.hpp>
+#include <chrono>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -14,6 +15,16 @@
 #include "types.h"
 
 namespace mooncake {
+
+/**
+ * @brief Internal state tracking for client health.
+ * Separated from metadata to avoid write-lock contention.
+ */
+struct ClientHealthState {
+    ClientStatus status = ClientStatus::UNDEFINED;
+    std::chrono::steady_clock::time_point last_heartbeat;
+    std::chrono::steady_clock::time_point disconnection_start;
+};
 class ClientManager {
    public:
     ClientManager(const int64_t client_live_ttl_sec);

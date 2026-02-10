@@ -2,6 +2,7 @@
 
 #include "types.h"
 #include "replica.h"
+#include "heartbeat_type.h"
 
 namespace mooncake {
 
@@ -56,4 +57,21 @@ struct GetStorageConfigResponse {
           quota_bytes(quota) {}
 };
 YLT_REFL(GetStorageConfigResponse, fsdir, enable_disk_eviction, quota_bytes);
+
+/**
+ * @brief Request structure for Heartbeat operation
+ */
+struct HeartbeatRequest {
+    UUID client_id;
+    std::vector<HeartbeatTask> tasks;
+};
+
+/**
+ * @brief Response structure for Heartbeat operation
+ */
+struct HeartbeatResponse {
+    ClientStatus status;
+    std::vector<HeartbeatTaskResult> task_results;
+};
+
 }  // namespace mooncake

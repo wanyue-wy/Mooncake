@@ -1832,7 +1832,7 @@ RealClient::batch_get_into_multi_buffers_internal(
 
 tl::expected<PingResponse, ErrorCode> RealClient::ping(const UUID &client_id) {
     std::shared_lock<std::shared_mutex> lock(dummy_client_mutex_);
-    ClientStatus client_status = ClientStatus::OK;
+    ClientStatus client_status = ClientStatus::HEALTH;
 
     PodUUID pod_client_id = {client_id.first, client_id.second};
     if (!dummy_client_ping_queue_.push(pod_client_id)) {

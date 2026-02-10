@@ -1774,7 +1774,7 @@ void Client::PingThreadMain(bool is_ha_mode,
             // Reset ping failure count
             ping_fail_count = 0;
             auto& ping_response = ping_result.value();
-            if (ping_response.client_status == ClientStatus::NEED_REMOUNT &&
+            if (ping_response.client_status == ClientStatus::UNDEFINED &&
                 !remount_segment_future.valid()) {
                 // Ensure at most one remount segment thread is running
                 remount_segment_future =

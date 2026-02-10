@@ -56,7 +56,7 @@ auto P2PClientManager::QueryIp(const UUID& client_id)
 auto P2PClientManager::Ping(const UUID& client_id)
     -> tl::expected<ClientStatus, ErrorCode> {
     // TODO
-    return ClientStatus::OK;
+    return ClientStatus::HEALTH;
 }
 
 }  // namespace mooncake

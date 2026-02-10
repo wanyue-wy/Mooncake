@@ -692,7 +692,7 @@ void DummyClient::ping_thread_main() {
             invoke_rpc<&RealClient::ping, PingResponse>(client_id_);
 
         if (ping_result.has_value() &&
-            ping_result.value().client_status == ClientStatus::OK) {
+            ping_result.value().client_status == ClientStatus::HEALTH) {
             ping_fail_count = 0;
             std::this_thread::sleep_for(
                 std::chrono::milliseconds(success_ping_interval_ms));
