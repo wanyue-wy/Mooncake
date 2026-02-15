@@ -30,16 +30,9 @@ class CentralizedClientManager final : public ClientManager {
     auto Allocate(const uint64_t slice_length, const size_t replica_num,
                   const std::vector<std::string>& preferred_segments)
         -> tl::expected<std::vector<Replica>, ErrorCode> {
-        return segment_manager_->Allocate(slice_length, replica_num,
-                                          preferred_segments);
+        return centralized_segment_manager_->Allocate(
+            allocator_manager_, slice_length, replica_num, preferred_segments);
     }
-
-    auto GetAllSegments()
-        -> tl::expected<std::vector<std::string>, ErrorCode> override;
-    auto QuerySegments(const std::string& segment)
-        -> tl::expected<std::pair<size_t, size_t>, ErrorCode> override;
-    auto QueryIp(const UUID& client_id)
-        -> tl::expected<std::vector<std::string>, ErrorCode> override;
 
    protected:
     // ===== Virtual Factory =====
@@ -53,13 +46,9 @@ class CentralizedClientManager final : public ClientManager {
     HeartbeatTaskResult ProcessTask(const UUID& client_id,
                                     const HeartbeatTask& task) override;
 
-    // ===== Segment Inner Operations =====
-    auto InnerMountSegment(const Segment& segment, const UUID& client_id)
-        -> tl::expected<void, ErrorCode> override;
-
    protected:
     std::function<void()> segment_clean_func_;
-    std::shared_ptr<CentralizedSegmentManager> segment_manager_;
+    std::shared_ptr<CentralizedSegmentManager> centralized_segment_manager_;
 };
 
 }  // namespace mooncake

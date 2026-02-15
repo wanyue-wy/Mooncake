@@ -33,37 +33,43 @@ auto ClientManager::RegisterClient(const RegisterClientRequest& req)
 
     // Create architecture-specific client meta via virtual factory
     auto meta = CreateClientMeta(req);
+    meta->segment_manager = segment_manager_;
 
     SharedMutexLocker lock(&client_mutex_);
+
+    // Mount segments first? Or update meta first?
+    // If we fail to mount, we abort?
+    // RegisterClient implies success = all segments mounted or at least client
+    // registered.
+
+    // Let's iterate segments and mount them.
+    for (const auto& segment : req.segments) {
+        auto result = segment_manager_->MountSegment(segment, client_id);
+        if (!result.has_value()) {
+            if (result.error() == ErrorCode::SEGMENT_ALREADY_EXISTS) {
+                // Warn but continue? Or fail?
+                // If it exists, maybe it's from previous crash.
+                // We can treat it as success?
+                LOG(WARNING) << "RegisterClient: segment already exists"
+                             << ", segment=" << segment.name;
+                // We still need to record it in our local meta segments list.
+                // But wait, if it exists in SegmentManager, does it exist in
+                // our Meta? We are creating NEW meta. So we should just add it.
+            } else {
+                LOG(ERROR) << "RegisterClient: failed to mount segment"
+                           << ", segment_name=" << segment.name
+                           << ", client_id=" << client_id
+                           << ", error=" << result.error();
+                return tl::make_unexpected(result.error());
+            }
+        }
+
+        // Add to ClientMeta list
+        meta->segments.push_back(std::make_shared<Segment>(segment));
+    }
+
     // Write to client_metas_ (overwrites if re-registering after crash)
     client_metas_[client_id] = std::move(meta);
-
-    // Batch mount segments
-    // Note: InnerMountSegment needs to be called with Write Lock held (from
-    // RegisterClient) But InnerMountSegment usually takes Read Lock? User
-    // requirement:
-    // "RegisterClient中要全程持有client_mutex_锁...并使用InnerMountSegment来注册segment"
-    // Issue: InnerMountSegment likely acquires lock internally if it follows
-    // standard pattern. Solution: We need to check if InnerMountSegment locks.
-    // If we implement InnerMountSegment in subclasses to grab lock, we have
-    // deadlock. However, RegisterClient holds Write Lock. InnerMountSegment
-    // should probably expect lock to be held or we need a version that doesn't
-    // lock. BUT, RegisterClient is in base class. InnerMountSegment is virtual.
-    // Let's look at the instruction:
-    // "ClientManager::RegisterClient中要全程持有client_mutex_锁...并且应该移除InnerReMountSegment接口，使用InnerMountSegment来注册segment"
-    // Implementation:
-    for (const auto& segment : req.segments) {
-        auto result = InnerMountSegment(segment, client_id);
-        if (!result.has_value()) {
-            LOG(ERROR) << "RegisterClient: failed to mount segment"
-                       << ", segment_name=" << segment.name
-                       << ", client_id=" << client_id
-                       << ", error=" << result.error();
-            // Rollback: remove client meta on segment mount failure
-            client_metas_.erase(client_id);
-            return tl::make_unexpected(result.error());
-        }
-    }
 
     MasterMetricManager::instance().inc_active_clients();
 
@@ -145,7 +151,7 @@ auto ClientManager::MountSegment(const Segment& segment, const UUID& client_id)
         return tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
     }
 
-    auto err = InnerMountSegment(segment, client_id);
+    auto err = segment_manager_->MountSegment(segment, client_id);
     if (!err.has_value()) {
         if (err.error() == ErrorCode::SEGMENT_ALREADY_EXISTS) {
             return {};
@@ -161,6 +167,45 @@ auto ClientManager::MountSegment(const Segment& segment, const UUID& client_id)
     MasterMetricManager::instance().inc_total_mem_capacity(segment.name,
                                                            segment.size);
     return {};
+}
+
+tl::expected<std::vector<std::string>, ErrorCode>
+ClientManager::GetAllSegments() {
+    SharedMutexLocker lock(&client_mutex_, shared_lock);
+    std::vector<std::string> all_segments;
+    ErrorCode err = segment_manager_->GetAllSegments(all_segments);
+    if (err != ErrorCode::OK) {
+        LOG(ERROR) << "fail to get all segments" << ", ret=" << err;
+        return tl::make_unexpected(err);
+    }
+    return all_segments;
+}
+
+tl::expected<std::pair<size_t, size_t>, ErrorCode> ClientManager::QuerySegments(
+    const std::string& segment) {
+    SharedMutexLocker lock(&client_mutex_, shared_lock);
+    size_t used = 0;
+    size_t capacity = 0;
+    ErrorCode err = segment_manager_->QuerySegments(segment, used, capacity);
+    if (err != ErrorCode::OK) {
+        LOG(ERROR) << "fail to query segments" << ", segment=" << segment
+                   << ", ret=" << err;
+        return tl::make_unexpected(err);
+    }
+    return std::make_pair(used, capacity);
+}
+
+tl::expected<std::vector<std::string>, ErrorCode> ClientManager::QueryIp(
+    const UUID& client_id) {
+    SharedMutexLocker lock(&client_mutex_, shared_lock);
+    std::vector<std::string> result;
+    ErrorCode err = segment_manager_->QueryIp(client_id, result);
+    if (err != ErrorCode::OK) {
+        LOG(ERROR) << "fail to query ip" << ", client_id=" << client_id
+                   << ", ret=" << err;
+        return tl::make_unexpected(err);
+    }
+    return result;
 }
 
 // ===== Default Client Monitor (three-state machine) =====
@@ -225,6 +270,7 @@ void ClientManager::ClientMonitorFunc() {
 
         // Phase 3: Remove crashed clients
         for (const auto& client_id : newly_crashed) {
+            // Already holding Write Lock from line 219
             client_metas_.erase(client_id);
             MasterMetricManager::instance().dec_active_clients();
         }

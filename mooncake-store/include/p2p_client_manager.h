@@ -18,12 +18,6 @@ class P2PClientManager final : public ClientManager {
 
     auto UnmountSegment(const UUID& segment_id, const UUID& client_id)
         -> tl::expected<void, ErrorCode> override;
-    auto GetAllSegments()
-        -> tl::expected<std::vector<std::string>, ErrorCode> override;
-    auto QuerySegments(const std::string& segment)
-        -> tl::expected<std::pair<size_t, size_t>, ErrorCode> override;
-    auto QueryIp(const UUID& client_id)
-        -> tl::expected<std::vector<std::string>, ErrorCode> override;
 
    protected:
     // ===== Virtual Factory =====
@@ -37,12 +31,8 @@ class P2PClientManager final : public ClientManager {
     HeartbeatTaskResult ProcessTask(const UUID& client_id,
                                     const HeartbeatTask& task) override;
 
-    // ===== Segment Inner Operations =====
-    auto InnerMountSegment(const Segment& segment, const UUID& client_id)
-        -> tl::expected<void, ErrorCode> override;
-
    protected:
-    std::shared_ptr<P2PSegmentManager> segment_manager_;
+    std::shared_ptr<P2PSegmentManager> p2p_segment_manager_;
 };
 
 }  // namespace mooncake

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <boost/functional/hash.hpp>
+#include "segment_manager.h"
 #include <chrono>
 #include <memory>
 #include <string>
@@ -34,6 +35,10 @@ struct ClientHealthState {
 struct ClientMeta {
     virtual ~ClientMeta() = default;
     ClientHealthState health_state;
+    // SegmentManager for this client (Centralized or P2P)
+    std::shared_ptr<SegmentManager> segment_manager;
+    // List of segments allocated to this client.
+    std::vector<std::shared_ptr<Segment>> segments;
 };
 
 /**
@@ -84,12 +89,14 @@ class ClientManager {
 
     virtual auto UnmountSegment(const UUID& segment_id, const UUID& client_id)
         -> tl::expected<void, ErrorCode> = 0;
-    virtual auto GetAllSegments()
-        -> tl::expected<std::vector<std::string>, ErrorCode> = 0;
-    virtual auto QuerySegments(const std::string& segment)
-        -> tl::expected<std::pair<size_t, size_t>, ErrorCode> = 0;
-    virtual auto QueryIp(const UUID& client_id)
-        -> tl::expected<std::vector<std::string>, ErrorCode> = 0;
+
+    auto GetAllSegments() -> tl::expected<std::vector<std::string>, ErrorCode>;
+
+    auto QuerySegments(const std::string& segment)
+        -> tl::expected<std::pair<size_t, size_t>, ErrorCode>;
+
+    auto QueryIp(const UUID& client_id)
+        -> tl::expected<std::vector<std::string>, ErrorCode>;
 
    protected:
     // ===== Monitor =====
@@ -101,12 +108,6 @@ class ClientManager {
     void ClientMonitorFunc();
 
     bool IsClientRegistered(const UUID& client_id) const;
-
-   protected:
-    // ===== Segment Inner Operations =====
-    virtual auto InnerMountSegment(const Segment& segment,
-                                   const UUID& client_id)
-        -> tl::expected<void, ErrorCode> = 0;
 
    protected:
     // ===== Virtual Factory for ClientMeta =====
@@ -151,6 +152,7 @@ class ClientManager {
         1000;  // 1000 ms sleep between client monitor checks
 
    protected:
+    std::shared_ptr<SegmentManager> segment_manager_;
     mutable SharedMutex client_mutex_;
     // Client metadata: client_id -> metadata (including health state)
     std::unordered_map<UUID, std::unique_ptr<ClientMeta>, boost::hash<UUID>>

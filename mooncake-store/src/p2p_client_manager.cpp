@@ -10,7 +10,8 @@ P2PClientManager::P2PClientManager(const int64_t disconnect_timeout_sec,
                                    const int64_t crash_timeout_sec,
                                    const ViewVersionId view_version)
     : ClientManager(disconnect_timeout_sec, crash_timeout_sec, view_version) {
-    segment_manager_ = std::make_shared<P2PSegmentManager>();
+    p2p_segment_manager_ = std::make_shared<P2PSegmentManager>();
+    segment_manager_ = p2p_segment_manager_;
 }
 
 auto P2PClientManager::UnmountSegment(const UUID& segment_id,
@@ -31,68 +32,6 @@ auto P2PClientManager::UnmountSegment(const UUID& segment_id,
         return tl::make_unexpected(err);
     }
     return {};
-}
-
-auto P2PClientManager::InnerMountSegment(const Segment& segment,
-                                         const UUID& client_id)
-    -> tl::expected<void, ErrorCode> {
-    ErrorCode err = segment_manager_->MountSegment(segment, client_id);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "fail to mount segment"
-                   << ", segment_id=" << segment.id
-                   << ", client_id=" << client_id << ", ret=" << err;
-        return tl::make_unexpected(err);
-    }
-    return {};
-}
-
-auto P2PClientManager::GetAllSegments()
-    -> tl::expected<std::vector<std::string>, ErrorCode> {
-    std::vector<std::string> all_segments;
-    ErrorCode err = segment_manager_->GetAllSegments(all_segments);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "fail to get all segments" << ", ret=" << err;
-        return tl::make_unexpected(err);
-    }
-    return all_segments;
-}
-
-auto P2PClientManager::QuerySegments(const std::string& segment)
-    -> tl::expected<std::pair<size_t, size_t>, ErrorCode> {
-    size_t used = 0;
-    size_t capacity = 0;
-    ErrorCode err = segment_manager_->QuerySegments(segment, used, capacity);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "fail to query segments" << ", segment=" << segment
-                   << ", ret=" << err;
-        return tl::make_unexpected(err);
-    }
-    return std::make_pair(used, capacity);
-}
-
-auto P2PClientManager::QueryIp(const UUID& client_id)
-    -> tl::expected<std::vector<std::string>, ErrorCode> {
-    std::vector<std::shared_ptr<Segment>> segments;
-    ErrorCode err = segment_manager_->GetClientSegments(client_id, segments);
-    if (err != ErrorCode::OK) {
-        if (err == ErrorCode::SEGMENT_NOT_FOUND) {
-            return tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
-        }
-        return tl::make_unexpected(err);
-    }
-
-    std::unordered_set<std::string> unique_ips;
-    for (const auto& segment : segments) {
-        if (!segment) continue;
-        if (segment->is_p2p()) {
-            const auto& extra = std::get<P2PSegmentExtraData>(segment->extra);
-            if (!extra.ip_address.empty()) {
-                unique_ips.insert(extra.ip_address);
-            }
-        }
-    }
-
-    return std::vector<std::string>(unique_ips.begin(), unique_ips.end());
 }
 
 // ===== Virtual Factory =====
@@ -118,11 +57,24 @@ void P2PClientManager::OnClientDisconnected(const UUID& client_id) {
 
 void P2PClientManager::OnClientCrashed(const UUID& client_id) {
     LOG(WARNING) << "client_id=" << client_id << ", action=p2p_client_crashed";
-    // Clean up segments
-    std::vector<std::shared_ptr<Segment>> segments;
-    if (segment_manager_->GetClientSegments(client_id, segments) ==
-        ErrorCode::OK) {
-        for (const auto& seg : segments) {
+
+    // We need to unmount segments for the crashed client.
+    // Since ClientMonitorFunc holds the lock when calling this hook,
+    // we can access client_metas_ directly without re-locking.
+    // However, ClientMonitorFunc loop iterates client_metas_.
+    // Erasing from it while iterating is handled by ClientManager's loop (Phase
+    // 3). Here we just handle cleanup logic (unmount).
+
+    auto it = client_metas_.find(client_id);
+    if (it != client_metas_.end()) {
+        auto& meta = it->second;
+        // Copy segments to avoid iterator invalidation if unmount modifies
+        // list? UnmountSegment calls SegmentManager::UnmountSegment. It does
+        // NOT modify ClientMeta's segment list directly (unless we do it). But
+        // ClientManager::UnRegisterClient logic calls Unmount then erase. Here
+        // we just want to ensure Backend SegmentManager cleans up.
+
+        for (const auto& seg : meta->segments) {
             segment_manager_->UnmountSegment(seg->id, client_id);
         }
     }

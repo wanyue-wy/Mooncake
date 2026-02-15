@@ -11,13 +11,15 @@ CentralizedClientManager::CentralizedClientManager(
     std::function<void()> segment_clean_func, const ViewVersionId view_version)
     : ClientManager(client_live_ttl_sec, client_live_ttl_sec, view_version),
       segment_clean_func_(segment_clean_func) {
-    segment_manager_ =
+    centralized_segment_manager_ =
         std::make_shared<CentralizedSegmentManager>(memory_allocator_type);
+    segment_manager_ = centralized_segment_manager_;
 }
 
 auto CentralizedClientManager::UnmountSegment(const UUID& segment_id,
                                               const UUID& client_id)
     -> tl::expected<void, ErrorCode> {
+    SharedMutexLocker lock(&client_mutex_, shared_lock);
     // Check client is registered
     if (!IsClientRegistered(client_id)) {
         LOG(ERROR) << "UnmountSegment: client not registered"
@@ -27,7 +29,7 @@ auto CentralizedClientManager::UnmountSegment(const UUID& segment_id,
 
     size_t metrics_dec_capacity = 0;
     std::string segment_name;
-    ErrorCode err = segment_manager_->PrepareUnmountSegment(
+    ErrorCode err = centralized_segment_manager_->PrepareUnmountSegment(
         segment_id, metrics_dec_capacity, segment_name);
     if (err == ErrorCode::SEGMENT_NOT_FOUND) {
         LOG(INFO) << "segment_id=" << segment_id << ", client_id=" << client_id
@@ -42,7 +44,7 @@ auto CentralizedClientManager::UnmountSegment(const UUID& segment_id,
 
     segment_clean_func_();
 
-    err = segment_manager_->UnmountSegment(segment_id, client_id);
+    err = centralized_segment_manager_->UnmountSegment(segment_id, client_id);
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "fail to unmount segment"
                    << "segment_id=" << segment_id << ", client_id=" << client_id
@@ -58,8 +60,9 @@ auto CentralizedClientManager::UnmountSegment(const UUID& segment_id,
 auto CentralizedClientManager::MountLocalDiskSegment(const UUID& client_id,
                                                      bool enable_offloading)
     -> tl::expected<void, ErrorCode> {
-    auto err =
-        segment_manager_->MountLocalDiskSegment(client_id, enable_offloading);
+    SharedMutexLocker lock(&client_mutex_, shared_lock);
+    auto err = centralized_segment_manager_->MountLocalDiskSegment(
+        client_id, enable_offloading);
     if (err == ErrorCode::SEGMENT_ALREADY_EXISTS) {
         return {};
     } else if (err != ErrorCode::OK) {
@@ -70,32 +73,30 @@ auto CentralizedClientManager::MountLocalDiskSegment(const UUID& client_id,
     return {};
 }
 
-auto CentralizedClientManager::InnerMountSegment(const Segment& segment,
-                                                 const UUID& client_id)
-    -> tl::expected<void, ErrorCode> {
-    ErrorCode err = segment_manager_->MountSegment(segment, client_id);
+auto CentralizedClientManager::OffloadObjectHeartbeat(const UUID& client_id,
+                                                      bool enable_offloading)
+    -> tl::expected<std::unordered_map<std::string, int64_t>, ErrorCode> {
+    SharedMutexLocker lock(&client_mutex_, shared_lock);
+    ErrorCode err = centralized_segment_manager_->OffloadObjectHeartbeat(
+        client_id, enable_offloading);
     if (err != ErrorCode::OK) {
-        LOG(ERROR) << "fail to mount segment"
-                   << ", segment_id=" << segment.id
+        LOG(ERROR) << "fail to offload object heartbeat"
                    << ", client_id=" << client_id << ", ret=" << err;
         return tl::make_unexpected(err);
     }
     return {};
 }
 
-auto CentralizedClientManager::OffloadObjectHeartbeat(const UUID& client_id,
-                                                      bool enable_offloading)
-    -> tl::expected<std::unordered_map<std::string, int64_t>, ErrorCode> {
-    return segment_manager_->OffloadObjectHeartbeat(client_id,
-                                                    enable_offloading);
-}
-
 auto CentralizedClientManager::PushOffloadingQueue(
     const std::string& key, const int64_t size, const std::string& segment_name)
     -> tl::expected<void, ErrorCode> {
-    ErrorCode err =
-        segment_manager_->PushOffloadingQueue(key, size, segment_name);
+    SharedMutexLocker lock(&client_mutex_, shared_lock);
+    ErrorCode err = centralized_segment_manager_->PushOffloadingQueue(
+        key, size, segment_name);
     if (err != ErrorCode::OK) {
+        LOG(ERROR) << "fail to push offloading queue"
+                   << ", key=" << key << ", size=" << size
+                   << ", segment_name=" << segment_name << ", ret=" << err;
         return tl::make_unexpected(err);
     }
     return {};
@@ -131,9 +132,10 @@ void CentralizedClientManager::OnClientCrashed(const UUID& client_id) {
     std::vector<UUID> client_ids;
     std::vector<std::string> segment_names;
 
-    ErrorCode ret = segment_manager_->BatchPrepareUnmountClientSegments(
-        expired_clients, unmount_segments, dec_capacities, client_ids,
-        segment_names);
+    ErrorCode ret =
+        centralized_segment_manager_->BatchPrepareUnmountClientSegments(
+            expired_clients, unmount_segments, dec_capacities, client_ids,
+            segment_names);
     if (ret != ErrorCode::OK) {
         LOG(ERROR) << "Failed to batch prepare unmount client segments: "
                    << toString(ret);
@@ -142,8 +144,8 @@ void CentralizedClientManager::OnClientCrashed(const UUID& client_id) {
 
     if (!unmount_segments.empty()) {
         segment_clean_func_();
-        ret = segment_manager_->BatchUnmountSegments(unmount_segments,
-                                                     client_ids, segment_names);
+        ret = centralized_segment_manager_->BatchUnmountSegments(
+            unmount_segments, client_ids, segment_names);
         if (ret != ErrorCode::OK) {
             LOG(ERROR) << "Failed to batch unmount segments: " << toString(ret);
         }
@@ -167,42 +169,6 @@ HeartbeatTaskResult CentralizedClientManager::ProcessTask(
     result.type = task.type();
     result.error = ErrorCode::NOT_IMPLEMENTED;
 
-    return result;
-}
-
-tl::expected<std::vector<std::string>, ErrorCode>
-CentralizedClientManager::GetAllSegments() {
-    std::vector<std::string> all_segments;
-    ErrorCode err = segment_manager_->GetAllSegments(all_segments);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "fail to get all segments" << ", ret=" << err;
-        return tl::make_unexpected(err);
-    }
-    return all_segments;
-}
-
-tl::expected<std::pair<size_t, size_t>, ErrorCode>
-CentralizedClientManager::QuerySegments(const std::string& segment) {
-    size_t used = 0;
-    size_t capacity = 0;
-    ErrorCode err = segment_manager_->QuerySegments(segment, used, capacity);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "fail to query segments" << ", segment=" << segment
-                   << ", ret=" << err;
-        return tl::make_unexpected(err);
-    }
-    return std::make_pair(used, capacity);
-}
-
-tl::expected<std::vector<std::string>, ErrorCode>
-CentralizedClientManager::QueryIp(const UUID& client_id) {
-    std::vector<std::string> result;
-    ErrorCode err = segment_manager_->QueryIp(client_id, result);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "fail to query ip" << ", client_id=" << client_id
-                   << ", ret=" << err;
-        return tl::make_unexpected(err);
-    }
     return result;
 }
 
