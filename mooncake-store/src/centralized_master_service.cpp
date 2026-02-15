@@ -190,8 +190,9 @@ CentralizedMasterService::CentralizedMasterService(
       global_file_segment_size_(config.global_file_segment_size),
       enable_disk_eviction_(config.enable_disk_eviction),
       quota_bytes_(config.quota_bytes),
-      client_manager_(config.client_live_ttl_sec, config.memory_allocator,
-                      [this] { this->ClearInvalidHandles(); }),
+      client_manager_(
+          config.client_live_ttl_sec, config.memory_allocator,
+          [this] { this->ClearInvalidHandles(); }, view_version_),
       memory_allocator_type_(config.memory_allocator),
       put_start_discard_timeout_sec_(config.put_start_discard_timeout_sec),
       put_start_release_timeout_sec_(config.put_start_release_timeout_sec) {
@@ -238,31 +239,6 @@ CentralizedMasterService::~CentralizedMasterService() {
     if (eviction_thread_.joinable()) {
         eviction_thread_.join();
     }
-}
-
-auto CentralizedMasterService::MountSegment(const Segment& segment,
-                                            const UUID& client_id)
-    -> tl::expected<void, ErrorCode> {
-    auto result = client_manager_.MountSegment(segment, client_id);
-    if (!result) {
-        LOG(ERROR) << "fail to mount segment"
-                   << ", segment_name=" << segment.name
-                   << ", client_id=" << client_id << ", ret=" << result.error();
-        return result;
-    }
-    return {};
-}
-
-auto CentralizedMasterService::ReMountSegment(
-    const std::vector<Segment>& segments, const UUID& client_id)
-    -> tl::expected<void, ErrorCode> {
-    auto result = client_manager_.ReMountSegment(segments, client_id);
-    if (!result) {
-        LOG(ERROR) << "fail to remount segment"
-                   << ", client_id=" << client_id << ", ret=" << result.error();
-        return result;
-    }
-    return {};
 }
 
 void CentralizedMasterService::ClearInvalidHandles() {

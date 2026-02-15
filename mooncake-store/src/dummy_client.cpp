@@ -159,7 +159,8 @@ tl::expected<ReturnType, ErrorCode> DummyClient::invoke_rpc(Args&&... args) {
 
     if constexpr (!std::is_same_v<
                       std::remove_reference_t<decltype(ServiceMethod)>,
-                      std::remove_reference_t<decltype(&RealClient::ping)>> &&
+                      std::remove_reference_t<
+                          decltype(&RealClient::heartbeat)>> &&
                   !std::is_same_v<
                       std::remove_reference_t<decltype(ServiceMethod)>,
                       std::remove_reference_t<
@@ -378,8 +379,9 @@ int DummyClient::setup_dummy(size_t mem_pool_size, size_t local_buffer_size,
     local_buffer_shm->registered = true;
     local_buffer_shm->is_local = true;
 
-    ping_running_ = true;
-    ping_thread_ = std::thread([this]() mutable { this->ping_thread_main(); });
+    heartbeat_running_ = true;
+    heartbeat_thread_ =
+        std::thread([this]() mutable { this->heartbeat_thread_main(); });
 
     return 0;
 }
@@ -387,10 +389,10 @@ int DummyClient::setup_dummy(size_t mem_pool_size, size_t local_buffer_size,
 int DummyClient::tearDownAll() {
     unregister_shm();
 
-    if (ping_running_) {
-        ping_running_ = false;
-        if (ping_thread_.joinable()) {
-            ping_thread_.join();
+    if (heartbeat_running_) {
+        heartbeat_running_ = false;
+        if (heartbeat_thread_.joinable()) {
+            heartbeat_thread_.join();
         }
     }
     return 0;
@@ -679,37 +681,37 @@ std::vector<Replica::Descriptor> DummyClient::get_replica_desc(
     return replica_list;
 }
 
-void DummyClient::ping_thread_main() {
-    const int max_ping_fail_count = 1;
-    const int success_ping_interval_ms = 1000;
-    const int fail_ping_interval_ms = 1000;
+void DummyClient::heartbeat_thread_main() {
+    const int max_heartbeat_fail_count = 1;
+    const int success_heartbeat_interval_ms = 1000;
+    const int fail_heartbeat_interval_ms = 1000;
     const int retry_connect_interval_ms = 2000;
 
-    int ping_fail_count = 0;
+    int heartbeat_fail_count = 0;
 
-    while (ping_running_) {
-        auto ping_result =
-            invoke_rpc<&RealClient::ping, PingResponse>(client_id_);
+    while (heartbeat_running_) {
+        auto heartbeat_result =
+            invoke_rpc<&RealClient::heartbeat, HeartbeatResponse>(client_id_);
 
-        if (ping_result.has_value() &&
-            ping_result.value().client_status == ClientStatus::HEALTH) {
-            ping_fail_count = 0;
+        if (heartbeat_result.has_value() &&
+            heartbeat_result.value().status == ClientStatus::HEALTH) {
+            heartbeat_fail_count = 0;
             std::this_thread::sleep_for(
-                std::chrono::milliseconds(success_ping_interval_ms));
+                std::chrono::milliseconds(success_heartbeat_interval_ms));
             continue;
         }
 
-        // Ping failed
-        ping_fail_count++;
-        LOG(WARNING) << "Ping failed " << ping_fail_count << "/"
-                     << max_ping_fail_count;
+        // Heartbeat failed
+        heartbeat_fail_count++;
+        LOG(WARNING) << "Heartbeat failed " << heartbeat_fail_count << "/"
+                     << max_heartbeat_fail_count;
 
-        if (ping_fail_count >= max_ping_fail_count) {
+        if (heartbeat_fail_count >= max_heartbeat_fail_count) {
             connected_ = false;
             LOG(ERROR) << "RealClient lost, entering reconnection loop...";
 
             // Reconnection Loop
-            while (ping_running_) {
+            while (heartbeat_running_) {
                 // Re-register ALL shms
                 bool all_registered = true;
                 const auto& shms = shm_helper_->get_shms();
@@ -734,10 +736,11 @@ void DummyClient::ping_thread_main() {
                     // Even if register_shm_via_ipc succeeded, we should check
                     // if RPC is responsive
                     auto check_rpc =
-                        invoke_rpc<&RealClient::ping, PingResponse>(client_id_);
+                        invoke_rpc<&RealClient::heartbeat, HeartbeatResponse>(
+                            client_id_);
                     if (check_rpc.has_value()) {
                         LOG(INFO) << "RPC connection restored";
-                        ping_fail_count = 0;
+                        heartbeat_fail_count = 0;
                         connected_ = true;
                         break;  // Exit reconnection loop
                     }
@@ -750,7 +753,7 @@ void DummyClient::ping_thread_main() {
             }
         } else {
             std::this_thread::sleep_for(
-                std::chrono::milliseconds(fail_ping_interval_ms));
+                std::chrono::milliseconds(fail_heartbeat_interval_ms));
         }
     }
 }

@@ -26,6 +26,18 @@ MasterService::ObjectMetadata::ObjectMetadata(const UUID& client_id,
 MasterService::MasterService(const MasterServiceConfig& config)
     : enable_ha_(config.enable_ha), view_version_(config.view_version) {}
 
+auto MasterService::MountSegment(const Segment& segment, const UUID& client_id)
+    -> tl::expected<void, ErrorCode> {
+    auto result = GetClientManager().MountSegment(segment, client_id);
+    if (!result) {
+        LOG(ERROR) << "fail to mount segment"
+                   << ", segment=" << segment.name
+                   << ", client_id=" << client_id << ", ret=" << result.error();
+        return result;
+    }
+    return {};
+}
+
 auto MasterService::UnmountSegment(const UUID& segment_id,
                                    const UUID& client_id)
     -> tl::expected<void, ErrorCode> {
@@ -400,16 +412,14 @@ size_t MasterService::GetKeyCount() const {
     return total;
 }
 
-auto MasterService::Ping(const UUID& client_id)
-    -> tl::expected<PingResponse, ErrorCode> {
-    auto res = GetClientManager().Ping(client_id);
-    if (!res.has_value()) {
-        LOG(ERROR) << "fail to ping client"
-                   << ", client_id=" << client_id << ", ret=" << res.error();
-        return tl::make_unexpected(res.error());
-    }
+auto MasterService::RegisterClient(const RegisterClientRequest& req)
+    -> tl::expected<RegisterClientResponse, ErrorCode> {
+    return GetClientManager().RegisterClient(req);
+}
 
-    return PingResponse(view_version_, res.value());
+auto MasterService::Heartbeat(const HeartbeatRequest& req)
+    -> tl::expected<HeartbeatResponse, ErrorCode> {
+    return GetClientManager().Heartbeat(req);
 }
 
 }  // namespace mooncake

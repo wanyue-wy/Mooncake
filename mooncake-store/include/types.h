@@ -200,16 +200,41 @@ const static uint64_t kMaxSliceSize =
 /**
  * @brief Represents a contiguous memory region
  */
+// Segment Types
+// Segment Types
+struct CentralizedSegmentExtraData {
+    uintptr_t base{0};
+    std::string te_endpoint;
+    YLT_REFL(CentralizedSegmentExtraData, base, te_endpoint);
+};
+
+struct P2PSegmentExtraData {
+    // P2P specific metadata
+    std::string ip_address;
+    uint16_t rpc_port;
+    int priority = 0;
+    std::vector<std::string> tags;
+    YLT_REFL(P2PSegmentExtraData, ip_address, rpc_port, priority, tags);
+};
+
 struct Segment {
     UUID id{0, 0};
     std::string name{};  // Logical segment name used for preferred allocation
-    uintptr_t base{0};
     size_t size{0};
-    // TE p2p endpoint (ip:port) for transport-only addressing
-    std::string te_endpoint{};
-    Segment() = default;
+
+    // Polymorphic extra data
+    std::variant<CentralizedSegmentExtraData, P2PSegmentExtraData> extra;
+
+    // Helper to check type
+    bool is_p2p() const {
+        return std::holds_alternative<P2PSegmentExtraData>(extra);
+    }
+
+    bool is_centralized() const {
+        return std::holds_alternative<CentralizedSegmentExtraData>(extra);
+    }
 };
-YLT_REFL(Segment, id, name, base, size, te_endpoint);
+YLT_REFL(Segment, id, name, size, extra);
 
 /**
  * @brief Client status from the master's perspective.

@@ -413,7 +413,7 @@ class RealClient : public PyClient {
     batch_get_replica_desc(const std::vector<std::string> &keys);
     std::vector<Replica::Descriptor> get_replica_desc(const std::string &key);
 
-    tl::expected<PingResponse, ErrorCode> ping(const UUID &client_id);
+    tl::expected<HeartbeatResponse, ErrorCode> heartbeat(const UUID& client_id);
 
     std::unique_ptr<AutoPortBinder> port_binder_ = nullptr;
 
@@ -473,10 +473,10 @@ class RealClient : public PyClient {
         uint64_t first;
         uint64_t second;
     };
-    static constexpr size_t kDummyClientPingQueueSize =
-        128 * 1024;  // Size of the client ping queue
-    boost::lockfree::queue<PodUUID> dummy_client_ping_queue_{
-        kDummyClientPingQueueSize};
+    static constexpr size_t kDummyClientHeartbeatQueueSize =
+        128 * 1024;  // Size of the client heartbeat queue
+    boost::lockfree::queue<PodUUID> dummy_client_heartbeat_queue_{
+        kDummyClientHeartbeatQueueSize};
     const int64_t dummy_client_live_ttl_sec_ = DEFAULT_CLIENT_LIVE_TTL_SEC;
     int64_t view_version_ = 0;
 

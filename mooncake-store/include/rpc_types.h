@@ -7,26 +7,6 @@
 namespace mooncake {
 
 /**
- * @brief Response structure for Ping operation
- */
-struct PingResponse {
-    ViewVersionId view_version_id;
-    ClientStatus client_status;
-
-    PingResponse() = default;
-    PingResponse(ViewVersionId view_version, ClientStatus status)
-        : view_version_id(view_version), client_status(status) {}
-
-    friend std::ostream& operator<<(std::ostream& os,
-                                    const PingResponse& response) noexcept {
-        return os << "PingResponse: { view_version_id: "
-                  << response.view_version_id
-                  << ", client_status: " << response.client_status << " }";
-    }
-};
-YLT_REFL(PingResponse, view_version_id, client_status);
-
-/**
  * @brief Response structure for GetReplicaList operation
  */
 struct GetReplicaListResponse {
@@ -67,11 +47,35 @@ struct HeartbeatRequest {
 };
 
 /**
- * @brief Response structure for Heartbeat operation
+ * @brief Response structure for Heartbeat operation.
+ * Always returns view_version; client uses it under UNDEFINED status
+ * for crash-recovery decisions, other statuses for defensive checks.
  */
 struct HeartbeatResponse {
     ClientStatus status;
+    ViewVersionId view_version = 0;
     std::vector<HeartbeatTaskResult> task_results;
+};
+
+/**
+ * @brief Request structure for RegisterClient operation.
+ * Client calls this on startup to register its UUID and local segments.
+ * P2P clients additionally provide ip_address and rpc_port.
+ */
+struct RegisterClientRequest {
+    UUID client_id;
+    std::vector<Segment> segments;
+    // P2P only: network endpoint info
+    std::optional<std::string> ip_address;
+    std::optional<uint16_t> rpc_port;
+};
+
+/**
+ * @brief Response structure for RegisterClient operation.
+ * Returns the master's view_version for client to store locally.
+ */
+struct RegisterClientResponse {
+    ViewVersionId view_version = 0;
 };
 
 }  // namespace mooncake

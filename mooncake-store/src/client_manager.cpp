@@ -4,13 +4,14 @@
 
 namespace mooncake {
 
-ClientManager::ClientManager(const int64_t client_live_ttl_sec)
-    : client_live_ttl_sec_(client_live_ttl_sec) {
-    // Thread will be started by Start() after object is fully constructed
-}
+ClientManager::ClientManager(const int64_t disconnect_timeout_sec,
+                             const int64_t crash_timeout_sec,
+                             const ViewVersionId view_version)
+    : disconnect_timeout_sec_(disconnect_timeout_sec),
+      crash_timeout_sec_(crash_timeout_sec),
+      view_version_(view_version) {}
 
 void ClientManager::Start() {
-    // Start client monitor thread in all modes so TTL/heartbeat works
     client_monitor_running_ = true;
     client_monitor_thread_ =
         std::thread(&ClientManager::ClientMonitorFunc, this);
@@ -24,33 +25,129 @@ ClientManager::~ClientManager() {
     }
 }
 
+// ===== Client Registration =====
+
+auto ClientManager::RegisterClient(const RegisterClientRequest& req)
+    -> tl::expected<RegisterClientResponse, ErrorCode> {
+    const auto& client_id = req.client_id;
+
+    // Create architecture-specific client meta via virtual factory
+    auto meta = CreateClientMeta(req);
+
+    SharedMutexLocker lock(&client_mutex_);
+    // Write to client_metas_ (overwrites if re-registering after crash)
+    client_metas_[client_id] = std::move(meta);
+
+    // Batch mount segments
+    // Note: InnerMountSegment needs to be called with Write Lock held (from
+    // RegisterClient) But InnerMountSegment usually takes Read Lock? User
+    // requirement:
+    // "RegisterClient中要全程持有client_mutex_锁...并使用InnerMountSegment来注册segment"
+    // Issue: InnerMountSegment likely acquires lock internally if it follows
+    // standard pattern. Solution: We need to check if InnerMountSegment locks.
+    // If we implement InnerMountSegment in subclasses to grab lock, we have
+    // deadlock. However, RegisterClient holds Write Lock. InnerMountSegment
+    // should probably expect lock to be held or we need a version that doesn't
+    // lock. BUT, RegisterClient is in base class. InnerMountSegment is virtual.
+    // Let's look at the instruction:
+    // "ClientManager::RegisterClient中要全程持有client_mutex_锁...并且应该移除InnerReMountSegment接口，使用InnerMountSegment来注册segment"
+    // Implementation:
+    for (const auto& segment : req.segments) {
+        auto result = InnerMountSegment(segment, client_id);
+        if (!result.has_value()) {
+            LOG(ERROR) << "RegisterClient: failed to mount segment"
+                       << ", segment_name=" << segment.name
+                       << ", client_id=" << client_id
+                       << ", error=" << result.error();
+            // Rollback: remove client meta on segment mount failure
+            client_metas_.erase(client_id);
+            return tl::make_unexpected(result.error());
+        }
+    }
+
+    MasterMetricManager::instance().inc_active_clients();
+
+    RegisterClientResponse response;
+    response.view_version = view_version_;
+
+    LOG(INFO) << "RegisterClient: client_id=" << client_id
+              << ", segments=" << req.segments.size()
+              << ", view_version=" << response.view_version;
+
+    return response;
+}
+
+// ===== Client Registration Check =====
+
+bool ClientManager::IsClientRegistered(const UUID& client_id) const {
+    SharedMutexLocker lock(&client_mutex_, shared_lock);
+    return client_metas_.find(client_id) != client_metas_.end();
+}
+
+// ===== Unified Heartbeat Interface =====
+
+auto ClientManager::Heartbeat(const HeartbeatRequest& req)
+    -> tl::expected<HeartbeatResponse, ErrorCode> {
+    const auto& client_id = req.client_id;
+    HeartbeatResponse response;
+    response.view_version = view_version_;
+
+    SharedMutexLocker lock(&client_mutex_);
+    auto it = client_metas_.find(client_id);
+    if (it == client_metas_.end()) {
+        // Client not in client_metas_: master restarted or client
+        // timed out and was cleaned up. Return UNDEFINED + view_version
+        // so client can decide whether to re-register or full-sync.
+        response.status = ClientStatus::UNDEFINED;
+        return response;
+    }
+
+    auto& meta = it->second;
+    auto& state = meta->health_state;
+
+    if (state.status == ClientStatus::CRASHED) {
+        // Master is actively cleaning up this client's metadata.
+        // Client should keep retrying heartbeat until it sees UNDEFINED.
+        response.status = ClientStatus::CRASHED;
+        return response;
+    }
+
+    // Update heartbeat timestamp
+    state.last_heartbeat = std::chrono::steady_clock::now();
+
+    if (state.status == ClientStatus::DISCONNECTION) {
+        // Recovery: DISCONNECTION -> HEALTH
+        LOG(INFO) << "client_id=" << client_id << ", action=client_recovered";
+        state.status = ClientStatus::HEALTH;
+        OnClientRecovered(client_id);
+    }
+
+    response.status = state.status;
+
+    for (const auto& task : req.tasks) {
+        response.task_results.push_back(ProcessTask(client_id, task));
+    }
+
+    return response;
+}
+
+// ===== Segment Management =====
+
 auto ClientManager::MountSegment(const Segment& segment, const UUID& client_id)
     -> tl::expected<void, ErrorCode> {
-    std::function<ErrorCode()> pre_mount = [this, &client_id,
-                                            &segment]() -> ErrorCode {
-        // Tell the client monitor thread to start timing for this client. To
-        // avoid the following undesired situations, this message must be sent
-        // after locking the segment mutex and before the mounting operation
-        // completes:
-        // 1. Sending the message before the lock: the client expires and
-        // unmouting invokes before this mounting are completed, which prevents
-        // this segment being able to be unmounted forever;
-        // 2. Sending the message after mounting the segment: After mounting
-        // this segment, when trying to push id to the queue, the queue is
-        // already full. However, at this point, the message must be sent,
-        // otherwise this client cannot be monitored and expired.
-        PodUUID pod_client_id{client_id.first, client_id.second};
-        if (!client_ping_queue_.push(pod_client_id)) {
-            LOG(ERROR) << "segment_name=" << segment.name
-                       << ", error=client_ping_queue_full";
-            return ErrorCode::INTERNAL_ERROR;
-        }
-        return ErrorCode::OK;
-    };
-    auto err = InnerMountSegment(segment, client_id, pre_mount);
+    // Segment Ops use Read Lock
+    SharedMutexLocker lock(&client_mutex_, shared_lock);
+
+    // Check client is registered
+    if (client_metas_.find(client_id) == client_metas_.end()) {
+        LOG(ERROR) << "MountSegment: client not registered"
+                   << ", client_id=" << client_id;
+        return tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
+    }
+
+    auto err = InnerMountSegment(segment, client_id);
     if (!err.has_value()) {
         if (err.error() == ErrorCode::SEGMENT_ALREADY_EXISTS) {
-            // Return OK because this is an idempotent operation
             return {};
         } else {
             LOG(ERROR) << "fail to mount segment"
@@ -66,51 +163,72 @@ auto ClientManager::MountSegment(const Segment& segment, const UUID& client_id)
     return {};
 }
 
-auto ClientManager::ReMountSegment(const std::vector<Segment>& segments,
-                                   const UUID& client_id)
-    -> tl::expected<void, ErrorCode> {
-    SharedMutexLocker lock(&client_mutex_);
-    if (ok_client_.contains(client_id)) {
-        LOG(WARNING) << "client_id=" << client_id
-                     << ", warn=client_already_remounted";
-        // Return OK because this is an idempotent operation
-        return {};
-    }
+// ===== Default Client Monitor (three-state machine) =====
 
-    std::function<ErrorCode()> pre_mount = [this, &client_id]() -> ErrorCode {
-        // Tell the client monitor thread to start timing for this client. To
-        // avoid the following undesired situations, this message must be sent
-        // after locking the segment mutex or client mutex and before the
-        // remounting operation completes:
-        // 1. Sending the message before the lock: the client expires and
-        // unmouting invokes before this remounting are completed, which
-        // prevents this segment being able to be unmounted forever;
-        // 2. Sending the message after remounting the segments: After
-        // remounting these segments, when trying to push id to the queue, the
-        // queue is already full. However, at this point, the message must be
-        // sent, otherwise this client cannot be monitored and expired.
-        PodUUID pod_client_id{client_id.first, client_id.second};
-        if (!client_ping_queue_.push(pod_client_id)) {
-            LOG(ERROR) << "client_id=" << client_id
-                       << ", error=client_ping_queue_full";
-            return ErrorCode::INTERNAL_ERROR;
+void ClientManager::ClientMonitorFunc() {
+    while (client_monitor_running_) {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(kClientMonitorSleepMs));
+
+        // Monitor holds Write Lock throughout execution
+        SharedMutexLocker lock(&client_mutex_);
+
+        auto now = std::chrono::steady_clock::now();
+        std::vector<UUID> newly_disconnected;
+        std::vector<UUID> newly_crashed;
+
+        for (auto& [client_id, meta] : client_metas_) {
+            auto& state = meta->health_state;
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                               now - state.last_heartbeat)
+                               .count();
+
+            switch (state.status) {
+                case ClientStatus::HEALTH: {
+                    if (elapsed > disconnect_timeout_sec_) {
+                        LOG(WARNING) << "client_id=" << client_id
+                                     << ", action=client_disconnected"
+                                     << ", elapsed_sec=" << elapsed;
+                        state.status = ClientStatus::DISCONNECTION;
+                        state.disconnection_start = now;
+                        newly_disconnected.push_back(client_id);
+                    }
+                    break;
+                }
+                case ClientStatus::DISCONNECTION: {
+                    auto disconnected_sec =
+                        std::chrono::duration_cast<std::chrono::seconds>(
+                            now - state.disconnection_start)
+                            .count();
+                    if (disconnected_sec > crash_timeout_sec_) {
+                        LOG(ERROR) << "client_id=" << client_id
+                                   << ", action=client_crashed"
+                                   << ", disconnected_sec=" << disconnected_sec;
+                        state.status = ClientStatus::CRASHED;
+                        newly_crashed.push_back(client_id);
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }  // end for
+
+        // Phase 2: Execute hooks inside lock
+        for (const auto& client_id : newly_disconnected) {
+            OnClientDisconnected(client_id);
         }
-        return ErrorCode::OK;
-    };
 
-    auto ret = InnerReMountSegment(segments, client_id, pre_mount);
-    if (!ret.has_value()) {
-        LOG(ERROR) << "client_id=" << client_id
-                   << ", error=fail_to_remount_segment"
-                   << ", ret=" << ret.error();
-        return ret;
+        for (const auto& client_id : newly_crashed) {
+            OnClientCrashed(client_id);
+        }
+
+        // Phase 3: Remove crashed clients
+        for (const auto& client_id : newly_crashed) {
+            client_metas_.erase(client_id);
+            MasterMetricManager::instance().dec_active_clients();
+        }
     }
-
-    // Change the client status to OK
-    ok_client_.insert(client_id);
-    MasterMetricManager::instance().inc_active_clients();
-
-    return {};
 }
 
 }  // namespace mooncake

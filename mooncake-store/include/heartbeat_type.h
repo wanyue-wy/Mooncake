@@ -14,14 +14,15 @@ namespace mooncake {
 
 /**
  * @brief Types of tasks that can be carried in a heartbeat request.
+ * Only lightweight info-sync tasks; heavy operations like RegisterClient
+ * are handled via separate RPC.
  */
 enum class HeartbeatTaskType {
-    REMOUNT_SEGMENTS,   // Crash recovery: re-register segments
     SYNC_SEGMENT_META,  // Sync segment usage metadata
 };
 
 // =====================================================================
-// Heartbeat Task Params (variant pattern, similar to Replica)
+// Heartbeat Task Params
 // =====================================================================
 
 /**
@@ -30,24 +31,6 @@ enum class HeartbeatTaskType {
 struct TierUsageInfo {
     UUID segment_id;
     size_t usage = 0;
-};
-
-/**
- * @brief Route info for a key's replica, used during REMOUNT_SEGMENTS.
- */
-struct KeyReplicaRoute {
-    std::string key;
-    UUID segment_id;
-    size_t value_size = 0;
-};
-
-/**
- * @brief Param for REMOUNT_SEGMENTS task.
- * Centralized: only segments. P2P: segments + key replica routes.
- */
-struct RemountSegmentsParam {
-    std::vector<Segment> segments;
-    std::optional<std::vector<KeyReplicaRoute>> key_replica_routes;  // P2P only
 };
 
 /**
@@ -67,8 +50,7 @@ struct SyncSegmentMetaParam {
  */
 class HeartbeatTask {
    public:
-    using ParamVariant =
-        std::variant<RemountSegmentsParam, SyncSegmentMetaParam>;
+    using ParamVariant = std::variant<SyncSegmentMetaParam>;
 
     HeartbeatTask(HeartbeatTaskType type, ParamVariant param)
         : type_(type), param_(std::move(param)) {}

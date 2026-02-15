@@ -18,32 +18,15 @@ ErrorCode CentralizedSegmentManager::MountSegment(const Segment& segment,
     return ret;
 }
 
-ErrorCode CentralizedSegmentManager::MountSegment(
-    const Segment& segment, const UUID& client_id,
-    std::function<ErrorCode()>& pre_func) {
-    ErrorCode ret = ErrorCode::OK;
-    SharedMutexLocker lock_(&segment_mutex_);
-
-    ret = pre_func();
-    if (ret != ErrorCode::OK) {
-        LOG(ERROR) << "fail to do pre_func"
-                   << ", segment_name=" << segment.name << ", ret=" << ret;
-        return ret;
-    }
-
-    ret = InnerMountSegment(segment, client_id);
-    if (ret != ErrorCode::OK) {
-        LOG(ERROR) << "fail to inner mount segment"
-                   << ", segment_name=" << segment.name << ", ret=" << ret;
-        return ret;
-    }
-
-    return ret;
-}
-
 ErrorCode CentralizedSegmentManager::InnerCheckMountSegment(
     const Segment& segment, const UUID& client_id) {
-    const uintptr_t buffer = segment.base;
+    // In InnerCheckMountSegment
+    if (!segment.is_centralized()) {
+        LOG(ERROR) << "segment is not centralized";
+        return ErrorCode::INVALID_PARAMS;
+    }
+    const uintptr_t buffer =
+        std::get<CentralizedSegmentExtraData>(segment.extra).base;
     const size_t size = segment.size;
 
     // Check if parameters are valid before allocating memory.
@@ -65,8 +48,9 @@ ErrorCode CentralizedSegmentManager::InnerCheckMountSegment(
     // Check if segment already exists
     auto exist_segment_it = mounted_segments_.find(segment.id);
     if (exist_segment_it != mounted_segments_.end()) {
-        auto exist_segment = std::static_pointer_cast<CentralizedSegment>(
-            exist_segment_it->second);
+        auto exist_segment =
+            std::static_pointer_cast<MountedCentralizedSegment>(
+                exist_segment_it->second);
         if (exist_segment->status == SegmentStatus::OK) {
             LOG(WARNING) << "segment_name=" << segment.name
                          << ", warn=segment_already_exists";
@@ -90,7 +74,8 @@ ErrorCode CentralizedSegmentManager::InnerMountSegment(const Segment& segment,
                    << ", segment_name=" << segment.name << ", ret=" << ret;
         return ret;
     }
-    const uintptr_t buffer = segment.base;
+    const uintptr_t buffer =
+        std::get<CentralizedSegmentExtraData>(segment.extra).base;
     const size_t size = segment.size;
     std::shared_ptr<BufferAllocatorBase> allocator;
     // CachelibBufferAllocator may throw an exception if the size or base is
@@ -100,11 +85,15 @@ ErrorCode CentralizedSegmentManager::InnerMountSegment(const Segment& segment,
         switch (memory_allocator_) {
             case BufferAllocatorType::CACHELIB:
                 allocator = std::make_shared<CachelibBufferAllocator>(
-                    segment.name, buffer, size, segment.te_endpoint);
+                    segment.name, buffer, size,
+                    std::get<CentralizedSegmentExtraData>(segment.extra)
+                        .te_endpoint);
                 break;
             case BufferAllocatorType::OFFSET:
                 allocator = std::make_shared<OffsetBufferAllocator>(
-                    segment.name, buffer, size, segment.te_endpoint);
+                    segment.name, buffer, size,
+                    std::get<CentralizedSegmentExtraData>(segment.extra)
+                        .te_endpoint);
                 break;
             default:
                 LOG(ERROR) << "segment_name=" << segment.name
@@ -127,7 +116,7 @@ ErrorCode CentralizedSegmentManager::InnerMountSegment(const Segment& segment,
     allocator_manager_.addAllocator(segment.name, allocator);
     client_segments_[client_id].push_back(segment.id);
 
-    auto mounted_segment = std::make_shared<CentralizedSegment>();
+    auto mounted_segment = std::make_shared<MountedCentralizedSegment>();
     static_cast<Segment&>(*mounted_segment) = segment;
     mounted_segment->status = SegmentStatus::OK;
     mounted_segment->buf_allocator = allocator;
@@ -197,46 +186,6 @@ ErrorCode CentralizedSegmentManager::PushOffloadingQueue(
         return ErrorCode::KEYS_ULTRA_LIMIT;
     }
     local_disk_segment_it->second->offloading_objects.emplace(key, size);
-    return ErrorCode::OK;
-}
-
-ErrorCode CentralizedSegmentManager::ReMountSegment(
-    const std::vector<Segment>& segments, const UUID& client_id,
-    std::function<ErrorCode()>& pre_func) {
-    ErrorCode ret = ErrorCode::OK;
-    SharedMutexLocker lock_(&segment_mutex_);
-    ret = pre_func();
-    if (ret != ErrorCode::OK) {
-        LOG(ERROR) << "fail to do pre_func"
-                   << ", client_id=" << client_id << ", ret=" << ret;
-        return ret;
-    }
-
-    for (const auto& segment : segments) {
-        ErrorCode err = InnerMountSegment(segment, client_id);
-
-        if (err == ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS ||
-            err == ErrorCode::INTERNAL_ERROR) {
-            LOG(ERROR) << "segment_name=" << segment.name
-                       << ", error=fail_to_remount_segment";
-            return err;
-        } else if (err == ErrorCode::INVALID_PARAMS) {
-            // Ignore INVALID_PARAMS. This error cannot be solved by a new
-            // remount request.
-            LOG(WARNING) << "segment_name=" << segment.name
-                         << ", warn=invalid_params";
-        } else if (err == ErrorCode::SEGMENT_ALREADY_EXISTS) {
-            // Segment already exists, no need to remount.
-            LOG(WARNING) << "segment_name=" << segment.name
-                         << ", warn=segment_already_exists";
-        } else if (err != ErrorCode::OK) {
-            // Ignore other errors. The error may not be solvable by a new
-            // remount request.
-            LOG(ERROR) << "segment_name=" << segment.name
-                       << ", error=unexpected_error (" << err << ")";
-        }
-    }
-
     return ErrorCode::OK;
 }
 
@@ -346,7 +295,7 @@ ErrorCode CentralizedSegmentManager::BatchPrepareUnmountClientSegments(
         }
         for (auto& seg : segments) {
             auto centralized_seg =
-                std::static_pointer_cast<CentralizedSegment>(seg);
+                std::static_pointer_cast<MountedCentralizedSegment>(seg);
             ret = InnerPrepareUnmountSegment(*centralized_seg);
             if (ret != ErrorCode::OK) {
                 LOG(WARNING) << "fail to inner prepare unmount segment"
@@ -376,7 +325,7 @@ ErrorCode CentralizedSegmentManager::PrepareUnmountSegment(
         return ErrorCode::SEGMENT_NOT_FOUND;
     }
     auto mounted_segment =
-        std::static_pointer_cast<CentralizedSegment>(it->second);
+        std::static_pointer_cast<MountedCentralizedSegment>(it->second);
     if (mounted_segment->status == SegmentStatus::UNMOUNTING) {
         LOG(ERROR) << "segment_id=" << segment_id
                    << ", error=segment_is_unmounting";
@@ -395,7 +344,7 @@ ErrorCode CentralizedSegmentManager::PrepareUnmountSegment(
 }
 
 ErrorCode CentralizedSegmentManager::InnerPrepareUnmountSegment(
-    CentralizedSegment& mounted_segment) {
+    MountedCentralizedSegment& mounted_segment) {
     // Remove the allocator from the segment manager
     std::shared_ptr<BufferAllocatorBase> allocator =
         mounted_segment.buf_allocator;
@@ -473,13 +422,23 @@ ErrorCode CentralizedSegmentManager::QueryIp(const UUID& client_id,
             LOG(ERROR) << "unexpected null segment"
                        << ", client_id=" << client_id << ", ret=" << err;
             return err;
-        } else if (!segment->te_endpoint.empty()) {
-            size_t colon_pos = segment->te_endpoint.find(':');
-            if (colon_pos != std::string::npos) {
-                std::string ip = segment->te_endpoint.substr(0, colon_pos);
-                unique_ips.emplace(ip);
-            } else {
-                unique_ips.emplace(segment->te_endpoint);
+        } else if (!segment->is_centralized()) {
+            LOG(ERROR) << "segment is not centralized: "
+                       << "segment_id=" << segment->id
+                       << ", segment_name=" << segment->name;
+            return ErrorCode::SEGMENT_NOT_FOUND;
+        } else {
+            const auto& endpoint =
+                std::get<CentralizedSegmentExtraData>(segment->extra)
+                    .te_endpoint;
+            if (!endpoint.empty()) {
+                size_t colon_pos = endpoint.find(':');
+                if (colon_pos != std::string::npos) {
+                    std::string ip = endpoint.substr(0, colon_pos);
+                    unique_ips.emplace(ip);
+                } else {
+                    unique_ips.emplace(endpoint);
+                }
             }
         }
     }
@@ -499,7 +458,8 @@ ErrorCode CentralizedSegmentManager::GetAllSegments(
     all_segments.clear();
     for (auto& segment_it : mounted_segments_) {
         auto mounted_segment =
-            std::static_pointer_cast<CentralizedSegment>(segment_it.second);
+            std::static_pointer_cast<MountedCentralizedSegment>(
+                segment_it.second);
         if (mounted_segment->status == SegmentStatus::OK) {
             all_segments.push_back(mounted_segment->name);
         }

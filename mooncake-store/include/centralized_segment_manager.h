@@ -29,7 +29,7 @@ inline std::ostream& operator<<(std::ostream& os,
     return os;
 }
 
-struct CentralizedSegment : public Segment {
+struct MountedCentralizedSegment : public Segment {
     SegmentStatus status;
     std::shared_ptr<BufferAllocatorBase> buf_allocator;
 };
@@ -61,12 +61,6 @@ class CentralizedSegmentManager {
           memory_allocator_(memory_allocator) {}
 
     ErrorCode MountSegment(const Segment& segment, const UUID& client_id);
-    ErrorCode MountSegment(const Segment& segment, const UUID& client_id,
-                           std::function<ErrorCode()>& pre_func);
-
-    ErrorCode ReMountSegment(const std::vector<Segment>& segments,
-                             const UUID& client_id,
-                             std::function<ErrorCode()>& pre_func);
 
     ErrorCode UnmountSegment(const UUID& segment_id, const UUID& client_id);
     ErrorCode BatchUnmountSegments(
@@ -120,7 +114,8 @@ class CentralizedSegmentManager {
                                      const UUID& client_id);
     virtual ErrorCode InnerMountSegment(const Segment& segment,
                                         const UUID& client_id);
-    ErrorCode InnerPrepareUnmountSegment(CentralizedSegment& mounted_segment);
+    ErrorCode InnerPrepareUnmountSegment(
+        MountedCentralizedSegment& mounted_segment);
 
     ErrorCode InnerUnmountSegment(const UUID& segment_id,
                                   const UUID& client_id);

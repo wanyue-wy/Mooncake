@@ -59,6 +59,11 @@ struct RpcNameTraits<&WrappedMasterService::RemoveAll> {
 };
 
 template <>
+struct RpcNameTraits<&WrappedMasterService::MountSegment> {
+    static constexpr const char* value = "MountSegment";
+};
+
+template <>
 struct RpcNameTraits<&WrappedMasterService::UnmountSegment> {
     static constexpr const char* value = "UnmountSegment";
 };
@@ -66,6 +71,11 @@ struct RpcNameTraits<&WrappedMasterService::UnmountSegment> {
 template <>
 struct RpcNameTraits<&WrappedMasterService::Ping> {
     static constexpr const char* value = "Ping";
+};
+
+template <>
+struct RpcNameTraits<&WrappedMasterService::RegisterClient> {
+    static constexpr const char* value = "RegisterClient";
 };
 
 template <>
@@ -218,12 +228,41 @@ tl::expected<void, ErrorCode> MasterClient::UnmountSegment(
     return result;
 }
 
-tl::expected<PingResponse, ErrorCode> MasterClient::Ping() {
-    ScopedVLogTimer timer(1, "MasterClient::Ping");
+tl::expected<HeartbeatResponse, ErrorCode> MasterClient::Heartbeat() {
+    ScopedVLogTimer timer(1, "MasterClient::Heartbeat");
     timer.LogRequest("client_id=", client_id_);
 
+    HeartbeatRequest req;
+    req.client_id = client_id_;
     auto result =
-        invoke_rpc<&WrappedMasterService::Ping, PingResponse>(client_id_);
+        invoke_rpc<&WrappedMasterService::Heartbeat, HeartbeatResponse>(req);
+    timer.LogResponseExpected(result);
+    return result;
+}
+
+tl::expected<void, ErrorCode> MasterClient::MountSegment(
+    const Segment& segment) {
+    ScopedVLogTimer timer(1, "MasterClient::MountSegment");
+    timer.LogRequest("segment_name=", segment.name, ", client_id=", client_id_);
+
+    auto result = invoke_rpc<&WrappedMasterService::MountSegment, void>(
+        segment, client_id_);
+    timer.LogResponseExpected(result);
+    return result;
+}
+
+tl::expected<RegisterClientResponse, ErrorCode> MasterClient::RegisterClient(
+    const std::vector<Segment>& segments) {
+    ScopedVLogTimer timer(1, "MasterClient::RegisterClient");
+    timer.LogRequest("client_id=", client_id_,
+                     ", segments_count=", segments.size());
+
+    RegisterClientRequest req;
+    req.client_id = client_id_;
+    req.segments = segments;
+
+    auto result = invoke_rpc<&WrappedMasterService::RegisterClient,
+                             RegisterClientResponse>(req);
     timer.LogResponseExpected(result);
     return result;
 }

@@ -8,12 +8,7 @@ namespace mooncake {
 // TODO: this class is a tmp placeholder. it will be implemented later
 class P2PSegmentManager {
    public:
-    ErrorCode MountSegment(const Segment& segment, const UUID& client_id,
-                           std::function<ErrorCode()>& pre_func);
-
-    ErrorCode ReMountSegment(const std::vector<Segment>& segments,
-                             const UUID& client_id,
-                             std::function<ErrorCode()>& pre_func);
+    ErrorCode MountSegment(const Segment& segment, const UUID& client_id);
 
     ErrorCode UnmountSegment(const UUID& segment_id, const UUID& client_id);
 

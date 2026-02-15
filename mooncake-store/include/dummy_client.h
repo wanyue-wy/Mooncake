@@ -222,9 +222,9 @@ class DummyClient : public PyClient {
     std::string ipc_socket_path_;
 
     // For high availability
-    std::thread ping_thread_;
-    std::atomic<bool> ping_running_{false};
-    void ping_thread_main();
+    std::thread heartbeat_thread_;
+    std::atomic<bool> heartbeat_running_{false};
+    void heartbeat_thread_main();
     volatile bool connected_ = false;
 };
 

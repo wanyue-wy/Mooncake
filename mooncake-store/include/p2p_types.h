@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "client_manager.h"
 #include "tiered_cache/cache_tier.h"
 #include "types.h"
 
@@ -15,10 +16,9 @@ namespace mooncake {
 // =====================================================================
 
 /**
- * @brief Static metadata for a P2P client.
+ * @brief P2P client metadata, extends ClientMeta with network endpoint info.
  */
-struct P2PClientMetadata {
-    UUID client_id;
+struct P2PClientMeta : ClientMeta {
     std::string ip_address;
     uint16_t rpc_port = 0;
 };

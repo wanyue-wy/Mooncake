@@ -1,12 +1,15 @@
 #include "centralized_client_manager.h"
+
+#include <glog/logging.h>
+
 #include "master_metric_manager.h"
 
 namespace mooncake {
 CentralizedClientManager::CentralizedClientManager(
     const int64_t client_live_ttl_sec,
     const BufferAllocatorType memory_allocator_type,
-    std::function<void()> segment_clean_func)
-    : ClientManager(client_live_ttl_sec),
+    std::function<void()> segment_clean_func, const ViewVersionId view_version)
+    : ClientManager(client_live_ttl_sec, client_live_ttl_sec, view_version),
       segment_clean_func_(segment_clean_func) {
     segment_manager_ =
         std::make_shared<CentralizedSegmentManager>(memory_allocator_type);
@@ -15,15 +18,20 @@ CentralizedClientManager::CentralizedClientManager(
 auto CentralizedClientManager::UnmountSegment(const UUID& segment_id,
                                               const UUID& client_id)
     -> tl::expected<void, ErrorCode> {
-    size_t metrics_dec_capacity = 0;  // to update the metrics
+    // Check client is registered
+    if (!IsClientRegistered(client_id)) {
+        LOG(ERROR) << "UnmountSegment: client not registered"
+                   << ", client_id=" << client_id;
+        return tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
+    }
+
+    size_t metrics_dec_capacity = 0;
     std::string segment_name;
-    // 1. Prepare to unmount the segment by deleting its allocator
     ErrorCode err = segment_manager_->PrepareUnmountSegment(
         segment_id, metrics_dec_capacity, segment_name);
     if (err == ErrorCode::SEGMENT_NOT_FOUND) {
         LOG(INFO) << "segment_id=" << segment_id << ", client_id=" << client_id
                   << ", error=segment_not_found";
-        // Return OK because this is an idempotent operation
         return {};
     } else if (err != ErrorCode::OK) {
         LOG(ERROR) << "fail to prepare unmount segment"
@@ -32,10 +40,8 @@ auto CentralizedClientManager::UnmountSegment(const UUID& segment_id,
         return tl::make_unexpected(err);
     }
 
-    // 2. Remove the metadata of the related objects
     segment_clean_func_();
 
-    // 3. Commit the unmount operation
     err = segment_manager_->UnmountSegment(segment_id, client_id);
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "fail to unmount segment"
@@ -44,7 +50,6 @@ auto CentralizedClientManager::UnmountSegment(const UUID& segment_id,
         return tl::make_unexpected(err);
     }
 
-    // Decrease the total capacity
     MasterMetricManager::instance().dec_total_mem_capacity(
         segment_name, metrics_dec_capacity);
     return {};
@@ -56,7 +61,6 @@ auto CentralizedClientManager::MountLocalDiskSegment(const UUID& client_id,
     auto err =
         segment_manager_->MountLocalDiskSegment(client_id, enable_offloading);
     if (err == ErrorCode::SEGMENT_ALREADY_EXISTS) {
-        // Return OK because this is an idempotent operation
         return {};
     } else if (err != ErrorCode::OK) {
         LOG(ERROR) << "fail to mount local disk segment"
@@ -66,28 +70,13 @@ auto CentralizedClientManager::MountLocalDiskSegment(const UUID& client_id,
     return {};
 }
 
-auto CentralizedClientManager::InnerMountSegment(
-    const Segment& segment, const UUID& client_id,
-    std::function<ErrorCode()>& pre_func) -> tl::expected<void, ErrorCode> {
-    ErrorCode err =
-        segment_manager_->MountSegment(segment, client_id, pre_func);
+auto CentralizedClientManager::InnerMountSegment(const Segment& segment,
+                                                 const UUID& client_id)
+    -> tl::expected<void, ErrorCode> {
+    ErrorCode err = segment_manager_->MountSegment(segment, client_id);
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "fail to mount segment"
                    << ", segment_id=" << segment.id
-                   << ", client_id=" << client_id << ", ret=" << err;
-        return tl::make_unexpected(err);
-    }
-    return {};
-}
-
-auto CentralizedClientManager::InnerReMountSegment(
-    const std::vector<Segment>& segments, const UUID& client_id,
-    std::function<ErrorCode()>& pre_func) -> tl::expected<void, ErrorCode> {
-    ErrorCode err =
-        segment_manager_->ReMountSegment(segments, client_id, pre_func);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "fail to remount segment"
-                   << ", segments.size()=" << segments.size()
                    << ", client_id=" << client_id << ", ret=" << err;
         return tl::make_unexpected(err);
     }
@@ -112,103 +101,73 @@ auto CentralizedClientManager::PushOffloadingQueue(
     return {};
 }
 
-auto CentralizedClientManager::Ping(const UUID& client_id)
-    -> tl::expected<ClientStatus, ErrorCode> {
-    SharedMutexLocker lock(&client_mutex_, shared_lock);
-    ClientStatus client_status;
-    auto it = ok_client_.find(client_id);
-    if (it != ok_client_.end()) {
-        client_status = ClientStatus::HEALTH;
-    } else {
-        client_status = ClientStatus::UNDEFINED;
-    }
-    PodUUID pod_client_id = {client_id.first, client_id.second};
-    if (!client_ping_queue_.push(pod_client_id)) {
-        // Queue is full
-        LOG(ERROR) << "client_id=" << client_id
-                   << ", error=client_ping_queue_full";
-        return tl::make_unexpected(ErrorCode::INTERNAL_ERROR);
-    }
-    return client_status;
+// ===== Virtual Factory =====
+
+std::unique_ptr<ClientMeta> CentralizedClientManager::CreateClientMeta(
+    const RegisterClientRequest& req) {
+    auto meta = std::make_unique<ClientMeta>();
+    meta->health_state.status = ClientStatus::HEALTH;
+    meta->health_state.last_heartbeat = std::chrono::steady_clock::now();
+    return meta;
 }
 
-void CentralizedClientManager::ClientMonitorFunc() {
-    std::unordered_map<UUID, std::chrono::steady_clock::time_point,
-                       boost::hash<UUID>>
-        client_ttl;
-    while (client_monitor_running_) {
-        auto now = std::chrono::steady_clock::now();
+// ===== Hook Functions =====
 
-        // Update the client ttl
-        PodUUID pod_client_id;
-        while (client_ping_queue_.pop(pod_client_id)) {
-            UUID client_id = {pod_client_id.first, pod_client_id.second};
-            client_ttl[client_id] =
-                now + std::chrono::seconds(client_live_ttl_sec_);
+void CentralizedClientManager::OnClientDisconnected(const UUID& client_id) {
+    // Centralized mode has no DISCONNECTION state (HEALTH -> CRASHED directly).
+    // This should not be called, but log if it is.
+    LOG(WARNING) << "client_id=" << client_id
+                 << ", action=centralized_client_disconnected (unexpected)";
+}
+
+void CentralizedClientManager::OnClientCrashed(const UUID& client_id) {
+    // Unmount all segments for this client
+    LOG(WARNING) << "client_id=" << client_id
+                 << ", action=centralized_client_crashed, cleaning_up";
+
+    std::vector<UUID> expired_clients = {client_id};
+    std::vector<UUID> unmount_segments;
+    std::vector<size_t> dec_capacities;
+    std::vector<UUID> client_ids;
+    std::vector<std::string> segment_names;
+
+    ErrorCode ret = segment_manager_->BatchPrepareUnmountClientSegments(
+        expired_clients, unmount_segments, dec_capacities, client_ids,
+        segment_names);
+    if (ret != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to batch prepare unmount client segments: "
+                   << toString(ret);
+        return;
+    }
+
+    if (!unmount_segments.empty()) {
+        segment_clean_func_();
+        ret = segment_manager_->BatchUnmountSegments(unmount_segments,
+                                                     client_ids, segment_names);
+        if (ret != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to batch unmount segments: " << toString(ret);
         }
-
-        // Find out expired clients
-        std::vector<UUID> expired_clients;
-        for (auto it = client_ttl.begin(); it != client_ttl.end();) {
-            if (it->second < now) {
-                LOG(INFO) << "client_id=" << it->first
-                          << ", action=client_expired";
-                expired_clients.push_back(it->first);
-                it = client_ttl.erase(it);
-            } else {
-                ++it;
-            }
+        for (size_t i = 0; i < unmount_segments.size(); ++i) {
+            MasterMetricManager::instance().dec_total_mem_capacity(
+                segment_names[i], dec_capacities[i]);
         }
+    }
+}
 
-        // Update the client status to NEED_REMOUNT
-        if (!expired_clients.empty()) {
-            // Record which segments are unmounted, will be used in the commit
-            // phase.
-            std::vector<UUID> unmount_segments;
-            std::vector<size_t> dec_capacities;
-            std::vector<UUID> client_ids;
-            std::vector<std::string> segment_names;
-            {
-                // Lock client_mutex and segment_mutex
-                SharedMutexLocker lock(&client_mutex_);
-                for (auto& client_id : expired_clients) {
-                    auto it = ok_client_.find(client_id);
-                    if (it != ok_client_.end()) {
-                        ok_client_.erase(it);
-                        MasterMetricManager::instance().dec_active_clients();
-                    }
-                }
+void CentralizedClientManager::OnClientRecovered(const UUID& client_id) {
+    // In centralized mode, recovery only happens after re-registration.
+    LOG(INFO) << "client_id=" << client_id
+              << ", action=centralized_client_recovered";
+    MasterMetricManager::instance().inc_active_clients();
+}
 
-                ErrorCode ret =
-                    segment_manager_->BatchPrepareUnmountClientSegments(
-                        expired_clients, unmount_segments, dec_capacities,
-                        client_ids, segment_names);
-                if (ret != ErrorCode::OK) {
-                    LOG(ERROR)
-                        << "Failed to batch prepare unmount client segments: "
-                        << toString(ret);
-                }
-            }  // Release the mutex before long-running ClearInvalidHandles and
-               // avoid deadlocks
+HeartbeatTaskResult CentralizedClientManager::ProcessTask(
+    const UUID& client_id, const HeartbeatTask& task) {
+    HeartbeatTaskResult result;
+    result.type = task.type();
+    result.error = ErrorCode::NOT_IMPLEMENTED;
 
-            if (!unmount_segments.empty()) {
-                segment_clean_func_();
-                ErrorCode ret = segment_manager_->BatchUnmountSegments(
-                    unmount_segments, client_ids, segment_names);
-                if (ret != ErrorCode::OK) {
-                    LOG(ERROR) << "Failed to batch unmount segments: "
-                               << toString(ret);
-                }
-                for (size_t i = 0; i < unmount_segments.size(); ++i) {
-                    MasterMetricManager::instance().dec_total_mem_capacity(
-                        segment_names[i], dec_capacities[i]);
-                }
-            }
-        }
-
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(kClientMonitorSleepMs));
-    }  // end while
+    return result;
 }
 
 tl::expected<std::vector<std::string>, ErrorCode>

@@ -43,22 +43,10 @@ template <>
 struct RpcNameTraits<&WrappedCentralizedMasterService::BatchPutRevoke> {
     static constexpr const char* value = "BatchPutRevoke";
 };
-
-template <>
-struct RpcNameTraits<&WrappedCentralizedMasterService::MountSegment> {
-    static constexpr const char* value = "MountSegment";
-};
-
-template <>
-struct RpcNameTraits<&WrappedCentralizedMasterService::ReMountSegment> {
-    static constexpr const char* value = "ReMountSegment";
-};
-
 template <>
 struct RpcNameTraits<&WrappedCentralizedMasterService::GetFsdir> {
     static constexpr const char* value = "GetFsdir";
 };
-
 template <>
 struct RpcNameTraits<&WrappedCentralizedMasterService::GetStorageConfig> {
     static constexpr const char* value = "GetStorageConfig";
@@ -192,33 +180,6 @@ CentralizedMasterClient::BatchPutRevoke(const std::vector<std::string>& keys) {
         invoke_batch_rpc<&WrappedCentralizedMasterService::BatchPutRevoke,
                          void>(keys.size(), client_id_, keys);
     timer.LogResponse("result=", result.size(), " operations");
-    return result;
-}
-
-tl::expected<void, ErrorCode> CentralizedMasterClient::MountSegment(
-    const Segment& segment) {
-    ScopedVLogTimer timer(1, "CentralizedMasterClient::MountSegment");
-    timer.LogRequest("base=", segment.base, ", size=", segment.size,
-                     ", name=", segment.name, ", id=", segment.id,
-                     ", client_id=", client_id_);
-
-    auto result =
-        invoke_rpc<&WrappedCentralizedMasterService::MountSegment, void>(
-            segment, client_id_);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<void, ErrorCode> CentralizedMasterClient::ReMountSegment(
-    const std::vector<Segment>& segments) {
-    ScopedVLogTimer timer(1, "CentralizedMasterClient::ReMountSegment");
-    timer.LogRequest("segments_num=", segments.size(),
-                     ", client_id=", client_id_);
-
-    auto result =
-        invoke_rpc<&WrappedCentralizedMasterService::ReMountSegment, void>(
-            segments, client_id_);
-    timer.LogResponseExpected(result);
     return result;
 }
 

@@ -23,6 +23,30 @@ class MasterService {
    public:
     MasterService(const MasterServiceConfig& config);
     virtual ~MasterService() = default;
+
+    /**
+     * @brief Register a client with its segments.
+     * Delegates to ClientManager::RegisterClient.
+     */
+    auto RegisterClient(const RegisterClientRequest& req)
+        -> tl::expected<RegisterClientResponse, ErrorCode>;
+
+    /**
+     * @brief Unified heartbeat interface.
+     * @param req HeartbeatRequest containing client_id and tasks
+     * @return HeartbeatResponse containing client status, view_version,
+     *         and task results
+     */
+    auto Heartbeat(const HeartbeatRequest& req)
+        -> tl::expected<HeartbeatResponse, ErrorCode>;
+
+    /**
+     * @brief Mount a memory segment. This function is idempotent.
+     * @return ErrorCode::OK on success.
+     */
+    auto MountSegment(const Segment& segment, const UUID& client_id)
+        -> tl::expected<void, ErrorCode>;
+
     /**
      * @brief Unmount a memory segment. This function is idempotent.
      * @return ErrorCode::OK on success,
@@ -148,15 +172,6 @@ class MasterService {
      * @return The count of keys
      */
     size_t GetKeyCount() const;
-
-    /**
-     * @brief Heartbeat from client
-     * @param client_id The uuid of the client
-     * @return PingResponse containing view version and client status
-     * @return ErrorCode::OK on success, ErrorCode::INTERNAL_ERROR if the client
-     *         ping queue is full
-     */
-    auto Ping(const UUID& client_id) -> tl::expected<PingResponse, ErrorCode>;
 
    protected:
     struct ObjectMetadata {

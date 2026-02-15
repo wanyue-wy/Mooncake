@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "types.h"
+#include "rpc_types.h"
 
 namespace mooncake::test {
 
@@ -25,6 +26,14 @@ class MasterServiceSSDTest : public ::testing::Test {
     }
 
     void TearDown() override { google::ShutdownGoogleLogging(); }
+
+    void RegisterClient(CentralizedMasterService& service,
+                        const UUID& client_id) const {
+        RegisterClientRequest reg_req;
+        reg_req.client_id = client_id;
+        auto reg_result = service.RegisterClient(reg_req);
+        EXPECT_TRUE(reg_result.has_value());
+    }
 };
 
 TEST_F(MasterServiceSSDTest, PutEndBothReplica) {
@@ -40,6 +49,7 @@ TEST_F(MasterServiceSSDTest, PutEndBothReplica) {
     segment.size = size;
     segment.te_endpoint = segment.name;
     UUID client_id = generate_uuid();
+    RegisterClient(*service_, client_id);
 
     auto mount_result = service_->MountSegment(segment, client_id);
     ASSERT_TRUE(mount_result.has_value());
@@ -95,6 +105,7 @@ TEST_F(MasterServiceSSDTest, PutRevokeDiskReplica) {
     segment.size = size;
     segment.te_endpoint = segment.name;
     UUID client_id = generate_uuid();
+    RegisterClient(*service_, client_id);
 
     auto mount_result = service_->MountSegment(segment, client_id);
     ASSERT_TRUE(mount_result.has_value());
@@ -136,6 +147,7 @@ TEST_F(MasterServiceSSDTest, PutRevokeMemoryReplica) {
     segment.size = size;
     segment.te_endpoint = segment.name;
     UUID client_id = generate_uuid();
+    RegisterClient(*service_, client_id);
 
     auto mount_result = service_->MountSegment(segment, client_id);
     ASSERT_TRUE(mount_result.has_value());
@@ -175,6 +187,7 @@ TEST_F(MasterServiceSSDTest, PutRevokeBothReplica) {
     segment.size = size;
     segment.te_endpoint = segment.name;
     UUID client_id = generate_uuid();
+    RegisterClient(*service_, client_id);
 
     auto mount_result = service_->MountSegment(segment, client_id);
     ASSERT_TRUE(mount_result.has_value());
@@ -213,6 +226,7 @@ TEST_F(MasterServiceSSDTest, RemoveKey) {
     segment.size = size;
     segment.te_endpoint = segment.name;
     UUID client_id = generate_uuid();
+    RegisterClient(*service_, client_id);
 
     auto mount_result = service_->MountSegment(segment, client_id);
     ASSERT_TRUE(mount_result.has_value());
@@ -253,6 +267,7 @@ TEST_F(MasterServiceSSDTest, EvictObject) {
     segment.size = size;
     segment.te_endpoint = segment.name;
     UUID client_id = generate_uuid();
+    RegisterClient(*service_, client_id);
     auto mount_result = service_->MountSegment(segment, client_id);
     ASSERT_TRUE(mount_result.has_value());
 
@@ -321,6 +336,7 @@ TEST_F(MasterServiceSSDTest, PutStartExpires) {
     segment.size = kSegmentSize;
     segment.te_endpoint = segment.name;
     auto client_id = generate_uuid();
+    RegisterClient(*service_, client_id);
     auto mount_result = service_->MountSegment(segment, client_id);
     ASSERT_TRUE(mount_result.has_value());
 
@@ -352,7 +368,9 @@ TEST_F(MasterServiceSSDTest, PutStartExpires) {
         for (size_t i = 0; i <= master_config.put_start_discard_timeout_sec;
              i++) {
             // Keep mounted segments alive.
-            auto result = service_->Ping(client_id);
+            HeartbeatRequest hb_req;
+            hb_req.client_id = client_id;
+            auto result = service_->Heartbeat(hb_req);
             EXPECT_TRUE(result.has_value());
             // Protect the key from eviction.
             auto get_result = service_->GetReplicaList(key);
@@ -371,7 +389,9 @@ TEST_F(MasterServiceSSDTest, PutStartExpires) {
         for (size_t i = 0; i <= master_config.put_start_release_timeout_sec;
              i++) {
             // Keep mounted segments alive.
-            auto result = service_->Ping(client_id);
+            HeartbeatRequest hb_req;
+            hb_req.client_id = client_id;
+            auto result = service_->Heartbeat(hb_req);
             EXPECT_TRUE(result.has_value());
             // Protect the key from eviction.
             auto get_result = service_->GetReplicaList(key);
@@ -395,7 +415,9 @@ TEST_F(MasterServiceSSDTest, PutStartExpires) {
 
         // Wait for the key to expire.
         for (size_t i = 0; i <= DEFAULT_DEFAULT_KV_LEASE_TTL / 1000; i++) {
-            auto result = service_->Ping(client_id);
+            HeartbeatRequest hb_req;
+            hb_req.client_id = client_id;
+            auto result = service_->Heartbeat(hb_req);
             EXPECT_TRUE(result.has_value());
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }

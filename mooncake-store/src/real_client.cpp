@@ -1830,18 +1830,23 @@ RealClient::batch_get_into_multi_buffers_internal(
     return results;
 }
 
-tl::expected<PingResponse, ErrorCode> RealClient::ping(const UUID &client_id) {
+tl::expected<HeartbeatResponse, ErrorCode> RealClient::heartbeat(
+    const UUID& client_id) {
     std::shared_lock<std::shared_mutex> lock(dummy_client_mutex_);
     ClientStatus client_status = ClientStatus::HEALTH;
 
     PodUUID pod_client_id = {client_id.first, client_id.second};
-    if (!dummy_client_ping_queue_.push(pod_client_id)) {
+    if (!dummy_client_heartbeat_queue_.push(pod_client_id)) {
         // Queue is full
         LOG(ERROR) << "client_id=" << client_id
-                   << ", error=dummy_client_ping_queue_";
+                   << ", error=dummy_client_heartbeat_queue_";
         return tl::make_unexpected(ErrorCode::INTERNAL_ERROR);
     }
-    return PingResponse(view_version_, client_status);
+    HeartbeatResponse resp;
+    resp.status = client_status;
+    resp.view_version = 0;  // TODO: RealClient/DummyClient doesn't seem to
+                            // track view_version yet
+    return resp;
 }
 
 void RealClient::dummy_client_monitor_func() {
@@ -1853,7 +1858,7 @@ void RealClient::dummy_client_monitor_func() {
 
         // Update the client ttl
         PodUUID pod_client_id;
-        while (dummy_client_ping_queue_.pop(pod_client_id)) {
+        while (dummy_client_heartbeat_queue_.pop(pod_client_id)) {
             UUID client_id = {pod_client_id.first, pod_client_id.second};
             client_ttl[client_id] =
                 now + std::chrono::seconds(dummy_client_live_ttl_sec_);

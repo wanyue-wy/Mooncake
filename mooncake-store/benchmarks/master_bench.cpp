@@ -20,6 +20,7 @@
 #include <random>
 #include <thread>
 #include <vector>
+#include <future>
 
 #include "gflags/gflags.h"
 #include "glog/logging.h"
@@ -86,7 +87,7 @@ class SegmentClient {
         }
     }
 
-    void Ping() {
+    void Heartbeat() {
         if (remount_future_.valid() &&
             remount_future_.wait_for(std::chrono::seconds(0)) ==
                 std::future_status::ready) {
@@ -94,18 +95,18 @@ class SegmentClient {
             remount_future_ = std::future<void>();
         }
 
-        auto ping_result = master_client_.Ping();
-        if (!ping_result.has_value()) {
-            throw std::runtime_error("Failed to ping master server");
+        auto heartbeat_result = master_client_.Heartbeat();
+        if (!heartbeat_result.has_value()) {
+            throw std::runtime_error("Failed to heartbeat to master server");
         }
 
-        if (ping_result.value().client_status ==
+        if (heartbeat_result.value().status ==
                 mooncake::ClientStatus::UNDEFINED &&
             !remount_future_.valid()) {
             remount_future_ = std::async(std::launch::async, [&]() {
-                auto remount_ec = master_client_.ReMountSegment({segment_});
-                if (!remount_ec.has_value()) {
-                    throw std::runtime_error("Failed to remount segment");
+                auto reg_ec = master_client_.RegisterClient({segment_});
+                if (!reg_ec.has_value()) {
+                    throw std::runtime_error("Failed to register client");
                 }
             });
         }
@@ -377,7 +378,7 @@ int main(int argc, char** argv) {
             {
                 std::lock_guard<std::mutex> guard(segment_clients_mutex);
                 for (auto& segment_client : segment_clients) {
-                    segment_client->Ping();
+                    segment_client->Heartbeat();
                 }
             }
             time_elapsed = std::chrono::steady_clock::now() - start_time;
@@ -437,12 +438,12 @@ int main(int argc, char** argv) {
     }
     LOG(INFO) << "Clients stopped";
 
-    LOG(INFO) << "Stopping ping thread...";
+    LOG(INFO) << "Stopping heartbeat thread...";
     if (ping_thread.joinable()) {
         ping_thread.request_stop();
         ping_thread.join();
     }
-    LOG(INFO) << "Ping thread stopped";
+    LOG(INFO) << "Heartbeat thread stopped";
 
     LOG(INFO) << "Disconnecting from master...";
     bench_clients.clear();
