@@ -3,6 +3,8 @@
 #include "p2p_master_service.h"
 #include "rpc_service.h"
 
+#include "p2p_rpc_types.h"
+
 namespace mooncake {
 
 class WrappedP2PMasterService final : public WrappedMasterService {
@@ -12,6 +14,17 @@ class WrappedP2PMasterService final : public WrappedMasterService {
     ~WrappedP2PMasterService() override = default;
 
     MasterService& GetMasterService() override { return master_service_; }
+
+    tl::expected<ReadRouteResponse, ErrorCode> GetReadRoute(
+        const ReadRouteRequest& req);
+
+    tl::expected<WriteRouteResponse, ErrorCode> GetWriteRoute(
+        const WriteRouteRequest& req);
+
+    tl::expected<void, ErrorCode> AddReplica(const AddReplicaRequest& req);
+
+    tl::expected<void, ErrorCode> RemoveReplica(
+        const RemoveReplicaRequest& req);
 
    private:
     P2PMasterService master_service_;

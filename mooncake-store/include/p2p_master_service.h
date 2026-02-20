@@ -2,6 +2,7 @@
 
 #include "master_service.h"
 #include "p2p_client_manager.h"
+#include "p2p_rpc_types.h"
 
 namespace mooncake {
 
@@ -14,6 +15,30 @@ class P2PMasterService : public MasterService {
     const ClientManager& GetClientManager() const override {
         return *client_manager_;
     }
+
+    /**
+     * @brief Get read route for an object
+     */
+    auto GetReadRoute(const ReadRouteRequest& req)
+        -> tl::expected<ReadRouteResponse, ErrorCode>;
+
+    /**
+     * @brief Get write candidate for a segment
+     */
+    auto GetWriteRoute(const WriteRouteRequest& req)
+        -> tl::expected<WriteRouteResponse, ErrorCode>;
+
+    /**
+     * @brief Add a replica to master
+     */
+    auto AddReplica(const AddReplicaRequest& req)
+        -> tl::expected<void, ErrorCode>;
+
+    /**
+     * @brief Remove a replica from master
+     */
+    auto RemoveReplica(const RemoveReplicaRequest& req)
+        -> tl::expected<void, ErrorCode>;
 
    protected:
     typedef MetadataShard P2PMetadataShard;

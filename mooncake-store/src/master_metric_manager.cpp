@@ -114,6 +114,25 @@ MasterMetricManager::MasterMetricManager()
                           "Total number of heartbeat requests received"),
       heartbeat_failures_("master_heartbeat_failures_total",
                           "Total number of failed heartbeat requests"),
+      get_read_route_requests_("master_get_read_route_requests_total",
+                               "Total number of get read route requests"),
+      get_read_route_failures_(
+          "master_get_read_route_failures_total",
+          "Total number of failed get read route requests"),
+      get_write_route_requests_("master_get_write_route_requests_total",
+                                "Total number of get write route requests"),
+      get_write_route_failures_(
+          "master_get_write_route_failures_total",
+          "Total number of failed get write route requests"),
+      add_replica_requests_("master_add_replica_requests_total",
+                            "Total number of add replica requests"),
+      add_replica_failures_("master_add_replica_failures_total",
+                            "Total number of failed add replica requests"),
+      remove_replica_requests_("master_remove_replica_requests_total",
+                               "Total number of remove replica requests"),
+      remove_replica_failures_(
+          "master_remove_replica_failures_total",
+          "Total number of failed remove replica requests"),
 
       // Initialize Batch Request Counters
       batch_exist_key_requests_(
@@ -301,6 +320,14 @@ void MasterMetricManager::update_metrics_for_zero_output() {
     remount_segment_failures_.inc(0);
     heartbeat_requests_.inc(0);
     heartbeat_failures_.inc(0);
+    get_read_route_requests_.inc(0);
+    get_read_route_failures_.inc(0);
+    get_write_route_requests_.inc(0);
+    get_write_route_failures_.inc(0);
+    add_replica_requests_.inc(0);
+    add_replica_failures_.inc(0);
+    remove_replica_requests_.inc(0);
+    remove_replica_failures_.inc(0);
 
     // Update Batch Request Counters
     batch_exist_key_requests_.inc(0);
@@ -605,6 +632,30 @@ void MasterMetricManager::inc_heartbeat_requests(int64_t val) {
 void MasterMetricManager::inc_heartbeat_failures(int64_t val) {
     heartbeat_failures_.inc(val);
 }
+void MasterMetricManager::inc_get_read_route_requests(int64_t val) {
+    get_read_route_requests_.inc(val);
+}
+void MasterMetricManager::inc_get_read_route_failures(int64_t val) {
+    get_read_route_failures_.inc(val);
+}
+void MasterMetricManager::inc_get_write_route_requests(int64_t val) {
+    get_write_route_requests_.inc(val);
+}
+void MasterMetricManager::inc_get_write_route_failures(int64_t val) {
+    get_write_route_failures_.inc(val);
+}
+void MasterMetricManager::inc_add_replica_requests(int64_t val) {
+    add_replica_requests_.inc(val);
+}
+void MasterMetricManager::inc_add_replica_failures(int64_t val) {
+    add_replica_failures_.inc(val);
+}
+void MasterMetricManager::inc_remove_replica_requests(int64_t val) {
+    remove_replica_requests_.inc(val);
+}
+void MasterMetricManager::inc_remove_replica_failures(int64_t val) {
+    remove_replica_failures_.inc(val);
+}
 
 // Batch Operation Statistics (Counters)
 void MasterMetricManager::inc_batch_exist_key_requests(int64_t items) {
@@ -800,6 +851,31 @@ int64_t MasterMetricManager::get_unmount_segment_requests() {
 
 int64_t MasterMetricManager::get_unmount_segment_failures() {
     return unmount_segment_failures_.value();
+}
+
+int64_t MasterMetricManager::get_get_read_route_requests() {
+    return get_read_route_requests_.value();
+}
+int64_t MasterMetricManager::get_get_read_route_failures() {
+    return get_read_route_failures_.value();
+}
+int64_t MasterMetricManager::get_get_write_route_requests() {
+    return get_write_route_requests_.value();
+}
+int64_t MasterMetricManager::get_get_write_route_failures() {
+    return get_write_route_failures_.value();
+}
+int64_t MasterMetricManager::get_add_replica_requests() {
+    return add_replica_requests_.value();
+}
+int64_t MasterMetricManager::get_add_replica_failures() {
+    return add_replica_failures_.value();
+}
+int64_t MasterMetricManager::get_remove_replica_requests() {
+    return remove_replica_requests_.value();
+}
+int64_t MasterMetricManager::get_remove_replica_failures() {
+    return remove_replica_failures_.value();
 }
 
 int64_t MasterMetricManager::get_remount_segment_requests() {

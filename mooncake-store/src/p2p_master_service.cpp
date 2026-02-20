@@ -11,6 +11,26 @@ P2PMasterService::P2PMasterService(const MasterServiceConfig& config)
         config.view_version);
 }
 
+auto P2PMasterService::GetReadRoute(const ReadRouteRequest& req)
+    -> tl::expected<ReadRouteResponse, ErrorCode> {
+    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+}
+
+auto P2PMasterService::GetWriteRoute(const WriteRouteRequest& req)
+    -> tl::expected<WriteRouteResponse, ErrorCode> {
+    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+}
+
+auto P2PMasterService::AddReplica(const AddReplicaRequest& req)
+    -> tl::expected<void, ErrorCode> {
+    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+}
+
+auto P2PMasterService::RemoveReplica(const RemoveReplicaRequest& req)
+    -> tl::expected<void, ErrorCode> {
+    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+}
+
 void P2PMasterService::OnObjectAccessed(ObjectMetadata& metadata) {
     // TODO: wanyue-wy
     // update metrics
