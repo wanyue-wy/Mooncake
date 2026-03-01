@@ -186,7 +186,7 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(
         (rdma_devices.empty() ? std::nullopt
                               : std::make_optional(rdma_devices));
 
-    auto client_opt = mooncake::Client::Create(
+    auto client_opt = mooncake::ClientService::Create(
         this->local_hostname, metadata_server, protocol, device_name,
         master_server_addr, transfer_engine);
     if (!client_opt) {

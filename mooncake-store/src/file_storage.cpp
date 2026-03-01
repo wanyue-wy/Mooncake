@@ -126,7 +126,7 @@ bool FileStorageConfig::Validate() const {
     return true;
 }
 
-FileStorage::FileStorage(std::shared_ptr<Client> client,
+FileStorage::FileStorage(std::shared_ptr<ClientService> client,
                          const std::string& local_rpc_addr,
                          const FileStorageConfig& config)
     : client_(client),

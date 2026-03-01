@@ -34,9 +34,9 @@ namespace mooncake {
     return slice_size;
 }
 
-Client::Client(const std::string& local_hostname,
-               const std::string& metadata_connstring,
-               const std::map<std::string, std::string>& labels)
+ClientService::ClientService(const std::string& local_hostname,
+                             const std::string& metadata_connstring,
+                             const std::map<std::string, std::string>& labels)
     : client_id_(generate_uuid()),
       metrics_(ClientMetric::Create(merge_labels(labels))),
       master_client_(client_id_,
@@ -61,7 +61,7 @@ Client::Client(const std::string& local_hostname,
     }
 }
 
-Client::~Client() {
+ClientService::~ClientService() {
     // Make a copy of mounted_segments_ to avoid modifying while iterating
     std::vector<Segment> segments_to_unmount;
     {
@@ -178,7 +178,8 @@ tl::expected<void, ErrorCode> CheckRegisterMemoryParams(const void* addr,
     return {};
 }
 
-ErrorCode Client::ConnectToMaster(const std::string& master_server_entry) {
+ErrorCode ClientService::ConnectToMaster(
+    const std::string& master_server_entry) {
     if (master_server_entry.find("etcd://") == 0) {
         std::string etcd_entry = master_server_entry.substr(strlen("etcd://"));
 
@@ -232,7 +233,7 @@ ErrorCode Client::ConnectToMaster(const std::string& master_server_entry) {
     }
 }
 
-ErrorCode Client::InitTransferEngine(
+ErrorCode ClientService::InitTransferEngine(
     const std::string& local_hostname, const std::string& metadata_connstring,
     const std::string& protocol,
     const std::optional<std::string>& device_names) {
@@ -355,7 +356,7 @@ ErrorCode Client::InitTransferEngine(
     return ErrorCode::OK;
 }
 
-void Client::InitTransferSubmitter() {
+void ClientService::InitTransferSubmitter() {
     // Initialize TransferSubmitter after transfer engine is ready
     // Keep using logical local_hostname for name-based behaviors; endpoint is
     // used separately where needed.
@@ -364,14 +365,14 @@ void Client::InitTransferSubmitter() {
         metrics_ ? &metrics_->transfer_metric : nullptr);
 }
 
-std::optional<std::shared_ptr<Client>> Client::Create(
+std::optional<std::shared_ptr<ClientService>> ClientService::Create(
     const std::string& local_hostname, const std::string& metadata_connstring,
     const std::string& protocol, const std::optional<std::string>& device_names,
     const std::string& master_server_entry,
     const std::shared_ptr<TransferEngine>& transfer_engine,
     std::map<std::string, std::string> labels) {
-    auto client = std::shared_ptr<Client>(
-        new Client(local_hostname, metadata_connstring, labels));
+    auto client = std::shared_ptr<ClientService>(
+        new ClientService(local_hostname, metadata_connstring, labels));
 
     ErrorCode err = client->ConnectToMaster(master_server_entry);
     if (err != ErrorCode::OK) {
@@ -451,8 +452,8 @@ std::optional<std::shared_ptr<Client>> Client::Create(
     return client;
 }
 
-tl::expected<void, ErrorCode> Client::Get(const std::string& object_key,
-                                          std::vector<Slice>& slices) {
+tl::expected<void, ErrorCode> ClientService::Get(const std::string& object_key,
+                                                 std::vector<Slice>& slices) {
     auto query_result = Query(object_key);
     if (!query_result) {
         return tl::unexpected(query_result.error());
@@ -460,7 +461,7 @@ tl::expected<void, ErrorCode> Client::Get(const std::string& object_key,
     return Get(object_key, query_result.value(), slices);
 }
 
-std::vector<tl::expected<void, ErrorCode>> Client::BatchGet(
+std::vector<tl::expected<void, ErrorCode>> ClientService::BatchGet(
     const std::vector<std::string>& object_keys,
     std::unordered_map<std::string, std::vector<Slice>>& slices) {
     auto batched_query_results = BatchQuery(object_keys);
@@ -511,19 +512,19 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchGet(
 tl::expected<
     std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
     ErrorCode>
-Client::BatchQueryIp(const std::vector<UUID>& client_ids) {
+ClientService::BatchQueryIp(const std::vector<UUID>& client_ids) {
     auto result = master_client_.BatchQueryIp(client_ids);
     return result;
 }
 
 tl::expected<std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
              ErrorCode>
-Client::QueryByRegex(const std::string& str) {
+ClientService::QueryByRegex(const std::string& str) {
     auto result = master_client_.GetReplicaListByRegex(str);
     return result;
 }
 
-tl::expected<QueryResult, ErrorCode> Client::Query(
+tl::expected<QueryResult, ErrorCode> ClientService::Query(
     const std::string& object_key) {
     std::chrono::steady_clock::time_point start_time =
         std::chrono::steady_clock::now();
@@ -543,7 +544,7 @@ tl::expected<QueryResult, ErrorCode> Client::Query(
                        start_time + std::chrono::milliseconds(lease_ttl_ms));
 }
 
-std::vector<tl::expected<QueryResult, ErrorCode>> Client::BatchQuery(
+std::vector<tl::expected<QueryResult, ErrorCode>> ClientService::BatchQuery(
     const std::vector<std::string>& object_keys) {
     std::chrono::steady_clock::time_point start_time =
         std::chrono::steady_clock::now();
@@ -584,17 +585,18 @@ std::vector<tl::expected<QueryResult, ErrorCode>> Client::BatchQuery(
     return results;
 }
 
-tl::expected<std::vector<std::string>, ErrorCode> Client::BatchReplicaClear(
-    const std::vector<std::string>& object_keys, const UUID& client_id,
-    const std::string& segment_name) {
+tl::expected<std::vector<std::string>, ErrorCode>
+ClientService::BatchReplicaClear(const std::vector<std::string>& object_keys,
+                                 const UUID& client_id,
+                                 const std::string& segment_name) {
     auto result =
         master_client_.BatchReplicaClear(object_keys, client_id, segment_name);
     return result;
 }
 
-tl::expected<void, ErrorCode> Client::Get(const std::string& object_key,
-                                          const QueryResult& query_result,
-                                          std::vector<Slice>& slices) {
+tl::expected<void, ErrorCode> ClientService::Get(
+    const std::string& object_key, const QueryResult& query_result,
+    std::vector<Slice>& slices) {
     // Find the first complete replica
     Replica::Descriptor replica;
     ErrorCode err = FindFirstCompleteReplica(query_result.replicas, replica);
@@ -633,7 +635,8 @@ struct BatchGetOperation {
     std::vector<TransferFuture> futures;
 };
 
-std::vector<tl::expected<void, ErrorCode>> Client::BatchGetWhenPreferSameNode(
+std::vector<tl::expected<void, ErrorCode>>
+ClientService::BatchGetWhenPreferSameNode(
     const std::vector<std::string>& object_keys,
     const std::vector<QueryResult>& query_results,
     std::unordered_map<std::string, std::vector<Slice>>& slices) {
@@ -712,7 +715,7 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchGetWhenPreferSameNode(
     return results;
 }
 
-std::vector<tl::expected<void, ErrorCode>> Client::BatchGet(
+std::vector<tl::expected<void, ErrorCode>> ClientService::BatchGet(
     const std::vector<std::string>& object_keys,
     const std::vector<QueryResult>& query_results,
     std::unordered_map<std::string, std::vector<Slice>>& slices,
@@ -826,9 +829,9 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchGet(
     return results;
 }
 
-tl::expected<void, ErrorCode> Client::Put(const ObjectKey& key,
-                                          std::vector<Slice>& slices,
-                                          const ReplicateConfig& config) {
+tl::expected<void, ErrorCode> ClientService::Put(
+    const ObjectKey& key, std::vector<Slice>& slices,
+    const ReplicateConfig& config) {
     // Prepare slice lengths
     std::vector<size_t> slice_lengths;
     for (size_t i = 0; i < slices.size(); ++i) {
@@ -969,7 +972,7 @@ class PutOperation {
     }
 };
 
-std::vector<PutOperation> Client::CreatePutOperations(
+std::vector<PutOperation> ClientService::CreatePutOperations(
     const std::vector<ObjectKey>& keys,
     const std::vector<std::vector<Slice>>& batched_slices) {
     std::vector<PutOperation> ops;
@@ -980,8 +983,8 @@ std::vector<PutOperation> Client::CreatePutOperations(
     return ops;
 }
 
-void Client::StartBatchPut(std::vector<PutOperation>& ops,
-                           const ReplicateConfig& config) {
+void ClientService::StartBatchPut(std::vector<PutOperation>& ops,
+                                  const ReplicateConfig& config) {
     std::vector<std::string> keys;
     std::vector<std::vector<uint64_t>> slice_lengths;
 
@@ -1028,7 +1031,7 @@ void Client::StartBatchPut(std::vector<PutOperation>& ops,
     }
 }
 
-void Client::SubmitTransfers(std::vector<PutOperation>& ops) {
+void ClientService::SubmitTransfers(std::vector<PutOperation>& ops) {
     if (!transfer_submitter_) {
         LOG(ERROR) << "TransferSubmitter not initialized";
         for (auto& op : ops) {
@@ -1099,7 +1102,7 @@ void Client::SubmitTransfers(std::vector<PutOperation>& ops) {
     }
 }
 
-void Client::WaitForTransfers(std::vector<PutOperation>& ops) {
+void ClientService::WaitForTransfers(std::vector<PutOperation>& ops) {
     for (auto& op : ops) {
         // Skip operations that already failed or completed
         if (op.IsResolved()) {
@@ -1145,7 +1148,7 @@ void Client::WaitForTransfers(std::vector<PutOperation>& ops) {
     }
 }
 
-void Client::FinalizeBatchPut(std::vector<PutOperation>& ops) {
+void ClientService::FinalizeBatchPut(std::vector<PutOperation>& ops) {
     // For each operation,
     // If transfers completed successfully, we need to call BatchPutEnd
     // If the operation failed but has allocated replicas, we need to call
@@ -1257,7 +1260,7 @@ void Client::FinalizeBatchPut(std::vector<PutOperation>& ops) {
     }
 }
 
-std::vector<tl::expected<void, ErrorCode>> Client::CollectResults(
+std::vector<tl::expected<void, ErrorCode>> ClientService::CollectResults(
     const std::vector<PutOperation>& ops) {
     std::vector<tl::expected<void, ErrorCode>> results;
     results.reserve(ops.size());
@@ -1296,8 +1299,8 @@ std::vector<tl::expected<void, ErrorCode>> Client::CollectResults(
     return results;
 }
 
-std::vector<tl::expected<void, ErrorCode>> Client::BatchPutWhenPreferSameNode(
-    std::vector<PutOperation>& ops) {
+std::vector<tl::expected<void, ErrorCode>>
+ClientService::BatchPutWhenPreferSameNode(std::vector<PutOperation>& ops) {
     auto t0 = std::chrono::steady_clock::now();
     std::unordered_map<std::string, PutOperation> seg_to_ops{};
     for (auto& op : ops) {
@@ -1386,7 +1389,7 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchPutWhenPreferSameNode(
     return CollectResults(ops);
 }
 
-std::vector<tl::expected<void, ErrorCode>> Client::BatchPut(
+std::vector<tl::expected<void, ErrorCode>> ClientService::BatchPut(
     const std::vector<ObjectKey>& keys,
     std::vector<std::vector<Slice>>& batched_slices,
     const ReplicateConfig& config) {
@@ -1417,7 +1420,7 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchPut(
     return CollectResults(ops);
 }
 
-tl::expected<void, ErrorCode> Client::Remove(const ObjectKey& key) {
+tl::expected<void, ErrorCode> ClientService::Remove(const ObjectKey& key) {
     auto result = master_client_.Remove(key);
     // if (storage_backend_) {
     //     storage_backend_->RemoveFile(key);
@@ -1428,7 +1431,8 @@ tl::expected<void, ErrorCode> Client::Remove(const ObjectKey& key) {
     return {};
 }
 
-tl::expected<long, ErrorCode> Client::RemoveByRegex(const ObjectKey& str) {
+tl::expected<long, ErrorCode> ClientService::RemoveByRegex(
+    const ObjectKey& str) {
     auto result = master_client_.RemoveByRegex(str);
     // if (storage_backend_) {
     //     storage_backend_->RemoveByRegex(str);
@@ -1439,15 +1443,15 @@ tl::expected<long, ErrorCode> Client::RemoveByRegex(const ObjectKey& str) {
     return result.value();
 }
 
-tl::expected<long, ErrorCode> Client::RemoveAll() {
+tl::expected<long, ErrorCode> ClientService::RemoveAll() {
     // if (storage_backend_) {
     //     storage_backend_->RemoveAll();
     // }
     return master_client_.RemoveAll();
 }
 
-tl::expected<void, ErrorCode> Client::MountSegment(const void* buffer,
-                                                   size_t size) {
+tl::expected<void, ErrorCode> ClientService::MountSegment(const void* buffer,
+                                                          size_t size) {
     auto check_result = CheckRegisterMemoryParams(buffer, size);
     if (!check_result) {
         return tl::unexpected(check_result.error());
@@ -1513,8 +1517,8 @@ tl::expected<void, ErrorCode> Client::MountSegment(const void* buffer,
     return {};
 }
 
-tl::expected<void, ErrorCode> Client::UnmountSegment(const void* buffer,
-                                                     size_t size) {
+tl::expected<void, ErrorCode> ClientService::UnmountSegment(const void* buffer,
+                                                            size_t size) {
     std::lock_guard<std::mutex> lock(mounted_segments_mutex_);
     auto segment = mounted_segments_.end();
 
@@ -1562,7 +1566,7 @@ tl::expected<void, ErrorCode> Client::UnmountSegment(const void* buffer,
     return {};
 }
 
-tl::expected<void, ErrorCode> Client::RegisterLocalMemory(
+tl::expected<void, ErrorCode> ClientService::RegisterLocalMemory(
     void* addr, size_t length, const std::string& location,
     bool remote_accessible, bool update_metadata) {
     auto check_result = CheckRegisterMemoryParams(addr, length);
@@ -1576,7 +1580,7 @@ tl::expected<void, ErrorCode> Client::RegisterLocalMemory(
     return {};
 }
 
-tl::expected<void, ErrorCode> Client::unregisterLocalMemory(
+tl::expected<void, ErrorCode> ClientService::unregisterLocalMemory(
     void* addr, bool update_metadata) {
     if (this->transfer_engine_->unregisterLocalMemory(addr, update_metadata) !=
         0) {
@@ -1585,12 +1589,12 @@ tl::expected<void, ErrorCode> Client::unregisterLocalMemory(
     return {};
 }
 
-tl::expected<bool, ErrorCode> Client::IsExist(const std::string& key) {
+tl::expected<bool, ErrorCode> ClientService::IsExist(const std::string& key) {
     auto result = master_client_.ExistKey(key);
     return result;
 }
 
-std::vector<tl::expected<bool, ErrorCode>> Client::BatchIsExist(
+std::vector<tl::expected<bool, ErrorCode>> ClientService::BatchIsExist(
     const std::vector<std::string>& keys) {
     auto response = master_client_.BatchExistKey(keys);
 
@@ -1612,7 +1616,7 @@ std::vector<tl::expected<bool, ErrorCode>> Client::BatchIsExist(
     return response;
 }
 
-tl::expected<void, ErrorCode> Client::MountLocalDiskSegment(
+tl::expected<void, ErrorCode> ClientService::MountLocalDiskSegment(
     bool enable_offloading) {
     auto response =
         master_client_.MountLocalDiskSegment(client_id_, enable_offloading);
@@ -1624,7 +1628,7 @@ tl::expected<void, ErrorCode> Client::MountLocalDiskSegment(
     return response;
 }
 
-tl::expected<void, ErrorCode> Client::OffloadObjectHeartbeat(
+tl::expected<void, ErrorCode> ClientService::OffloadObjectHeartbeat(
     bool enable_offloading,
     std::unordered_map<std::string, int64_t>& offloading_objects) {
     auto response =
@@ -1638,7 +1642,7 @@ tl::expected<void, ErrorCode> Client::OffloadObjectHeartbeat(
     return {};
 }
 
-tl::expected<void, ErrorCode> Client::BatchPutOffloadObject(
+tl::expected<void, ErrorCode> ClientService::BatchPutOffloadObject(
     const std::string& transfer_engine_addr,
     const std::vector<std::string>& keys,
     const std::vector<uintptr_t>& pointers,
@@ -1646,7 +1650,7 @@ tl::expected<void, ErrorCode> Client::BatchPutOffloadObject(
     return {};
 }
 
-tl::expected<void, ErrorCode> Client::NotifyOffloadSuccess(
+tl::expected<void, ErrorCode> ClientService::NotifyOffloadSuccess(
     const std::vector<std::string>& keys,
     const std::vector<StorageObjectMetadata>& metadatas) {
     auto response =
@@ -1654,9 +1658,10 @@ tl::expected<void, ErrorCode> Client::NotifyOffloadSuccess(
     return response;
 }
 
-void Client::PrepareStorageBackend(const std::string& storage_root_dir,
-                                   const std::string& fsdir,
-                                   bool enable_eviction, uint64_t quota_bytes) {
+void ClientService::PrepareStorageBackend(const std::string& storage_root_dir,
+                                          const std::string& fsdir,
+                                          bool enable_eviction,
+                                          uint64_t quota_bytes) {
     // Initialize storage backend
     storage_backend_ =
         StorageBackend::Create(storage_root_dir, fsdir, enable_eviction);
@@ -1670,9 +1675,9 @@ void Client::PrepareStorageBackend(const std::string& storage_root_dir,
     }
 }
 
-void Client::PutToLocalFile(const std::string& key,
-                            const std::vector<Slice>& slices,
-                            const DiskDescriptor& disk_descriptor) {
+void ClientService::PutToLocalFile(const std::string& key,
+                                   const std::vector<Slice>& slices,
+                                   const DiskDescriptor& disk_descriptor) {
     if (!storage_backend_) return;
 
     size_t total_size = 0;
@@ -1718,9 +1723,9 @@ void Client::PutToLocalFile(const std::string& key,
     });
 }
 
-ErrorCode Client::TransferData(const Replica::Descriptor& replica_descriptor,
-                               std::vector<Slice>& slices,
-                               TransferRequest::OpCode op_code) {
+ErrorCode ClientService::TransferData(
+    const Replica::Descriptor& replica_descriptor, std::vector<Slice>& slices,
+    TransferRequest::OpCode op_code) {
     if (!transfer_submitter_) {
         LOG(ERROR) << "TransferSubmitter not initialized";
         return ErrorCode::INVALID_PARAMS;
@@ -1738,13 +1743,13 @@ ErrorCode Client::TransferData(const Replica::Descriptor& replica_descriptor,
     return future->get();
 }
 
-ErrorCode Client::TransferWrite(const Replica::Descriptor& replica_descriptor,
-                                std::vector<Slice>& slices) {
+ErrorCode ClientService::TransferWrite(
+    const Replica::Descriptor& replica_descriptor, std::vector<Slice>& slices) {
     return TransferData(replica_descriptor, slices, TransferRequest::WRITE);
 }
 
-ErrorCode Client::TransferRead(const Replica::Descriptor& replica_descriptor,
-                               std::vector<Slice>& slices) {
+ErrorCode ClientService::TransferRead(
+    const Replica::Descriptor& replica_descriptor, std::vector<Slice>& slices) {
     size_t total_size = 0;
     if (replica_descriptor.is_memory_replica()) {
         auto& mem_desc = replica_descriptor.get_memory_descriptor();
@@ -1764,8 +1769,8 @@ ErrorCode Client::TransferRead(const Replica::Descriptor& replica_descriptor,
     return TransferData(replica_descriptor, slices, TransferRequest::READ);
 }
 
-void Client::HeartbeatThreadMain(bool is_ha_mode,
-                                 std::string current_master_address) {
+void ClientService::HeartbeatThreadMain(bool is_ha_mode,
+                                        std::string current_master_address) {
     // How many failed heartbeats before getting latest master view from etcd
     const int max_heartbeat_fail_count = 3;
     // How long to wait for next heartbeat after success
@@ -1883,7 +1888,7 @@ void Client::HeartbeatThreadMain(bool is_ha_mode,
     }
 }
 
-ErrorCode Client::FindFirstCompleteReplica(
+ErrorCode ClientService::FindFirstCompleteReplica(
     const std::vector<Replica::Descriptor>& replica_list,
     Replica::Descriptor& replica) {
     // Find the first complete replica

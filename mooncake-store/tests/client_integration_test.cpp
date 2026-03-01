@@ -82,14 +82,15 @@ class ClientIdCaptureSink : public google::LogSink {
 
 class ClientIntegrationTest : public ::testing::Test {
    protected:
-    static std::shared_ptr<Client> CreateClient(const std::string& host_name) {
-        auto client_opt =
-            Client::Create(host_name,       // Local hostname
-                           "P2PHANDSHAKE",  // Metadata connection string
-                           FLAGS_protocol,  // Transfer protocol
-                           std::nullopt,  // RDMA device names (auto-discovery)
-                           master_address_  // Master server address (non-HA)
-            );
+    static std::shared_ptr<ClientService> CreateClient(
+        const std::string& host_name) {
+        auto client_opt = ClientService::Create(
+            host_name,       // Local hostname
+            "P2PHANDSHAKE",  // Metadata connection string
+            FLAGS_protocol,  // Transfer protocol
+            std::nullopt,    // RDMA device names (auto-discovery)
+            master_address_  // Master server address (non-HA)
+        );
 
         EXPECT_TRUE(client_opt.has_value())
             << "Failed to create client with host_name: " << host_name;
@@ -256,8 +257,8 @@ class ClientIntegrationTest : public ::testing::Test {
         }
     }
 
-    static std::shared_ptr<Client> test_client_;
-    static std::shared_ptr<Client> segment_provider_client_;
+    static std::shared_ptr<ClientService> test_client_;
+    static std::shared_ptr<ClientService> segment_provider_client_;
     // Here we use a simple allocator for the client buffer. In a real
     // application, user should manage the memory allocation and deallocation
     // themselves.
@@ -275,8 +276,8 @@ class ClientIntegrationTest : public ::testing::Test {
 };
 
 // Static members initialization
-std::shared_ptr<Client> ClientIntegrationTest::test_client_ = nullptr;
-std::shared_ptr<Client> ClientIntegrationTest::segment_provider_client_ =
+std::shared_ptr<ClientService> ClientIntegrationTest::test_client_ = nullptr;
+std::shared_ptr<ClientService> ClientIntegrationTest::segment_provider_client_ =
     nullptr;
 void* ClientIntegrationTest::segment_ptr_ = nullptr;
 void* ClientIntegrationTest::test_client_segment_ptr_ = nullptr;

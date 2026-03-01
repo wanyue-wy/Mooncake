@@ -57,12 +57,12 @@ class QueryResult {
 /**
  * @brief Client for interacting with the mooncake distributed object store
  */
-class Client {
+class ClientService {
    public:
-    ~Client();
+    ~ClientService();
 
     /**
-     * @brief Creates and initializes a new Client instance
+     * @brief Creates and initializes a new ClientService instance
      * @param local_hostname Local host address (IP:Port)
      * @param metadata_connstring Connection string for metadata service
      * @param protocol Transfer protocol ("rdma" or "tcp")
@@ -72,10 +72,10 @@ class Client {
      * @param master_server_entry The entry of master server (IP:Port of master
      *        address for non-HA mode, etcd://IP:Port;IP:Port;...;IP:Port for
      *        HA mode)
-     * @return std::optional containing a shared_ptr to Client if successful,
-     * std::nullopt otherwise
+     * @return std::optional containing a shared_ptr to ClientService if
+     * successful, std::nullopt otherwise
      */
-    static std::optional<std::shared_ptr<Client>> Create(
+    static std::optional<std::shared_ptr<ClientService>> Create(
         const std::string& local_hostname,
         const std::string& metadata_connstring, const std::string& protocol,
         const std::optional<std::string>& device_names = std::nullopt,
@@ -358,9 +358,9 @@ class Client {
     /**
      * @brief Private constructor to enforce creation through Create() method
      */
-    Client(const std::string& local_hostname,
-           const std::string& metadata_connstring,
-           const std::map<std::string, std::string>& labels = {});
+    ClientService(const std::string& local_hostname,
+                  const std::string& metadata_connstring,
+                  const std::map<std::string, std::string>& labels = {});
 
     /**
      * @brief Internal helper functions for initialization and data transfer
