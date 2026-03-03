@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "allocator.h"
-#include "client_service.h"
+#include "centralized_client_service.h"
 #include "types.h"
 #include "utils.h"
 
@@ -41,7 +41,7 @@ namespace mooncake {
 namespace benchmark {
 
 // Global client and allocator instances
-std::shared_ptr<ClientService> g_client = nullptr;
+std::shared_ptr<CentralizedClientService> g_client = nullptr;
 std::unique_ptr<SimpleAllocator> g_client_buffer_allocator = nullptr;
 void* g_segment_ptr = nullptr;
 size_t g_ram_buffer_size = 0;
@@ -94,10 +94,10 @@ void cleanup_segment() {
 }
 
 bool initialize_client() {
-    auto client_opt = ClientService::Create(
-        FLAGS_local_hostname,              // Local hostname
-        FLAGS_metadata_connection_string,  // Metadata connection string
-        FLAGS_protocol, FLAGS_master_address);
+    auto config = ClientConfigBuilder::build_centralized_real_client(
+        FLAGS_local_hostname, FLAGS_metadata_connection_string, FLAGS_protocol,
+        std::nullopt, FLAGS_master_address);
+    auto client_opt = ClientService::Create(config);
 
     if (!client_opt.has_value()) {
         LOG(ERROR) << "Failed to create client";
@@ -106,7 +106,8 @@ bool initialize_client() {
 
     LOG(INFO) << "Create client successfully";
 
-    g_client = *client_opt;
+    g_client =
+        std::dynamic_pointer_cast<CentralizedClientService>(client_opt.value());
 
     // Use gflags configuration for client buffer allocator size
     auto client_buffer_allocator_size =

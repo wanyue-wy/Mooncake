@@ -61,7 +61,8 @@ class DataManagerTest : public ::testing::Test {
         tiered_backend_ = std::make_unique<TieredBackend>();
         // transfer_engine_ is nullptr when initializing tiered_backend_
         // only for local access test
-        auto init_result = tiered_backend_->Init(config, nullptr, nullptr);
+        auto init_result =
+            tiered_backend_->Init(config, nullptr, nullptr, nullptr, nullptr);
         ASSERT_TRUE(init_result.has_value())
             << "Failed to initialize TieredBackend: " << init_result.error();
 
@@ -482,7 +483,7 @@ TEST_F(DataManagerTest, MultipleScatterGatherBuffers) {
     // Verify all parameters are valid (no empty segment names, non-zero sizes,
     // valid addresses)
     for (const auto& buf : multi_segment_buffers) {
-        EXPECT_FALSE(buf.segment_name.empty());
+        EXPECT_FALSE(buf.segment_endpoint.empty());
         EXPECT_GT(buf.size, 0);
         EXPECT_NE(buf.addr, 0);
     }
@@ -1399,8 +1400,8 @@ TEST_F(DataManagerTest, RealRDMALoopbackTransfer) {
     auto rdma_tiered_backend = std::make_unique<TieredBackend>();
     // Pass TransferEngine to TieredBackend so DRAM memory gets registered for
     // RDMA
-    auto init_backend_result =
-        rdma_tiered_backend->Init(config, rdma_transfer_engine.get(), nullptr);
+    auto init_backend_result = rdma_tiered_backend->Init(
+        config, rdma_transfer_engine.get(), nullptr, nullptr, nullptr);
     ASSERT_TRUE(init_backend_result.has_value())
         << "Failed to initialize TieredBackend";
 
@@ -1562,8 +1563,8 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchTransfer) {
     auto rdma_tiered_backend = std::make_unique<TieredBackend>();
     // Pass TransferEngine to TieredBackend so DRAM memory gets registered for
     // RDMA
-    auto init_backend_result =
-        rdma_tiered_backend->Init(config, rdma_transfer_engine.get(), nullptr);
+    auto init_backend_result = rdma_tiered_backend->Init(
+        config, rdma_transfer_engine.get(), nullptr, nullptr, nullptr);
     ASSERT_TRUE(init_backend_result.has_value())
         << "Failed to initialize TieredBackend";
 
@@ -1753,8 +1754,8 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchPartialFailure) {
     ASSERT_TRUE(parseJsonString(json_config_str, config));
 
     auto rdma_tiered_backend = std::make_unique<TieredBackend>();
-    auto init_backend_result =
-        rdma_tiered_backend->Init(config, rdma_transfer_engine.get(), nullptr);
+    auto init_backend_result = rdma_tiered_backend->Init(
+        config, rdma_transfer_engine.get(), nullptr, nullptr, nullptr);
     ASSERT_TRUE(init_backend_result.has_value())
         << "Failed to initialize TieredBackend";
 
@@ -1899,8 +1900,8 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteData) {
     ASSERT_TRUE(parseJsonString(json_config_str, config));
 
     auto rdma_tiered_backend = std::make_unique<TieredBackend>();
-    auto init_backend_result =
-        rdma_tiered_backend->Init(config, rdma_transfer_engine.get(), nullptr);
+    auto init_backend_result = rdma_tiered_backend->Init(
+        config, rdma_transfer_engine.get(), nullptr, nullptr, nullptr);
     ASSERT_TRUE(init_backend_result.has_value())
         << "Failed to initialize TieredBackend";
 
@@ -2062,8 +2063,8 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteDataPartialFailure) {
     ASSERT_TRUE(parseJsonString(json_config_str, config));
 
     auto rdma_tiered_backend = std::make_unique<TieredBackend>();
-    auto init_backend_result =
-        rdma_tiered_backend->Init(config, rdma_transfer_engine.get(), nullptr);
+    auto init_backend_result = rdma_tiered_backend->Init(
+        config, rdma_transfer_engine.get(), nullptr, nullptr, nullptr);
     ASSERT_TRUE(init_backend_result.has_value())
         << "Failed to initialize TieredBackend";
 

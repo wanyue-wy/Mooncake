@@ -186,9 +186,26 @@ inline std::ostream& operator<<(std::ostream& os,
 }
 
 enum class DeploymentMode {
+    UNKNOWN = -1,
     CENTRALIZATION = 0,
     P2P,
 };
+
+inline std::ostream& operator<<(std::ostream& os,
+                                const DeploymentMode& mode) noexcept {
+    switch (mode) {
+        case DeploymentMode::CENTRALIZATION:
+            os << "CENTRALIZATION";
+            break;
+        case DeploymentMode::P2P:
+            os << "P2P";
+            break;
+        default:
+            os << "UNKNOWN";
+            break;
+    }
+    return os;
+}
 
 /**
  * @brief Represents a contiguous memory region

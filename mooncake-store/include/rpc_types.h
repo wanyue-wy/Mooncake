@@ -108,8 +108,10 @@ struct RegisterClientRequest {
     // P2P only: network endpoint info
     std::optional<std::string> ip_address;
     std::optional<uint16_t> rpc_port;
+    DeploymentMode deployment_mode = DeploymentMode::CENTRALIZATION;
 };
-YLT_REFL(RegisterClientRequest, client_id, segments, ip_address, rpc_port);
+YLT_REFL(RegisterClientRequest, client_id, segments, ip_address, rpc_port,
+         deployment_mode);
 
 /**
  * @brief Response structure for RegisterClient operation.

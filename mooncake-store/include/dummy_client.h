@@ -1,9 +1,10 @@
 #pragma once
 
+#include "client_config_builder.h"
+
 #include <ylt/coro_rpc/coro_rpc_client.hpp>
 
 #include "pyclient.h"
-#include "real_client.h"
 #include <memory>
 
 namespace mooncake {
@@ -52,101 +53,101 @@ class DummyClient : public PyClient {
 
     int64_t unregister_shm();
 
-    int setup_real(const std::string& local_hostname,
-                   const std::string& metadata_server,
-                   size_t global_segment_size, size_t local_buffer_size,
-                   const std::string& protocol, const std::string& rdma_devices,
-                   const std::string& master_server_addr,
-                   const std::shared_ptr<TransferEngine>& transfer_engine,
-                   const std::string& ipc_socket_path) {
-        // Dummy client does not support real setup
-        return -1;
-    };
-
-    int setup_dummy(size_t mem_pool_size, size_t local_buffer_size,
-                    const std::string& server_address,
-                    const std::string& ipc_socket_path);
+    int setup(DummyClientConfig& config);
 
     int initAll(const std::string& protocol, const std::string& device_name,
-                size_t mount_segment_size) {
+                size_t mount_segment_size) override {
         // Dummy client does not support real setup
         return -1;
     }
 
-    uint64_t alloc_from_mem_pool(size_t size);
+    uint64_t alloc_from_mem_pool(size_t size) override;
+
+    DeploymentMode deployment_mode() const override {
+        return DeploymentMode::UNKNOWN;
+    }
 
     int put(const std::string& key, std::span<const char> value,
-            const ReplicateConfig& config = ReplicateConfig{});
+            const WriteConfig& config) override;
 
-    int register_buffer(void* buffer, size_t size);
+    int register_buffer(void* buffer, size_t size) override;
 
-    int unregister_buffer(void* buffer);
+    int unregister_buffer(void* buffer) override;
 
-    int64_t get_into(const std::string& key, void* buffer, size_t size);
+    int64_t get_into(const std::string& key, void* buffer, size_t size,
+                     const GetReplicaListRequestConfig& config = {}) override;
 
-    std::vector<int64_t> batch_get_into(const std::vector<std::string>& keys,
-                                        const std::vector<void*>& buffers,
-                                        const std::vector<size_t>& sizes);
+    std::vector<int64_t> batch_get_into(
+        const std::vector<std::string>& keys, const std::vector<void*>& buffers,
+        const std::vector<size_t>& sizes,
+        const GetReplicaListRequestConfig& config = {}) override;
 
     std::vector<int> batch_get_into_multi_buffers(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
         const std::vector<std::vector<size_t>>& all_sizes,
-        bool prefer_same_node);
+        bool prefer_same_node,
+        const GetReplicaListRequestConfig& config = {}) override;
 
     int put_from(const std::string& key, void* buffer, size_t size,
-                 const ReplicateConfig& config = ReplicateConfig{});
+                 const WriteConfig& config) override;
 
-    int put_from_with_metadata(
-        const std::string& key, void* buffer, void* metadata_buffer,
-        size_t size, size_t metadata_size,
-        const ReplicateConfig& config = ReplicateConfig{});
+    int put_from_with_metadata(const std::string& key, void* buffer,
+                               void* metadata_buffer, size_t size,
+                               size_t metadata_size,
+                               const WriteConfig& config) override;
 
-    std::vector<int> batch_put_from(
-        const std::vector<std::string>& keys, const std::vector<void*>& buffers,
-        const std::vector<size_t>& sizes,
-        const ReplicateConfig& config = ReplicateConfig{});
+    std::vector<int> batch_put_from(const std::vector<std::string>& keys,
+                                    const std::vector<void*>& buffers,
+                                    const std::vector<size_t>& sizes,
+                                    const WriteConfig& config) override;
 
     std::vector<int> batch_put_from_multi_buffers(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
         const std::vector<std::vector<size_t>>& all_sizes,
-        const ReplicateConfig& config = ReplicateConfig{});
+        const WriteConfig& config) override;
 
-    std::shared_ptr<BufferHandle> get_buffer(const std::string& key);
+    std::shared_ptr<BufferHandle> get_buffer(
+        const std::string& key,
+        const GetReplicaListRequestConfig& config = {}) override;
 
-    std::tuple<uint64_t, size_t> get_buffer_info(const std::string& key);
+    std::tuple<uint64_t, size_t> get_buffer_info(
+        const std::string& key,
+        const GetReplicaListRequestConfig& config = {}) override;
 
     std::vector<std::shared_ptr<BufferHandle>> batch_get_buffer(
-        const std::vector<std::string>& keys);
+        const std::vector<std::string>& keys,
+        const GetReplicaListRequestConfig& config = {}) override;
 
     int put_parts(const std::string& key,
                   std::vector<std::span<const char>> values,
-                  const ReplicateConfig& config = ReplicateConfig{});
+                  const WriteConfig& config) override;
 
     int put_batch(const std::vector<std::string>& keys,
                   const std::vector<std::span<const char>>& values,
-                  const ReplicateConfig& config = ReplicateConfig{});
+                  const WriteConfig& config) override;
 
-    [[nodiscard]] std::string get_hostname() const;
+    [[nodiscard]] std::string get_hostname() const override;
 
-    int remove(const std::string& key);
+    int remove(const std::string& key) override;
 
-    long removeByRegex(const std::string& str);
+    long removeByRegex(const std::string& str) override;
 
-    long removeAll();
+    long removeAll() override;
 
-    int isExist(const std::string& key);
+    int isExist(const std::string& key) override;
 
-    std::vector<int> batchIsExist(const std::vector<std::string>& keys);
+    std::vector<int> batchIsExist(
+        const std::vector<std::string>& keys) override;
 
-    int64_t getSize(const std::string& key);
+    int64_t getSize(const std::string& key) override;
 
     std::map<std::string, std::vector<Replica::Descriptor>>
     batch_get_replica_desc(const std::vector<std::string>& keys);
     std::vector<Replica::Descriptor> get_replica_desc(const std::string& key);
 
-    int tearDownAll();
+    int tearDownAll() override;
 
    private:
     ErrorCode connect(const std::string& server_address);
