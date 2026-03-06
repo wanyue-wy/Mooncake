@@ -99,6 +99,7 @@ void ClientScheduler::Start() {
 
 void ClientScheduler::Stop() {
     running_ = false;
+    cv_.notify_all();  // Wake the worker thread immediately.
     if (worker_thread_.joinable()) {
         worker_thread_.join();
     }
@@ -131,8 +132,12 @@ bool ClientScheduler::OnAllocationFailure(UUID tier_id) {
 
 void ClientScheduler::WorkerLoop() {
     while (running_) {
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(loop_interval_ms_));
+        // Use condition_variable so Stop() can wake us immediately.
+        {
+            std::unique_lock<std::mutex> lk(cv_mutex_);
+            cv_.wait_for(lk, std::chrono::milliseconds(loop_interval_ms_),
+                         [this] { return !running_.load(); });
+        }
         if (!running_) break;
 
         // 1. Collect Stats
@@ -185,6 +190,7 @@ void ClientScheduler::ExecuteActions(const std::vector<SchedAction>& actions) {
 
     // Phase 1: Execute all EVICT actions
     for (const auto& action : actions) {
+        if (!running_) return;  // Fast exit on shutdown
         if (action.type == SchedAction::Type::EVICT) {
             if (!action.source_tier_id.has_value()) continue;
 
@@ -205,6 +211,7 @@ void ClientScheduler::ExecuteActions(const std::vector<SchedAction>& actions) {
     std::unordered_set<UUID> tiers_needing_eviction;
 
     for (const auto& action : actions) {
+        if (!running_) return;  // Fast exit on shutdown
         if (action.type == SchedAction::Type::MIGRATE) {
             // Check validity
             if (!action.source_tier_id.has_value() ||

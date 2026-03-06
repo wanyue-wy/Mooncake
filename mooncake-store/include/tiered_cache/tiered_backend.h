@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <vector>
 #include <memory>
@@ -107,6 +108,17 @@ class TieredBackend {
    public:
     TieredBackend();
     ~TieredBackend();
+
+    /**
+     * @brief 1. stops any backend thread;
+     *        2. all public APIs will return SHUTTING_DOWN.
+     */
+    void Stop();
+
+    /**
+     * @brief Unmounts segments from Master and cleans up resources.
+     */
+    void Destroy();
 
     tl::expected<void, ErrorCode> Init(
         Json::Value root, TransferEngine* engine,
@@ -249,6 +261,12 @@ class TieredBackend {
 
     // Scheduler
     std::unique_ptr<ClientScheduler> scheduler_;
+
+    // Shutdown flag — once set, all public APIs reject new requests.
+    std::atomic<bool> is_shutting_down_{false};
+
+    // Destroy flag
+    std::atomic<bool> is_destroyed_{false};
 };
 
 }  // namespace mooncake

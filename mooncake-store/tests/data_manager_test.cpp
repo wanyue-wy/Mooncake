@@ -215,8 +215,8 @@ TEST_F(DataManagerTest, GetKeyNotFound) {
     auto result = data_manager_->Get(key);
 
     ASSERT_FALSE(result.has_value());
-    // TieredBackend returns INVALID_KEY for not found keys
-    EXPECT_EQ(result.error(), ErrorCode::INVALID_KEY);
+    // TieredBackend returns OBJECT_NOT_FOUND for not found keys
+    EXPECT_EQ(result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 // Test Get with tier_id
@@ -261,7 +261,7 @@ TEST_F(DataManagerTest, DeleteSuccess) {
     // Verify it's deleted
     auto get_result = data_manager_->Get(key);
     ASSERT_FALSE(get_result.has_value());
-    EXPECT_EQ(get_result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(get_result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 // Test Delete operation - key not found
@@ -378,7 +378,7 @@ TEST_F(DataManagerTest, ReadRemoteDataKeyNotFound) {
     auto result = data_manager_->ReadRemoteData(key, dest_buffers);
 
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 // Test ReadRemoteData with empty buffers
@@ -1191,7 +1191,7 @@ TEST_F(DataManagerTest, HandleKeepsDataAliveAfterDelete) {
     // Verify key is no longer accessible via DataManager
     auto get_after_delete = data_manager_->Get(key);
     EXPECT_FALSE(get_after_delete.has_value());
-    EXPECT_EQ(get_after_delete.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(get_after_delete.error(), ErrorCode::OBJECT_NOT_FOUND);
 
     // But the handle we obtained earlier should still be valid!
     // This is because shared_ptr reference counting keeps the data alive
@@ -1235,7 +1235,7 @@ TEST_F(DataManagerTest, WriteRemoteDataAllBatchesFailedNoCommit) {
     // Verify key was NOT committed (should not exist)
     auto get_result = data_manager_->Get(key);
     EXPECT_FALSE(get_result.has_value());
-    EXPECT_EQ(get_result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(get_result.error(), ErrorCode::OBJECT_NOT_FOUND);
 
     LOG(INFO) << "WriteRemoteData all-failed test: key correctly not committed";
 }
@@ -2100,7 +2100,7 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteDataPartialFailure) {
     // Verify key was NOT committed (any segment failure should prevent commit)
     auto get_result = rdma_data_manager->Get(key);
     EXPECT_FALSE(get_result.has_value());
-    EXPECT_EQ(get_result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(get_result.error(), ErrorCode::OBJECT_NOT_FOUND);
 
     // Cleanup
     rdma_transfer_engine->unregisterLocalMemory(rdma_buffer);

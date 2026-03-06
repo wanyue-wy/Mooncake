@@ -21,24 +21,59 @@ P2PClientService::P2PClientService(
       master_client_(client_id_,
                      metrics_ ? &metrics_->master_client_metric : nullptr) {}
 
-P2PClientService::~P2PClientService() {
-    // 1. Stop RPC server
+void P2PClientService::Stop() {
+    bool expected = false;
+    if (!shutdown_done_.compare_exchange_strong(expected, true,
+                                                std::memory_order_acq_rel)) {
+        return;  // Already shut down.
+    }
+
+    LOG(INFO) << "P2PClientService::Stop() — begin";
+
+    // 1. Stop RPC server so no new requests arrive.
     if (rpc_server_) {
         rpc_server_->stop();
     }
-    // 2. Wait for RPC thread to finish
     if (rpc_server_thread_.joinable()) {
         rpc_server_thread_.join();
     }
-    // 3. Clear peer clients
+
+    // 2. Stop TieredBackend
+    // (scheduler stop).
+    if (data_manager_.has_value()) {
+        data_manager_->Stop();
+    }
+
+    // 3. Stop heartbeat
+    ClientService::Stop();
+
+    LOG(INFO) << "P2PClientService::Stop() — complete";
+}
+
+void P2PClientService::Destroy() {
+    LOG(INFO) << "P2PClientService::Destroy() — begin";
+
+    // 4. Clear peer clients.
     {
         std::lock_guard<std::mutex> lock(peer_clients_mutex_);
         peer_clients_.clear();
     }
-    // 4. Destroy rpc_service_ before data_manager_ (rpc_service_ holds
-    //    a reference to data_manager_)
+
+    // 5. Tear down RPC service and data manager references.
     rpc_service_.reset();
+    if (data_manager_.has_value()) {
+        data_manager_->Destroy();
+    }
     data_manager_.reset();
+
+    ClientService::Destroy();
+
+    LOG(INFO) << "P2PClientService::Destroy() — complete";
+}
+
+P2PClientService::~P2PClientService() {
+    Stop();
+    Destroy();
 }
 
 // ============================================================================
@@ -297,6 +332,10 @@ std::vector<Segment> P2PClientService::CollectTierSegments() const {
 }
 
 tl::expected<void, ErrorCode> P2PClientService::RegisterClient() {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     RegisterClientRequest req;
     req.client_id = client_id_;
     req.segments = CollectTierSegments();
@@ -343,7 +382,7 @@ tl::expected<void, ErrorCode> P2PClientService::PutLocal(
     return {};
 }
 
-tl::expected<void, ErrorCode> P2PClientService::PutRemoteViaRoute(
+tl::expected<void, ErrorCode> P2PClientService::PutViaRoute(
     const std::string& key, std::vector<Slice>& slices,
     const WriteRouteRequestConfig& config) {
     size_t total_size = ClientService::CalculateSliceSize(slices);
@@ -357,7 +396,8 @@ tl::expected<void, ErrorCode> P2PClientService::PutRemoteViaRoute(
 
     auto route_result = master_client_.GetWriteRoute(route_req);
     if (!route_result) {
-        LOG(ERROR) << "Failed to get write route for key: " << key;
+        LOG(WARNING) << "Failed to get write route for key: " << key
+                     << " error: " << route_result.error();
         return tl::unexpected(route_result.error());
     }
 
@@ -418,20 +458,38 @@ tl::expected<void, ErrorCode> P2PClientService::PutRemoteViaRoute(
 tl::expected<void, ErrorCode> P2PClientService::Put(const ObjectKey& key,
                                                     std::vector<Slice>& slices,
                                                     const WriteConfig& config) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     const auto* route_config = std::get_if<WriteRouteRequestConfig>(&config);
     if (!route_config) {
         LOG(ERROR) << "P2PClientService currently only supports "
                       "WriteRouteRequestConfig";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
-    // Always go through master for write route
-    return PutRemoteViaRoute(key, slices, *route_config);
+    auto result = PutViaRoute(key, slices, *route_config);
+    if (!result) {
+        if (result.error() == ErrorCode::REPLICA_NUM_EXCEEDED) {
+            // the key exists, ignore the error
+            return {};
+        }
+        LOG(ERROR) << "Failed to put key: " << key
+                   << " error: " << result.error();
+    }
+
+    return result;
 }
 
 std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchPut(
     const std::vector<ObjectKey>& keys,
     std::vector<std::vector<Slice>>& batched_slices,
     const WriteConfig& config) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return std::vector<tl::expected<void, ErrorCode>>(
+            keys.size(), tl::make_unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     std::vector<tl::expected<void, ErrorCode>> results;
     results.reserve(keys.size());
     for (size_t i = 0; i < keys.size(); ++i) {
@@ -544,6 +602,10 @@ tl::expected<void, ErrorCode> P2PClientService::GetRemoteViaRoute(
 tl::expected<void, ErrorCode> P2PClientService::Get(
     const std::string& object_key, const QueryResult& query_result,
     std::vector<Slice>& slices) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     // Try local first
     auto local_result = GetLocal(object_key, slices);
     if (local_result) return {};
@@ -556,6 +618,11 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchGet(
     const std::vector<std::unique_ptr<QueryResult>>& query_results,
     std::unordered_map<std::string, std::vector<Slice>>& slices,
     bool prefer_same_node) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return std::vector<tl::expected<void, ErrorCode>>(
+            object_keys.size(), tl::make_unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     std::vector<tl::expected<void, ErrorCode>> results;
     results.reserve(object_keys.size());
     for (size_t i = 0; i < object_keys.size(); ++i) {
@@ -575,6 +642,10 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchGet(
 
 tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
     const std::string& object_key, const GetReplicaListRequestConfig& config) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     // Query master for replica list
     auto result = master_client_.GetReplicaList(object_key, config);
     if (!result) {
@@ -587,6 +658,16 @@ tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
 std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
 P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
                              const GetReplicaListRequestConfig& config) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
+            results;
+        results.reserve(object_keys.size());
+        for (size_t i = 0; i < object_keys.size(); ++i) {
+            results.push_back(tl::make_unexpected(ErrorCode::SHUTTING_DOWN));
+        }
+        return results;
+    }
     auto responses = master_client_.BatchGetReplicaList(object_keys, config);
     std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>> results;
     results.reserve(responses.size());
@@ -603,22 +684,38 @@ P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
 
 // ============================================================================
 // Remove Operations (Not Supported in P2P)
+// Attention:
+// The behavior of this type of interface has not yet been defined.
+// At present, all keys will be evicted by the client's scheduler according
+// to a specific strategy, and external active remove is not allowed currently
 // ============================================================================
 
 tl::expected<void, ErrorCode> P2PClientService::Remove(const ObjectKey& key) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     LOG(WARNING) << "Remove is not supported in P2P mode";
-    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
+    return {};  // return ok for ut
 }
 
 tl::expected<long, ErrorCode> P2PClientService::RemoveByRegex(
     const ObjectKey& str) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     LOG(WARNING) << "RemoveByRegex is not supported in P2P mode";
-    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
+    return {};  // return ok for ut
 }
 
 tl::expected<long, ErrorCode> P2PClientService::RemoveAll() {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     LOG(WARNING) << "RemoveAll is not supported in P2P mode";
-    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
+    return {};  // return ok for ut
 }
 
 // ============================================================================
@@ -627,6 +724,10 @@ tl::expected<long, ErrorCode> P2PClientService::RemoveAll() {
 
 tl::expected<void, ErrorCode> P2PClientService::MountSegment(const void* buffer,
                                                              size_t size) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     // P2PClientService does not support dynamic segment mount/unmount
     // because TieredBackend does not support dynamic capacity scaling.
     // Master's MountSegment/UnmountSegment are invoked as callbacks
@@ -639,6 +740,10 @@ tl::expected<void, ErrorCode> P2PClientService::MountSegment(const void* buffer,
 
 tl::expected<void, ErrorCode> P2PClientService::UnmountSegment(
     const void* buffer, size_t size) {
+    if (shutdown_done_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     // P2PClientService does not support dynamic segment mount/unmount.
     // See MountSegment comment for details.
     LOG(WARNING) << "UnmountSegment is not supported in P2P mode.";

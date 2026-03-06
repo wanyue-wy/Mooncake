@@ -16,11 +16,11 @@ DEFINE_string(master_server_address, "127.0.0.1:50051",
 DEFINE_string(protocol, "tcp", "Protocol");
 DEFINE_int32(port, 50052, "Real Client service port");
 DEFINE_string(global_segment_size, "4 GB", "Size of global segment");
+DEFINE_int32(threads, 1, "Number of threads for client service");
+DEFINE_bool(enable_offload, false, "Enable offload availability");
 DEFINE_string(tiered_backend_config, "",
               "Tiered backend config json. Empty means load from env "
               "MOONCAKE_TIERED_CONFIG");
-DEFINE_int32(threads, 1, "Number of threads for client service");
-DEFINE_bool(enable_offload, false, "Enable offload availability");
 DEFINE_string(deployment_mode, "Centralization",
               "Client type: 'Centralization' or 'P2P'");
 DEFINE_uint32(client_rpc_port, 12345, "Client RPC service port (P2P mode)");
@@ -54,6 +54,10 @@ void RegisterClientRpcService(coro_rpc::coro_rpc_server& server,
 }  // namespace mooncake
 
 int main(int argc, char* argv[]) {
+    // Initialize ResourceTracker early to apply signal mask to the main thread
+    // before any other threads are spawned, avoiding signal handling races.
+    mooncake::ResourceTracker::getInstance();
+
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     // when separatly deploy real client,
     // local buffer is shared by dummy client,

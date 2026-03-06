@@ -50,6 +50,18 @@ class ClientService {
     virtual ~ClientService();
 
     /**
+     * @brief Graceful stop: stops accepting new requests, drains in-flight
+     * operations. Safe to call multiple times.
+     */
+    virtual void Stop();
+
+    /**
+     * @brief Release internal resources. Safe to call multiple times.
+     * Should be called AFTER Stop() and BEFORE the destructor.
+     */
+    virtual void Destroy();
+
+    /**
      * @brief Creates and initializes a new ClientService instance
      * @param config The start up configuration for the client service.
      * @return std::optional containing a shared_ptr to ClientService if

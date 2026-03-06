@@ -28,6 +28,16 @@ CentralizedClientService::CentralizedClientService(
       write_thread_pool_(2) {}
 
 CentralizedClientService::~CentralizedClientService() {
+    Stop();
+    Destroy();
+}
+
+void CentralizedClientService::Stop() {
+    // Stop heartbeat early so no more tasks are scheduled
+    ClientService::Stop();
+}
+
+void CentralizedClientService::Destroy() {
     // Make a copy of mounted_segments_ to avoid modifying while iterating
     std::vector<Segment> segments_to_unmount;
     {
@@ -57,6 +67,8 @@ CentralizedClientService::~CentralizedClientService() {
         std::lock_guard<std::mutex> lock(mounted_segments_mutex_);
         mounted_segments_.clear();
     }
+
+    ClientService::Destroy();
 }
 
 ErrorCode CentralizedClientService::init_client_service(

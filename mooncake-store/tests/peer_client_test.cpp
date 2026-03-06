@@ -177,7 +177,7 @@ TEST_F(PeerClientTest, ConnectSuccess) {
     // The RPC reaches the server but fails because the key doesn't exist.
     // The important thing is that we get a server-side error, not RPC_FAIL.
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 // ============================================================================
@@ -193,7 +193,7 @@ TEST_F(PeerClientTest, AsyncReadRemoteDataKeyNotFound) {
     auto result = async_simple::coro::syncAwait(
         peer_client_->AsyncReadRemoteData(request));
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 TEST_F(PeerClientTest, AsyncReadRemoteDataEmptyKey) {
@@ -360,7 +360,7 @@ TEST_F(PeerClientTest, SyncReadRemoteDataKeyNotFound) {
 
     auto result = peer_client_->ReadRemoteData(request);
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 TEST_F(PeerClientTest, SyncReadRemoteDataEmptyKey) {

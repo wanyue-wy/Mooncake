@@ -38,6 +38,24 @@ class DataManager {
                 std::shared_ptr<TransferEngine> transfer_engine);
 
     /**
+     * @brief Graceful stop: delegates to TieredBackend::Stop().
+     */
+    void Stop() {
+        if (tiered_backend_) {
+            tiered_backend_->Stop();
+        }
+    }
+
+    /**
+     * @brief Cleanup: delegates to TieredBackend::Destroy().
+     */
+    void Destroy() {
+        if (tiered_backend_) {
+            tiered_backend_->Destroy();
+        }
+    }
+
+    /**
      * @brief Put data locally into tiered storage
      * @param key Object key
      * @param data Source data buffer (takes ownership, zero-copy)

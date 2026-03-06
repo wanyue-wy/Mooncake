@@ -56,6 +56,7 @@ Replica::Descriptor Replica::get_descriptor() const {
         } else {
             proxy_desc.segment_id = proxy_data.segment->id;
         }
+        proxy_desc.object_size = proxy_data.object_size;
         desc.descriptor_variant = std::move(proxy_desc);
     }
 
@@ -96,6 +97,7 @@ std::ostream& operator<<(std::ostream& os, const Replica& replica) {
                           proxy_data.segment->GetP2PExtra().memory_type);
             }
         }
+        os << ", object_size: " << proxy_data.object_size;
     }
 
     os << " }";

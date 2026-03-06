@@ -318,7 +318,9 @@ class RealClient : public PyClient {
         uint64_t dummy_base_addr, const UUID& client_id);
 
     // Internal versions that return tl::expected
-    tl::expected<void, ErrorCode> service_ready_internal() { return {}; }
+    tl::expected<DeploymentMode, ErrorCode> service_ready_internal() {
+        return deployment_mode();
+    }
 
     template <typename ConfigT>
     tl::expected<void, ErrorCode> setup_internal(ConfigT& config);

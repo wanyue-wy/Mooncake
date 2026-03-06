@@ -58,10 +58,11 @@ ClientService::ClientService(const std::string& local_ip, uint16_t te_port,
 }
 
 ClientService::~ClientService() {
-    // Free global segment memory
-    segment_ptrs_.clear();
-    ascend_segment_ptrs_.clear();
+    Stop();
+    Destroy();
+}
 
+void ClientService::Stop() {
     // Stop ping thread only after no need to contact master anymore
     if (heartbeat_running_) {
         heartbeat_running_ = false;
@@ -69,6 +70,12 @@ ClientService::~ClientService() {
             heartbeat_thread_.join();
         }
     }
+}
+
+void ClientService::Destroy() {
+    // Free global segment memory
+    segment_ptrs_.clear();
+    ascend_segment_ptrs_.clear();
 }
 
 static std::optional<bool> get_auto_discover() {
@@ -269,7 +276,7 @@ ErrorCode ClientService::InitTransferEngine(
         Transport* transport = nullptr;
 
         if (protocol == "rdma") {
-            if (!device_names.has_value() || device_names->empty()) {
+            if (!device_names.has_value() || device_names.value().empty()) {
                 LOG(ERROR) << "RDMA protocol requires device names when auto "
                               "discovery is disabled";
                 return ErrorCode::INVALID_PARAMS;

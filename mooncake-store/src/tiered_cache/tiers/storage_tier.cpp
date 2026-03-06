@@ -18,11 +18,16 @@ StorageTier::~StorageTier() {
         flush_thread_.join();
     }
 
-    // Flush any pending data on destruction
-    if (pending_batch_size_.load() > 0) {
-        LOG(INFO) << "StorageTier dtor: Flushing " << pending_batch_.size()
-                  << " pending items.";
-        FlushInternal();
+    // Discard any pending data rather than blocking on I/O.
+    // As a cache, we can acceptd data loss.
+    {
+        std::unique_lock<std::mutex> lock(batch_mutex_);
+        if (!pending_batch_.empty()) {
+            LOG(INFO) << "StorageTier dtor: Discarding "
+                      << pending_batch_.size() << " pending items.";
+            pending_batch_.clear();
+            pending_batch_size_.store(0);
+        }
     }
 }
 

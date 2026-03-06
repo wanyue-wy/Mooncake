@@ -129,6 +129,14 @@ void ResourceTracker::startSignalThread() {
                     sigemptyset(&sa.sa_mask);
                     sa.sa_flags = 0;
                     sigaction(sig, &sa, nullptr);
+
+                    // Unblock the signal before raising it so it can be
+                    // delivered immediately
+                    sigset_t unblock_set;
+                    sigemptyset(&unblock_set);
+                    sigaddset(&unblock_set, sig);
+                    pthread_sigmask(SIG_UNBLOCK, &unblock_set, nullptr);
+
                     raise(sig);
 
                     break;  // Should not reach due to process termination
@@ -264,6 +272,9 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
         // Not initialized or already cleaned; treat as success for idempotence
         return {};
     }
+    // Gracefully stop accepting new requests and drain in-flight operations
+    client_service_->Stop();
+    client_service_->Destroy();
     // Reset all resources
     client_service_.reset();
     client_buffer_allocator_.reset();

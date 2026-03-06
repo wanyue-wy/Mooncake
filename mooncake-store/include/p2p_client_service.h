@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -26,6 +27,18 @@ class P2PClientService final : public ClientService {
                      const std::map<std::string, std::string>& labels = {});
 
     virtual ~P2PClientService();
+
+    /**
+     * @brief
+     * 1. Stops heartbeat, RPC server, and all background threads of submodules.
+     * 2. Rejects all incoming requests.
+     */
+    void Stop() override;
+
+    /**
+     * @brief Release internal resources.
+     */
+    void Destroy() override;
 
     /**
      * @brief Single put data for a key. Not implemented in P2P mode currently.
@@ -216,7 +229,7 @@ class P2PClientService final : public ClientService {
      * @brief Put data to a remote node via Master's write route.
      * Gets write route from Master, then uses PeerClient to write.
      */
-    tl::expected<void, ErrorCode> PutRemoteViaRoute(
+    tl::expected<void, ErrorCode> PutViaRoute(
         const std::string& key, std::vector<Slice>& slices,
         const WriteRouteRequestConfig& config);
 
@@ -251,6 +264,8 @@ class P2PClientService final : public ClientService {
     // Each PeerClient instance maintains its own fixed-size connection pool.
     std::mutex peer_clients_mutex_;
     std::map<std::string, std::unique_ptr<PeerClient>> peer_clients_;
+
+    std::atomic<bool> shutdown_done_{false};
 };
 
 }  // namespace mooncake

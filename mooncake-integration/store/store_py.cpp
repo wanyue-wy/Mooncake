@@ -1022,9 +1022,10 @@ PYBIND11_MODULE(store, m) {
                const std::string& master_server_addr = "127.0.0.1:50051",
                uint16_t client_rpc_port = 12345, uint32_t rpc_thread_num = 16,
                const py::object& engine = py::none()) {
+                auto& resource_tracker = ResourceTracker::getInstance();
                 self.use_dummy_client_ = false;
                 auto real_client = std::make_shared<RealClient>();
-                ResourceTracker::getInstance().registerInstance(
+                resource_tracker.registerInstance(
                     std::dynamic_pointer_cast<PyClient>(real_client));
                 std::shared_ptr<mooncake::TransferEngine> transfer_engine =
                     nullptr;
@@ -1062,9 +1063,10 @@ PYBIND11_MODULE(store, m) {
                const std::string& rdma_devices = "",
                const std::string& master_server_addr = "127.0.0.1:50051",
                const py::object& engine = py::none()) {
+                auto& resource_tracker = ResourceTracker::getInstance();
                 self.use_dummy_client_ = false;
                 auto real_client = std::make_shared<RealClient>();
-                ResourceTracker::getInstance().registerInstance(
+                resource_tracker.registerInstance(
                     std::dynamic_pointer_cast<PyClient>(real_client));
                 std::shared_ptr<mooncake::TransferEngine> transfer_engine =
                     nullptr;
@@ -1093,9 +1095,10 @@ PYBIND11_MODULE(store, m) {
             "setup_dummy",
             [](MooncakeStorePyWrapper& self, size_t mem_pool_size,
                size_t local_buffer_size, const std::string& server_address) {
+                auto& resource_tracker = ResourceTracker::getInstance();
                 self.use_dummy_client_ = true;
                 auto dummy_client = std::make_shared<DummyClient>();
-                ResourceTracker::getInstance().registerInstance(
+                resource_tracker.registerInstance(
                     std::dynamic_pointer_cast<PyClient>(dummy_client));
                 auto [ip, port] = parseHostNameWithPort(server_address);
                 auto config = ClientConfigBuilder::build_dummy(
@@ -1119,8 +1122,10 @@ PYBIND11_MODULE(store, m) {
                  py::gil_scoped_release release;
                  return self.store_->alloc_from_mem_pool(size);
              })
-        .def("get", &mooncake::MooncakeStorePyWrapper::get)
-        .def("get_batch", &mooncake::MooncakeStorePyWrapper::get_batch)
+        .def("get", &mooncake::MooncakeStorePyWrapper::get, py::arg("key"),
+             py::arg("config") = py::none())
+        .def("get_batch", &mooncake::MooncakeStorePyWrapper::get_batch,
+             py::arg("keys"), py::arg("config") = py::none())
         .def(
             "get_buffer",
             [](MooncakeStorePyWrapper& self, const std::string& key,
@@ -1186,6 +1191,7 @@ PYBIND11_MODULE(store, m) {
         .def("close",
              [](MooncakeStorePyWrapper& self) {
                  if (!self.store_) return 0;
+                 py::gil_scoped_release release;
                  int rc = self.store_->tearDownAll();
                  self.store_.reset();
                  return rc;

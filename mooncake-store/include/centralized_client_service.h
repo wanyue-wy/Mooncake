@@ -47,6 +47,9 @@ class CentralizedClientService
 
     ~CentralizedClientService() override;
 
+    void Stop() override;
+    void Destroy() override;
+
     tl::expected<std::unique_ptr<QueryResult>, ErrorCode> Query(
         const std::string& object_key,
         const GetReplicaListRequestConfig& config = {}) override;

@@ -262,11 +262,13 @@ ErrorCode DummyClient::connect(const std::string& server_address) {
     auto pool = client_accessor_.GetClientPool();
     // The client pool does not have native connection check method, so we need
     // to use custom ServiceReady API.
-    auto result = invoke_rpc<&RealClient::service_ready_internal, void>();
+    auto result =
+        invoke_rpc<&RealClient::service_ready_internal, DeploymentMode>();
     if (!result.has_value()) {
         timer.LogResponse("error_code=", result.error());
         return result.error();
     }
+    deployment_mode_ = result.value();
     timer.LogResponse("error_code=", ErrorCode::OK);
     connected_ = true;
     return ErrorCode::OK;

@@ -13,6 +13,7 @@ P2PMasterService::P2PMasterService(const MasterServiceConfig& config)
         config.client_live_ttl_sec, config.client_crashed_ttl_sec,
         config.view_version);
     InitializeClientManager();
+    client_manager_->Start();
 }
 
 std::vector<Replica::Descriptor> P2PMasterService::FilterReplicas(
@@ -162,8 +163,9 @@ auto P2PMasterService::AddReplica(const AddReplicaRequest& req)
     }
 
     // Construct Replica from resolved pointers
-    Replica new_replica(P2PProxyReplicaData(client, segment_res.value()),
-                        ReplicaStatus::COMPLETE);
+    Replica new_replica(
+        P2PProxyReplicaData(client, segment_res.value(), req.size),
+        ReplicaStatus::COMPLETE);
 
     if (accessor->Exists()) {
         auto& metadata = accessor->Get();

@@ -720,7 +720,7 @@ TEST_F(TieredBackendTest, GetNonExistentKey) {
     auto get_result = backend.Get("non_existent_key");
     EXPECT_FALSE(get_result.has_value())
         << "Get should fail for non-existent key";
-    EXPECT_EQ(get_result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(get_result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 // Test get from specified tier
@@ -977,7 +977,7 @@ TEST_F(TieredBackendTest, DeleteAllReplicas) {
     // Should not be able to get from any tier
     auto get_result = backend.Get("delete_all_key");
     EXPECT_FALSE(get_result.has_value());
-    EXPECT_EQ(get_result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(get_result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 // Test delete non-existent key
@@ -1003,7 +1003,7 @@ TEST_F(TieredBackendTest, DeleteNonExistentKey) {
     auto delete_result = backend.Delete("non_existent_key");
     EXPECT_FALSE(delete_result.has_value())
         << "Delete should fail for non-existent key";
-    EXPECT_EQ(delete_result.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(delete_result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 // ============================================================================
@@ -1062,7 +1062,7 @@ TEST_F(TieredBackendTest, CompleteDataLifecycle) {
     // 6. Verify deleted
     auto get_after_delete = backend.Get(key);
     EXPECT_FALSE(get_after_delete.has_value());
-    EXPECT_EQ(get_after_delete.error(), ErrorCode::INVALID_KEY);
+    EXPECT_EQ(get_after_delete.error(), ErrorCode::OBJECT_NOT_FOUND);
 }
 
 // Test multi-tier data management

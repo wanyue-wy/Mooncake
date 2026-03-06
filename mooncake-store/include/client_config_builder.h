@@ -228,9 +228,32 @@ class ClientConfigBuilder {
         const std::shared_ptr<TransferEngine>& transfer_engine,
         const std::string& ipc_socket_path,
         const std::map<std::string, std::string>& labels) {
-        auto res = parseHostNameWithPort(local_hostname);
-        config.local_ip = res.first;
-        config.te_port = res.second;
+        // Parse local_hostname into IP and optional port.
+        // Only set te_port when the user explicitly provides a port;
+        // otherwise keep the default value (0 = randomly assigned).
+        auto bracket_pos = local_hostname.find(']');
+        if (bracket_pos != std::string::npos) {
+            // Bracketed IPv6, e.g. "[2001:db8::1]" or "[2001:db8::1]:1234"
+            config.local_ip = local_hostname.substr(1, bracket_pos - 1);
+            auto colon_after = local_hostname.find(':', bracket_pos);
+            if (colon_after != std::string::npos) {
+                config.te_port = getPortFromString(
+                    local_hostname.substr(colon_after + 1), 0);
+            }
+        } else if (isValidIpV6(local_hostname)) {
+            // Raw IPv6 without brackets, no way to specify port
+            config.local_ip = local_hostname;
+        } else {
+            // IPv4 or hostname, optionally with port
+            auto colon_pos = local_hostname.rfind(':');
+            if (colon_pos != std::string::npos) {
+                config.local_ip = local_hostname.substr(0, colon_pos);
+                config.te_port =
+                    getPortFromString(local_hostname.substr(colon_pos + 1), 0);
+            } else {
+                config.local_ip = local_hostname;
+            }
+        }
         config.metadata_connstring = metadata_connstring;
         config.protocol = protocol;
         config.rdma_devices = rdma_devices;

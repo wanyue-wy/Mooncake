@@ -63,9 +63,7 @@ class DummyClient : public PyClient {
 
     uint64_t alloc_from_mem_pool(size_t size) override;
 
-    DeploymentMode deployment_mode() const override {
-        return DeploymentMode::UNKNOWN;
-    }
+    DeploymentMode deployment_mode() const override { return deployment_mode_; }
 
     int put(const std::string& key, std::span<const char> value,
             const WriteConfig& config) override;
@@ -217,6 +215,8 @@ class DummyClient : public PyClient {
     mutable Mutex connect_mutex_;
     // The address which is passed to the coro_rpc_client
     std::string client_addr_param_ GUARDED_BY(connect_mutex_);
+
+    DeploymentMode deployment_mode_ = DeploymentMode::UNKNOWN;
 
     // For shared memory management
     ShmHelper* shm_helper_ = nullptr;
