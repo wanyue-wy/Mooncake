@@ -464,6 +464,9 @@ class Replica {
             }
             throw std::runtime_error("Expected P2PProxyDescriptor");
         }
+
+        friend std::ostream& operator<<(std::ostream& os,
+                                        const Descriptor& desc);
     };
 
    private:
