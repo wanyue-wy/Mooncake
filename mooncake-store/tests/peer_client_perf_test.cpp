@@ -592,7 +592,7 @@ class PeerClientRdmaPerfTest : public ::testing::Test {
     void PopulateKey(const std::string& key, size_t data_size) {
         auto data = std::make_unique<char[]>(data_size);
         std::memset(data.get(), 'A', data_size);
-        auto rc = data_manager_->Put(key, std::move(data), data_size);
+        auto rc = data_manager_->Put(key, {data.get(), data_size});
         ASSERT_TRUE(rc.has_value()) << "PopulateKey failed for " << key;
     }
 
