@@ -19,7 +19,7 @@ StorageTier::~StorageTier() {
     }
 
     // Discard any pending data rather than blocking on I/O.
-    // As a cache, we can acceptd data loss.
+    // As a cache, we can tolerate data loss.
     {
         std::unique_lock<std::mutex> lock(batch_mutex_);
         if (!pending_batch_.empty()) {

@@ -43,7 +43,7 @@ class P2PClientService final : public ClientService {
     void Destroy() override;
 
     /**
-     * @brief Single put data for a key. Not implemented in P2P mode currently.
+     * @brief Single put data for a key.
      * @param key The object key.
      * @param slices Data slices.
      * @param config Replicate configuration.
@@ -54,7 +54,7 @@ class P2PClientService final : public ClientService {
                                       const WriteConfig& config) override;
 
     /**
-     * @brief Batch put data for multiple keys. Not implemented in P2P mode
+     * @brief Batch put data for multiple keys.
      * currently.
      * @param keys The list of object keys.
      * @param batched_slices The list of data slices for each key.

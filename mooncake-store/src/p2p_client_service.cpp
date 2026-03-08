@@ -361,7 +361,8 @@ tl::expected<void, ErrorCode> P2PClientService::PutLocal(
     }
 
     auto result = data_manager_->Put(key, slices[0]);
-    if (!result) {
+    if (!result && result.error() != ErrorCode::REPLICA_NUM_EXCEEDED &&
+        result.error() != ErrorCode::REPLICA_ALREADY_EXISTS) {
         VLOG(1) << "Local put failed for key: " << key
                 << " error: " << result.error();
         return tl::unexpected(result.error());
@@ -402,15 +403,16 @@ tl::expected<void, ErrorCode> P2PClientService::PutViaRoute(
         if (proxy.client_id == client_id_) {
             // Write locally via DataManager
             result = PutLocal(key, slices);
-            if (!result && result.error() != ErrorCode::REPLICA_NUM_EXCEEDED) {
+            if (!result && result.error() != ErrorCode::REPLICA_NUM_EXCEEDED &&
+                result.error() != ErrorCode::REPLICA_ALREADY_EXISTS) {
                 LOG(WARNING)
                     << "Local write failed despite local route, trying "
                        "next candidate, error: "
                     << result.error();
                 continue;  // write failed, attempt next candidate
             } else {
-                // ErrorCode::REPLICA_NUM_EXCEEDED means the key exists and the
-                // replica num has reached the limitation.
+                // ErrorCode::REPLICA_NUM_EXCEEDED or
+                // ErrorCode::REPLICA_ALREADY_EXISTS means the key exists.
                 // Currently, we think this is a normal case,
                 // just ignore the error and return success.
                 return {};  // write success
@@ -437,13 +439,14 @@ tl::expected<void, ErrorCode> P2PClientService::PutViaRoute(
             }
 
             result = peer.WriteRemoteData(write_req);
-            if (!result && result.error() != ErrorCode::REPLICA_NUM_EXCEEDED) {
+            if (!result && result.error() != ErrorCode::REPLICA_NUM_EXCEEDED &&
+                result.error() != ErrorCode::REPLICA_ALREADY_EXISTS) {
                 LOG(WARNING) << "Remote write to " << endpoint
                              << " failed: " << result.error();
                 continue;  // write failed, attempt next candidate
             } else {
-                // ErrorCode::REPLICA_NUM_EXCEEDED means the key exists and the
-                // replica num has reached the limitation.
+                // ErrorCode::REPLICA_NUM_EXCEEDED or
+                // ErrorCode::REPLICA_ALREADY_EXISTS means the key exists.
                 // Currently, we think this is a normal case,
                 // just ignore the error and return success.
                 return {};  // write success
@@ -474,7 +477,8 @@ tl::expected<void, ErrorCode> P2PClientService::Put(const ObjectKey& key,
     }
     auto result = PutViaRoute(key, slices, *route_config);
     if (!result) {
-        if (result.error() != ErrorCode::REPLICA_NUM_EXCEEDED) {
+        if (result.error() != ErrorCode::REPLICA_NUM_EXCEEDED &&
+            result.error() != ErrorCode::REPLICA_ALREADY_EXISTS) {
             LOG(ERROR) << "Failed to put key: " << key
                        << " error: " << result.error();
         } else {

@@ -55,13 +55,13 @@ void RegisterClientRpcService(coro_rpc::coro_rpc_server& server,
 
 int main(int argc, char* argv[]) {
     // Attention !!!
-    // Initialization of ResourceTracker must be the most earlist.
+    // Initialization of ResourceTracker must be the most earliest.
     // Otherwise, the main thread will not apply signal mask before other
     // spawning threads, leading to missing signal processing.
     mooncake::ResourceTracker::getInstance();
 
     gflags::ParseCommandLineFlags(&argc, &argv, true);
-    // when separatly deploy real client,
+    // when separately deploy real client,
     // local buffer is shared by dummy client,
     // real client does not have local buffer
     const uint64_t local_buffer_size = 0;
