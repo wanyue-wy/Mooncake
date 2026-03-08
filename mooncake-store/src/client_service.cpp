@@ -63,7 +63,7 @@ std::optional<std::shared_ptr<ClientService>> ClientService::Create(
         config.local_ip, config.te_port, config.metadata_connstring,
         config.labels);
 
-    auto err = client->init_client_service(config);
+    auto err = client->Init(config);
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "Failed to initialize centralized client service"
                    << ", ret = " << err;
@@ -79,7 +79,7 @@ std::optional<std::shared_ptr<ClientService>> ClientService::Create(
         config.local_ip, config.te_port, config.metadata_connstring,
         config.labels);
 
-    auto err = client->init_client_service(config);
+    auto err = client->Init(config);
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "Failed to initialize P2P client service"
                    << ", ret = " << err;
@@ -397,8 +397,9 @@ std::vector<tl::expected<bool, ErrorCode>> ClientService::BatchIsExist(
     const std::vector<std::string>& keys) {
     auto guard = AcquireInflightGuard();
     if (!guard.is_valid()) {
-        LOG(ERROR) << "client is shutting down";
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+        std::vector<tl::expected<bool, ErrorCode>> results(
+            keys.size(), tl::make_unexpected(ErrorCode::SHUTTING_DOWN));
+        return results;
     }
     return GetMasterClient().BatchExistKey(keys);
 }

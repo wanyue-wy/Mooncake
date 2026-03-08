@@ -28,6 +28,8 @@ class P2PClientService final : public ClientService {
 
     virtual ~P2PClientService();
 
+    ErrorCode Init(const P2PClientConfig& config);
+
     /**
      * @brief
      * 1. Stops heartbeat, RPC server, and all background threads of submodules.
@@ -151,18 +153,6 @@ class P2PClientService final : public ClientService {
      */
     tl::expected<long, ErrorCode> RemoveAll() override;
 
-    /**
-     * @brief Register the P2P client with the master server.
-     * Collects segments from mounted_segments_ and registers them.
-     * @return An ErrorCode indicating success or failure.
-     */
-    tl::expected<void, ErrorCode> RegisterClient() override;
-
-    ErrorCode init_client_service(const P2PClientConfig& config);
-
-   protected:
-    HeartbeatRequest build_heartbeat_request() override;
-
     MasterClient& GetMasterClient() override { return master_client_; }
 
    private:
@@ -207,14 +197,26 @@ class P2PClientService final : public ClientService {
     /**
      * @brief handle batch DELETE: notify master to remove replicas from
      *        multiple segments in one RPC call
+     * @param key Key to remove
+     * @param segment_ids Vector of segment IDs to remove (it will be moved)
+     * @return Vector of ErrorCode results for each segment
      */
     std::vector<tl::expected<void, ErrorCode>> SyncBatchRemoveReplica(
-        const std::string& key, const std::vector<UUID>& segment_ids);
+        const std::string& key, std::vector<UUID> segment_ids);
 
     /**
      * @brief Collect tier info from DataManager and build P2P Segments.
      */
     std::vector<Segment> CollectTierSegments() const;
+
+    /**
+     * @brief Register the P2P client with the master server.
+     * Collects segments from mounted_segments_ and registers them.
+     * @return An ErrorCode indicating success or failure.
+     */
+    tl::expected<void, ErrorCode> RegisterClient() override;
+
+    HeartbeatRequest build_heartbeat_request() override;
 
    private:
     // --- Internal helpers for P2P read/write modes ---
@@ -256,10 +258,10 @@ class P2PClientService final : public ClientService {
     P2PMasterClient master_client_;
     uint16_t client_rpc_port_ = 12345;
 
-    std::unique_ptr<coro_rpc::coro_rpc_server> rpc_server_;
-    std::thread rpc_server_thread_;
+    std::unique_ptr<coro_rpc::coro_rpc_server> client_rpc_server_;
+    std::thread client_rpc_server_thread_;
     std::optional<DataManager> data_manager_;
-    std::optional<ClientRpcService> rpc_service_;
+    std::optional<ClientRpcService> client_rpc_service_;
 
     // Each PeerClient instance maintains its own fixed-size connection pool.
     std::mutex peer_clients_mutex_;

@@ -36,11 +36,10 @@ DataManager::DataManager(std::unique_ptr<TieredBackend> tiered_backend,
 }
 
 tl::expected<void, ErrorCode> DataManager::Put(const std::string& key,
-                                               std::unique_ptr<char[]> data,
-                                               size_t size,
+                                               const Slice& slice,
                                                std::optional<UUID> tier_id) {
     ScopedVLogTimer timer(1, "DataManager::Put");
-    timer.LogRequest("key=", key, "size=", size);
+    timer.LogRequest("key=", key, "size=", slice.size);
 
     std::unique_lock lock(GetKeyLock(key));
 
@@ -51,7 +50,7 @@ tl::expected<void, ErrorCode> DataManager::Put(const std::string& key,
     }
 
     // Allocate space in tiered backend
-    auto handle = tiered_backend_->Allocate(size, tier_id);
+    auto handle = tiered_backend_->Allocate(slice.size, tier_id);
     if (!handle.has_value()) {
         LOG(ERROR) << "Failed to allocate space for key: " << key;
         timer.LogResponse("error_code=", handle.error());
@@ -60,7 +59,7 @@ tl::expected<void, ErrorCode> DataManager::Put(const std::string& key,
 
     // Create DataSource from input data
     DataSource source;
-    source.buffer = std::make_unique<TempDRAMBuffer>(std::move(data), size);
+    source.buffer = std::make_unique<RefBuffer>(slice.ptr, slice.size);
     source.type = MemoryType::DRAM;
 
     // Write data to allocated handle

@@ -47,6 +47,7 @@ class CentralizedClientService
 
     ~CentralizedClientService() override;
 
+    ErrorCode Init(const CentralizedClientConfig& config);
     void Stop() override;
     void Destroy() override;
 
@@ -122,8 +123,6 @@ class CentralizedClientService
 
     tl::expected<void, ErrorCode> RegisterClient() override;
 
-    ErrorCode init_client_service(const CentralizedClientConfig& config);
-
    protected:
     HeartbeatRequest build_heartbeat_request() override;
 
@@ -172,6 +171,7 @@ class CentralizedClientService
         const std::vector<Replica::Descriptor>& replica_list,
         Replica::Descriptor& replica);
 
+   private:
     CentralizedMasterClient master_client_;
     std::unique_ptr<TransferSubmitter> transfer_submitter_;
 

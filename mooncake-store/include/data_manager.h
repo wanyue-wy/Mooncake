@@ -64,7 +64,7 @@ class DataManager {
      * @return ErrorCode indicating success or failure
      */
     tl::expected<void, ErrorCode> Put(
-        const std::string& key, std::unique_ptr<char[]> data, size_t size,
+        const std::string& key, const Slice& slice,
         std::optional<UUID> tier_id = std::nullopt);
 
     /**

@@ -28,21 +28,20 @@ void P2PClientService::Stop() {
 
     LOG(INFO) << "P2PClientService::Stop() — begin";
 
-    // 1. Stop RPC server so no new requests arrive.
-    if (rpc_server_) {
-        rpc_server_->stop();
+    // Stop RPC server so no new requests arrive.
+    if (client_rpc_server_) {
+        client_rpc_server_->stop();
     }
-    if (rpc_server_thread_.joinable()) {
-        rpc_server_thread_.join();
+    if (client_rpc_server_thread_.joinable()) {
+        client_rpc_server_thread_.join();
     }
 
-    // 2. Stop TieredBackend
-    // (scheduler stop).
+    // Stop tier scheduler of tierd_backend
     if (data_manager_.has_value()) {
         data_manager_->Stop();
     }
 
-    // 3. Stop heartbeat
+    // Stop heartbeat
     ClientService::Stop();
 
     LOG(INFO) << "P2PClientService::Stop() — complete";
@@ -51,14 +50,12 @@ void P2PClientService::Stop() {
 void P2PClientService::Destroy() {
     LOG(INFO) << "P2PClientService::Destroy() — begin";
 
-    // 4. Clear peer clients.
     {
         std::lock_guard<std::mutex> lock(peer_clients_mutex_);
         peer_clients_.clear();
     }
 
-    // 5. Tear down RPC service and data manager references.
-    rpc_service_.reset();
+    client_rpc_service_.reset();
     if (data_manager_.has_value()) {
         data_manager_->Destroy();
     }
@@ -74,11 +71,7 @@ P2PClientService::~P2PClientService() {
     Destroy();
 }
 
-// ============================================================================
-// Initialization
-// ============================================================================
-
-ErrorCode P2PClientService::init_client_service(const P2PClientConfig& config) {
+ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
     client_rpc_port_ = config.client_rpc_port;
 
     // 1. Connect to master
@@ -119,29 +112,14 @@ ErrorCode P2PClientService::init_client_service(const P2PClientConfig& config) {
         return err;
     }
 
-    // 5. Start RPC service for P2P data serving
-    rpc_service_.emplace(*data_manager_);
-    // Set rectify callback on DataManager to remove stale replicas from master
-    data_manager_->SetRectifyCallback(
-        [this](const std::string& key, std::optional<UUID> tier_id) {
-            if (!tier_id) {
-                auto tier_views = data_manager_->GetTierViews();
-                std::vector<UUID> segment_ids;
-                segment_ids.reserve(tier_views.size());
-                for (const auto& tv : tier_views) {
-                    segment_ids.push_back(tv.id);
-                }
-                SyncBatchRemoveReplica(key, segment_ids);
-            } else {
-                SyncRemoveReplica(key, *tier_id);
-            }
-        });
-    rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(
+    // 5. Start P2P client RPC service
+    client_rpc_service_.emplace(*data_manager_);
+    client_rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(
         config.rpc_thread_num, client_rpc_port_);
-    RegisterClientRpcService(*rpc_server_, *rpc_service_);
+    RegisterClientRpcService(*client_rpc_server_, *client_rpc_service_);
 
-    rpc_server_thread_ = std::thread([this]() {
-        auto ec = rpc_server_->start();
+    client_rpc_server_thread_ = std::thread([this]() {
+        auto ec = client_rpc_server_->start();
         if (ec) {
             LOG(ERROR) << "P2P RPC server failed to start on port "
                        << client_rpc_port_ << ": " << ec.message();
@@ -173,7 +151,22 @@ ErrorCode P2PClientService::InitStorage(const P2PClientConfig& config) {
         return init_result.error();
     }
 
-    data_manager_.emplace(std::move(tiered_backend), transfer_engine_);
+    data_manager_ = DataManager(std::move(tiered_backend), transfer_engine_);
+    // Set rectify callback on DataManager to remove stale replicas from master
+    data_manager_->SetRectifyCallback(
+        [this](const std::string& key, std::optional<UUID> tier_id) {
+            if (!tier_id) {
+                auto tier_views = data_manager_->GetTierViews();
+                std::vector<UUID> segment_ids;
+                segment_ids.reserve(tier_views.size());
+                for (const auto& tv : tier_views) {
+                    segment_ids.push_back(tv.id);
+                }
+                SyncBatchRemoveReplica(key, std::move(segment_ids));
+            } else {
+                SyncRemoveReplica(key, *tier_id);
+            }
+        });
     return ErrorCode::OK;
 }
 
@@ -188,10 +181,10 @@ RemoveReplicaCallback P2PClientService::BuildRemoveReplicaCallback() {
     return
         [this](
             const std::string& key, const UUID& tier_id,
-            enum DELETE_CALLBACK_TYPE type) -> tl::expected<void, ErrorCode> {
-            if (type == DELETE_CALLBACK_TYPE::DELETE) {
+            enum REMOVE_CALLBACK_TYPE type) -> tl::expected<void, ErrorCode> {
+            if (type == REMOVE_CALLBACK_TYPE::DELETE) {
                 return SyncRemoveReplica(key, tier_id);
-            } else if (type == DELETE_CALLBACK_TYPE::DELETE_ALL) {
+            } else if (type == REMOVE_CALLBACK_TYPE::DELETE_ALL) {
                 // TODO:
                 // Currently Master does not support deleting all replicas of a
                 // key within a client. The future will be implemented in
@@ -200,6 +193,7 @@ RemoveReplicaCallback P2PClientService::BuildRemoveReplicaCallback() {
                            << ", key: " << key;
                 return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
             }
+
             LOG(ERROR) << "Unknown callback type: " << static_cast<int>(type);
             return tl::unexpected(ErrorCode::INTERNAL_ERROR);
         };
@@ -240,16 +234,16 @@ tl::expected<void, ErrorCode> P2PClientService::SyncRemoveReplica(
 
 std::vector<tl::expected<void, ErrorCode>>
 P2PClientService::SyncBatchRemoveReplica(const std::string& key,
-                                         const std::vector<UUID>& segment_ids) {
+                                         std::vector<UUID> segment_ids) {
     BatchRemoveReplicaRequest req;
     req.key = key;
     req.client_id = client_id_;
-    req.segment_ids = segment_ids;
+    req.segment_ids = std::move(segment_ids);
     auto results = master_client_.BatchRemoveReplica(req);
     for (size_t i = 0; i < results.size(); i++) {
         if (!results[i]) {
             LOG(ERROR) << "Failed to remove replica for key: " << key
-                       << ", segment_id: " << segment_ids[i]
+                       << ", segment_id: " << req.segment_ids[i]
                        << ", error: " << results[i].error();
         }
     }
@@ -330,11 +324,6 @@ std::vector<Segment> P2PClientService::CollectTierSegments() const {
 }
 
 tl::expected<void, ErrorCode> P2PClientService::RegisterClient() {
-    auto guard = AcquireInflightGuard();
-    if (!guard.is_valid()) {
-        LOG(ERROR) << "client is shutting down";
-        return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
-    }
     RegisterClientRequest req;
     req.client_id = client_id_;
     req.segments = CollectTierSegments();
@@ -362,17 +351,14 @@ tl::expected<void, ErrorCode> P2PClientService::PutLocal(
         return tl::unexpected(ErrorCode::INTERNAL_ERROR);
     }
 
-    // Concatenate slices into a single buffer for DataManager::Put
-    size_t total_size = ClientService::CalculateSliceSize(slices);
-
-    auto data = std::make_unique<char[]>(total_size);
-    size_t offset = 0;
-    for (const auto& slice : slices) {
-        std::memcpy(data.get() + offset, slice.ptr, slice.size);
-        offset += slice.size;
+    if (slices.size() != 1) {
+        LOG(ERROR) << "PutLocal currently only supports a single slice, "
+                      "but received slice size = "
+                   << slices.size();
+        return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
     }
 
-    auto result = data_manager_->Put(key, std::move(data), total_size);
+    auto result = data_manager_->Put(key, slices[0]);
     if (!result) {
         VLOG(1) << "Local put failed for key: " << key
                 << " error: " << result.error();
@@ -414,11 +400,19 @@ tl::expected<void, ErrorCode> P2PClientService::PutViaRoute(
         if (proxy.client_id == client_id_) {
             // Write locally via DataManager
             result = PutLocal(key, slices);
-            if (result) return {};
-            LOG(WARNING) << "Local write failed despite local route, trying "
-                            "next candidate, error: "
-                         << result.error();
-            continue;
+            if (!result && result.error() != ErrorCode::REPLICA_NUM_EXCEEDED) {
+                LOG(WARNING)
+                    << "Local write failed despite local route, trying "
+                       "next candidate, error: "
+                    << result.error();
+                continue;  // write failed, attempt next candidate
+            } else {
+                // ErrorCode::REPLICA_NUM_EXCEEDED means the key exists and the
+                // replica num has reached the limitation.
+                // Currently, we think this is a normal case,
+                // just ignore the error and return success.
+                return {};  // write success
+            }
         }
 
         // Remote write via PeerClient
@@ -441,15 +435,23 @@ tl::expected<void, ErrorCode> P2PClientService::PutViaRoute(
             }
 
             result = peer.WriteRemoteData(write_req);
-            if (result) return {};
-            LOG(WARNING) << "Remote write to " << endpoint
-                         << " failed: " << result.error();
+            if (!result && result.error() != ErrorCode::REPLICA_NUM_EXCEEDED) {
+                LOG(WARNING) << "Remote write to " << endpoint
+                             << " failed: " << result.error();
+                continue;  // write failed, attempt next candidate
+            } else {
+                // ErrorCode::REPLICA_NUM_EXCEEDED means the key exists and the
+                // replica num has reached the limitation.
+                // Currently, we think this is a normal case,
+                // just ignore the error and return success.
+                return {};  // write success
+            }
         } catch (const std::exception& e) {
             LOG(ERROR) << "Exception during remote write to " << endpoint
                        << ": " << e.what();
             result = tl::unexpected(ErrorCode::INTERNAL_ERROR);
         }
-    }
+    }  // end for
 
     return result;
 }
@@ -470,10 +472,6 @@ tl::expected<void, ErrorCode> P2PClientService::Put(const ObjectKey& key,
     }
     auto result = PutViaRoute(key, slices, *route_config);
     if (!result) {
-        if (result.error() == ErrorCode::REPLICA_NUM_EXCEEDED) {
-            // the key exists, ignore the error
-            return {};
-        }
         LOG(ERROR) << "Failed to put key: " << key
                    << " error: " << result.error();
     }
@@ -553,21 +551,29 @@ tl::expected<void, ErrorCode> P2PClientService::GetRemoteViaRoute(
 
     // 2. Try each P2P proxy replica
     for (auto& replica : replicas) {
-        if (!replica.is_p2p_proxy_replica()) continue;
+        if (!replica.is_p2p_proxy_replica()) {
+            LOG(ERROR) << "Replica is not a P2P proxy replica"
+                       << ", key: " << key << ", replica: " << replica;
+            continue;
+        }
 
         auto& proxy = replica.get_p2p_proxy_descriptor();
 
         // Check if locality
         if (proxy.client_id == client_id_) {
             auto local_result = GetLocal(key, slices);
-            if (local_result) return {};
-            LOG(WARNING) << "Local get failed despite local route for key: "
-                         << key;
-            // Rectify stale local route
-            if (data_manager_.has_value()) {
-                data_manager_->RectifyReadRoute(key, proxy.segment_id);
+            if (!local_result) {
+                LOG(WARNING)
+                    << "fail to get local via route"
+                    << ", key: " << key << ", error: " << local_result.error();
+                // Rectify stale local route
+                if (data_manager_.has_value()) {
+                    data_manager_->RectifyReadRoute(key, proxy.segment_id);
+                }
+                continue;  // get failed, attempt next replica
+            } else {
+                return {};
             }
-            continue;
         }
 
         // Remote read via PeerClient
@@ -587,15 +593,21 @@ tl::expected<void, ErrorCode> P2PClientService::GetRemoteViaRoute(
             }
 
             auto read_result = peer.ReadRemoteData(read_req);
-            if (read_result) return {};
-            LOG(WARNING) << "Remote read from " << endpoint
-                         << " failed for key: " << key
-                         << " error: " << read_result.error();
+            if (!read_result) {
+                // No need to call RectifyReadRoute() here.
+                // The remote client will rectify route.
+                LOG(WARNING) << "Remote read from " << endpoint
+                             << " failed for key: " << key
+                             << " error: " << read_result.error();
+                continue;
+            } else {
+                return {};
+            }
         } catch (const std::exception& e) {
             LOG(ERROR) << "Exception during remote read from " << endpoint
                        << ": " << e.what();
         }
-    }
+    }  // end for
 
     return tl::unexpected(ErrorCode::OBJECT_NOT_FOUND);
 }
@@ -610,9 +622,27 @@ tl::expected<void, ErrorCode> P2PClientService::Get(
     }
     // Try local first
     auto local_result = GetLocal(object_key, slices);
-    if (local_result) return {};
+    if (!local_result) {
+        if (local_result.error() != ErrorCode::OBJECT_NOT_FOUND) {
+            LOG(ERROR) << "Failed to get local data"
+                       << ", key: " << object_key
+                       << ", error: " << local_result.error();
+        }
+    } else {
+        return {};  // success to get data
+    }
+
     // Local miss, read via master route
-    return GetRemoteViaRoute(object_key, slices);
+    auto remote_result = GetRemoteViaRoute(object_key, slices);
+    if (!remote_result) {
+        if (remote_result.error() != ErrorCode::OBJECT_NOT_FOUND) {
+            LOG(ERROR) << "Failed to get remote data"
+                       << ", key: " << object_key
+                       << ", error: " << remote_result.error();
+        }
+        return remote_result;
+    }
+    return {};
 }
 
 std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchGet(
@@ -655,7 +685,7 @@ tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
     if (!result) {
         return tl::unexpected(result.error());
     }
-    // P2P mode has no lease concept
+
     return std::make_unique<QueryResult>(std::move(result.value().replicas));
 }
 
@@ -692,7 +722,8 @@ P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
 // Attention:
 // The behavior of this type of interface has not yet been defined.
 // At present, all keys will be evicted by the client's scheduler according
-// to a specific strategy, and external active remove is not allowed currently
+// to a specific strategy.
+// The external active remove call is not allowed currently
 // ============================================================================
 
 tl::expected<void, ErrorCode> P2PClientService::Remove(const ObjectKey& key) {
@@ -737,13 +768,12 @@ tl::expected<void, ErrorCode> P2PClientService::MountSegment(const void* buffer,
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
-    // P2PClientService does not support dynamic segment mount/unmount
-    // because TieredBackend does not support dynamic capacity scaling.
-    // Master's MountSegment/UnmountSegment are invoked as callbacks
-    // during TieredBackend::Init instead.
+    // Due to TieredBackend does not support dynamic capacity scaling,
+    // P2PClientService could not support segment mount/unmount functions.
+    // Currently, the segment is mounted in TieredBackend::Init(),
+    // and is unmounted in TieredBackend::Destroy()
     LOG(WARNING) << "MountSegment is not supported in P2P mode. "
-                 << "TieredBackend does not support dynamic scaling. "
-                 << "Use TieredBackend::Init config for tier setup.";
+                 << "Please use TieredBackend::Init config for tier setup.";
     return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
 }
 

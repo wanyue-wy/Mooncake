@@ -45,10 +45,10 @@ struct TierView {
 };
 
 /**
- * @enum CALLBACK_TYPE
+ * @enum REMOVE_CALLBACK_TYPE
  * @brief The type of metadata synchronization callback.
  */
-enum CALLBACK_TYPE { DELETE = 0, DELETE_ALL = 1 };
+enum REMOVE_CALLBACK_TYPE { DELETE = 0, DELETE_ALL = 1 };
 
 /**
  * @struct AllocationEntry
@@ -89,7 +89,8 @@ using AddReplicaCallback = std::function<tl::expected<void, ErrorCode>(
  * Returns true if sync succeeds, false otherwise.
  */
 using RemoveReplicaCallback = std::function<tl::expected<void, ErrorCode>(
-    const std::string& key, const UUID& tier_id, enum CALLBACK_TYPE type)>;
+    const std::string& key, const UUID& tier_id,
+    enum REMOVE_CALLBACK_TYPE type)>;
 
 /**
  * @brief Callback for segment lifecycle synchronization.
@@ -170,8 +171,8 @@ class TieredBackend {
      * @param tier_id Optional tier ID. If specified, checks only the given
      *        tier; if nullopt, checks any tier.
      */
-    bool HasKey(const std::string& key,
-                std::optional<UUID> tier_id = std::nullopt) const;
+    bool Exist(const std::string& key,
+               std::optional<UUID> tier_id = std::nullopt) const;
 
     /**
      * @brief Get

@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <optional>
 #include <vector>
+#include <memory>
 
 #include "transfer_engine.h"
 #include "transfer_task.h"
@@ -74,11 +75,12 @@ void CentralizedClientService::Destroy() {
     ClientService::Destroy();
 }
 
-ErrorCode CentralizedClientService::init_client_service(
+ErrorCode CentralizedClientService::Init(
     const CentralizedClientConfig& config) {
     auto master_server_entry = config.master_server_entry;
     ErrorCode err = ConnectToMaster(master_server_entry);
     if (err != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to connect to master: " << err;
         return err;
     }
 
@@ -236,6 +238,7 @@ CentralizedClientService::Query(const std::string& object_key,
         std::chrono::steady_clock::now();
     auto result = master_client_.GetReplicaList(object_key, config);
     if (!result) {
+        LOG(ERROR) << "Failed to get replica list: " << result.error();
         return tl::unexpected(result.error());
     }
     uint64_t lease_ttl_ms = 0;
@@ -321,6 +324,18 @@ CentralizedClientService::BatchReplicaClear(
 }
 
 tl::expected<void, ErrorCode> CentralizedClientService::Get(
+    const std::string& object_key, std::vector<Slice>& slices) {
+    // First query the object metadata
+    auto query_result = Query(object_key);
+    if (!query_result.has_value()) {
+        return tl::unexpected(query_result.error());
+    }
+
+    // Then use the existing Get method with the query result
+    return Get(object_key, *query_result.value(), slices);
+}
+
+tl::expected<void, ErrorCode> CentralizedClientService::Get(
     const std::string& object_key, const QueryResult& query_result,
     std::vector<Slice>& slices) {
     auto guard = AcquireInflightGuard();
@@ -371,83 +386,52 @@ struct BatchGetOperation {
     std::vector<TransferFuture> futures;
 };
 
-std::vector<tl::expected<void, ErrorCode>>
-CentralizedClientService::BatchGetWhenPreferSameNode(
+std::vector<tl::expected<void, ErrorCode>> CentralizedClientService::BatchGet(
     const std::vector<std::string>& object_keys,
-    const std::vector<std::unique_ptr<QueryResult>>& query_results,
     std::unordered_map<std::string, std::vector<Slice>>& slices) {
-    std::vector<tl::expected<void, ErrorCode>> results;
-    results.resize(object_keys.size());
+    auto batched_query_results = BatchQuery(object_keys);
 
-    std::unordered_map<std::string, BatchGetOperation> seg_to_op_map{};
-    for (size_t i = 0; i < object_keys.size(); ++i) {
-        const auto& key = object_keys[i];
-        const auto& replica_list = query_results[i]->replicas;
-        auto slices_it = slices.find(key);
-        if (slices_it == slices.end()) {
-            LOG(ERROR) << "Slices not found for key: " << key;
-            results[i] = tl::unexpected(ErrorCode::INVALID_PARAMS);
-            continue;
-        }
-        Replica::Descriptor replica;
-        ErrorCode err = FindFirstCompleteReplica(replica_list, replica);
-        if (err != ErrorCode::OK) {
-            if (err == ErrorCode::INVALID_REPLICA) {
-                LOG(ERROR) << "no_complete_replicas_found key=" << key;
-            }
-            results[i] = tl::unexpected(err);
-            continue;
-        }
-        if (!replica.is_memory_replica()) {
-            results[i] = tl::unexpected(ErrorCode::INVALID_REPLICA);
-            continue;
-        }
-        auto& memory_descriptor = replica.get_memory_descriptor();
-        if (memory_descriptor.buffer_descriptor.size_ == 0) {
-            results[i] = tl::unexpected(ErrorCode::INVALID_REPLICA);
-            continue;
-        }
-        auto& buffer_descriptor = memory_descriptor.buffer_descriptor;
-        auto seg = buffer_descriptor.transport_endpoint_;
-        auto& op = seg_to_op_map[seg];
-        op.replicas.emplace_back(replica);
-        op.batched_slices.emplace_back(slices_it->second);
-        op.key_indexes.emplace_back(i);
-    }
-    for (auto& seg_to_op : seg_to_op_map) {
-        auto& op = seg_to_op.second;
-        auto future = transfer_submitter_->submit_batch(
-            op.replicas, op.batched_slices, TransferRequest::READ);
-        if (!future) {
-            for (auto index : op.key_indexes) {
-                results[index] = tl::unexpected(ErrorCode::TRANSFER_FAIL);
-                LOG(ERROR) << "Failed to submit transfer operation for key: "
-                           << object_keys[index];
-            }
-            continue;
-        }
-        op.futures.emplace_back(std::move(*future));
-    }
-    for (auto& seg_to_op : seg_to_op_map) {
-        auto& op = seg_to_op.second;
-        if (op.futures.empty()) {
-            continue;
-        }
-        ErrorCode result = op.futures[0].get();
-        if (result != ErrorCode::OK) {
-            for (auto index : op.key_indexes) {
-                results[index] = tl::unexpected(ErrorCode::TRANSFER_FAIL);
-                LOG(ERROR) << "Failed to submit transfer operation for key: "
-                           << object_keys[index];
-            }
+    // If any queries failed, return error results immediately for failed
+    // queries
+    std::vector<tl::expected<void, ErrorCode>> results;
+    results.reserve(object_keys.size());
+
+    std::vector<std::unique_ptr<QueryResult>> valid_query_results;
+    std::vector<size_t> valid_indices;
+    std::vector<std::string> valid_keys;
+
+    for (size_t i = 0; i < batched_query_results.size(); ++i) {
+        if (batched_query_results[i]) {
+            valid_query_results.emplace_back(
+                std::move(batched_query_results[i].value()));
+            valid_indices.emplace_back(i);
+            valid_keys.emplace_back(object_keys[i]);
+            results.emplace_back();  // placeholder for successful results
         } else {
-            for (auto index : op.key_indexes) {
-                VLOG(1) << "Transfer completed successfully for key: "
-                        << object_keys[index];
-                results[index] = {};
-            }
+            results.emplace_back(
+                tl::unexpected(batched_query_results[i].error()));
         }
     }
+
+    // If we have any valid queries, process them
+    if (!valid_keys.empty()) {
+        std::unordered_map<std::string, std::vector<Slice>> valid_slices;
+        for (const auto& key : valid_keys) {
+            auto it = slices.find(key);
+            if (it != slices.end()) {
+                valid_slices[key] = it->second;
+            }
+        }
+
+        auto valid_results =
+            BatchGet(valid_keys, valid_query_results, valid_slices);
+
+        // Merge results back
+        for (size_t i = 0; i < valid_indices.size(); ++i) {
+            results[valid_indices[i]] = valid_results[i];
+        }
+    }
+
     return results;
 }
 
@@ -557,8 +541,9 @@ std::vector<tl::expected<void, ErrorCode>> CentralizedClientService::BatchGet(
     std::chrono::steady_clock::time_point now =
         std::chrono::steady_clock::now();
     for (size_t i = 0; i < object_keys.size(); ++i) {
+        const QueryResult* base_ptr = query_results[i].get();
         auto* centralized_result =
-            dynamic_cast<const CentralizedQueryResult*>(query_results[i].get());
+            dynamic_cast<const CentralizedQueryResult*>(base_ptr);
         if (!centralized_result) {
             LOG(ERROR) << "query_result is not centralized key="
                        << object_keys[i];
@@ -580,6 +565,86 @@ std::vector<tl::expected<void, ErrorCode>> CentralizedClientService::BatchGet(
     }
 
     VLOG(1) << "BatchGet completed for " << object_keys.size() << " keys";
+    return results;
+}
+
+std::vector<tl::expected<void, ErrorCode>>
+CentralizedClientService::BatchGetWhenPreferSameNode(
+    const std::vector<std::string>& object_keys,
+    const std::vector<std::unique_ptr<QueryResult>>& query_results,
+    std::unordered_map<std::string, std::vector<Slice>>& slices) {
+    std::vector<tl::expected<void, ErrorCode>> results;
+    results.resize(object_keys.size());
+
+    std::unordered_map<std::string, BatchGetOperation> seg_to_op_map{};
+    for (size_t i = 0; i < object_keys.size(); ++i) {
+        const auto& key = object_keys[i];
+        const auto& replica_list = query_results[i]->replicas;
+        auto slices_it = slices.find(key);
+        if (slices_it == slices.end()) {
+            LOG(ERROR) << "Slices not found for key: " << key;
+            results[i] = tl::unexpected(ErrorCode::INVALID_PARAMS);
+            continue;
+        }
+        Replica::Descriptor replica;
+        ErrorCode err = FindFirstCompleteReplica(replica_list, replica);
+        if (err != ErrorCode::OK) {
+            if (err == ErrorCode::INVALID_REPLICA) {
+                LOG(ERROR) << "no_complete_replicas_found key=" << key;
+            }
+            results[i] = tl::unexpected(err);
+            continue;
+        }
+        if (!replica.is_memory_replica()) {
+            results[i] = tl::unexpected(ErrorCode::INVALID_REPLICA);
+            continue;
+        }
+        auto& memory_descriptor = replica.get_memory_descriptor();
+        if (memory_descriptor.buffer_descriptor.size_ == 0) {
+            results[i] = tl::unexpected(ErrorCode::INVALID_REPLICA);
+            continue;
+        }
+        auto& buffer_descriptor = memory_descriptor.buffer_descriptor;
+        auto seg = buffer_descriptor.transport_endpoint_;
+        auto& op = seg_to_op_map[seg];
+        op.replicas.emplace_back(replica);
+        op.batched_slices.emplace_back(slices_it->second);
+        op.key_indexes.emplace_back(i);
+    }
+    for (auto& seg_to_op : seg_to_op_map) {
+        auto& op = seg_to_op.second;
+        auto future = transfer_submitter_->submit_batch(
+            op.replicas, op.batched_slices, TransferRequest::READ);
+        if (!future) {
+            for (auto index : op.key_indexes) {
+                results[index] = tl::unexpected(ErrorCode::TRANSFER_FAIL);
+                LOG(ERROR) << "Failed to submit transfer operation for key: "
+                           << object_keys[index];
+            }
+            continue;
+        }
+        op.futures.emplace_back(std::move(*future));
+    }
+    for (auto& seg_to_op : seg_to_op_map) {
+        auto& op = seg_to_op.second;
+        if (op.futures.empty()) {
+            continue;
+        }
+        ErrorCode result = op.futures[0].get();
+        if (result != ErrorCode::OK) {
+            for (auto index : op.key_indexes) {
+                results[index] = tl::unexpected(ErrorCode::TRANSFER_FAIL);
+                LOG(ERROR) << "Failed to submit transfer operation for key: "
+                           << object_keys[index];
+            }
+        } else {
+            for (auto index : op.key_indexes) {
+                VLOG(1) << "Transfer completed successfully for key: "
+                        << object_keys[index];
+                results[index] = {};
+            }
+        }
+    }
     return results;
 }
 
@@ -1566,10 +1631,7 @@ tl::expected<void, ErrorCode> CentralizedClientService::RegisterClient() {
 
     auto register_result = master_client_.RegisterClient(req);
     if (!register_result) {
-        ErrorCode err = register_result.error();
-        LOG(ERROR) << "Failed to register client: " << err;
-    }
-    if (!register_result) {
+        LOG(ERROR) << "Failed to register client: " << register_result.error();
         return tl::unexpected(register_result.error());
     }
     return {};
@@ -1588,67 +1650,6 @@ ErrorCode CentralizedClientService::FindFirstCompleteReplica(
 
     // No complete replica found
     return ErrorCode::INVALID_REPLICA;
-}
-
-tl::expected<void, ErrorCode> CentralizedClientService::Get(
-    const std::string& object_key, std::vector<Slice>& slices) {
-    // First query the object metadata
-    auto query_result = Query(object_key);
-    if (!query_result.has_value()) {
-        return tl::unexpected(query_result.error());
-    }
-
-    // Then use the existing Get method with the query result
-    return Get(object_key, *query_result.value(), slices);
-}
-
-std::vector<tl::expected<void, ErrorCode>> CentralizedClientService::BatchGet(
-    const std::vector<std::string>& object_keys,
-    std::unordered_map<std::string, std::vector<Slice>>& slices) {
-    auto batched_query_results = BatchQuery(object_keys);
-
-    // If any queries failed, return error results immediately for failed
-    // queries
-    std::vector<tl::expected<void, ErrorCode>> results;
-    results.reserve(object_keys.size());
-
-    std::vector<std::unique_ptr<QueryResult>> valid_query_results;
-    std::vector<size_t> valid_indices;
-    std::vector<std::string> valid_keys;
-
-    for (size_t i = 0; i < batched_query_results.size(); ++i) {
-        if (batched_query_results[i]) {
-            valid_query_results.emplace_back(
-                std::move(batched_query_results[i].value()));
-            valid_indices.emplace_back(i);
-            valid_keys.emplace_back(object_keys[i]);
-            results.emplace_back();  // placeholder for successful results
-        } else {
-            results.emplace_back(
-                tl::unexpected(batched_query_results[i].error()));
-        }
-    }
-
-    // If we have any valid queries, process them
-    if (!valid_keys.empty()) {
-        std::unordered_map<std::string, std::vector<Slice>> valid_slices;
-        for (const auto& key : valid_keys) {
-            auto it = slices.find(key);
-            if (it != slices.end()) {
-                valid_slices[key] = it->second;
-            }
-        }
-
-        auto valid_results =
-            BatchGet(valid_keys, valid_query_results, valid_slices);
-
-        // Merge results back
-        for (size_t i = 0; i < valid_indices.size(); ++i) {
-            results[valid_indices[i]] = valid_results[i];
-        }
-    }
-
-    return results;
 }
 
 }  // namespace mooncake

@@ -45,9 +45,9 @@ class P2PClientIntegrationTest : public ::testing::Test {
             config.local_ip, config.te_port, config.metadata_connstring,
             config.labels);
 
-        auto err = client->init_client_service(config);
+        auto err = client->Init(config);
         EXPECT_EQ(err, ErrorCode::OK)
-            << "init_client_service failed: " << static_cast<int>(err);
+            << "Init failed: " << static_cast<int>(err);
 
         return client;
     }
