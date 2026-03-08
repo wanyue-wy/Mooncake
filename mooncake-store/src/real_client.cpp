@@ -231,7 +231,7 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT& config) {
         LOG(INFO) << "Starting IPC server at " << ipc_socket_path_;
     }
     auto res = start_dummy_client_monitor();
-    if (!res) {
+    if (res != 0) {
         LOG(ERROR) << "Failed to start dummy client monitor";
         return tl::unexpected(ErrorCode::INTERNAL_ERROR);
     }

@@ -124,8 +124,7 @@ TEST_F(ClientRpcServiceTest, ReadRemoteDataSuccess) {
     const std::string key = "test_read_key";
     const std::string test_data = "Hello, World!";
     auto buffer = StringToBuffer(test_data);
-    auto put_result =
-        data_manager_->Put(key, std::move(buffer), test_data.size());
+    auto put_result = data_manager_->Put(key, {buffer.get(), test_data.size()});
     ASSERT_TRUE(put_result.has_value()) << "Put failed";
 
     // Create read request with valid buffers

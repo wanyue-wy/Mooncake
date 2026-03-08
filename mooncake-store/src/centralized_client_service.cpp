@@ -154,6 +154,8 @@ ErrorCode CentralizedClientService::Init(
 
     InitTransferSubmitter();
 
+    is_running_ = true;
+
     auto reg = RegisterClient();
     if (!reg) {
         LOG(ERROR) << "Failed to register centralized client with master: "

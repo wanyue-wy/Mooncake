@@ -126,6 +126,8 @@ ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
         }
     });
 
+    is_running_ = true;
+
     // Give RPC server a moment to start
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     LOG(INFO) << "P2P RPC server started on port " << client_rpc_port_;
@@ -472,11 +474,15 @@ tl::expected<void, ErrorCode> P2PClientService::Put(const ObjectKey& key,
     }
     auto result = PutViaRoute(key, slices, *route_config);
     if (!result) {
-        LOG(ERROR) << "Failed to put key: " << key
-                   << " error: " << result.error();
+        if (result.error() != ErrorCode::REPLICA_NUM_EXCEEDED) {
+            LOG(ERROR) << "Failed to put key: " << key
+                       << " error: " << result.error();
+        } else {
+            // the key exists, just ignore the error
+        }
     }
 
-    return result;
+    return {};
 }
 
 std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchPut(

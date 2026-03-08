@@ -248,8 +248,7 @@ TEST_F(PeerClientTest, AsyncReadRemoteDataWithExistingKey) {
     const std::string key = "async_read_key";
     const std::string test_data = "Hello, Async!";
     auto buffer = StringToBuffer(test_data);
-    auto put_result =
-        data_manager_->Put(key, std::move(buffer), test_data.size());
+    auto put_result = data_manager_->Put(key, {buffer.get(), test_data.size()});
     ASSERT_TRUE(put_result.has_value()) << "Put failed";
 
     // Create read request
@@ -389,8 +388,7 @@ TEST_F(PeerClientTest, SyncReadRemoteDataWithExistingKey) {
     const std::string key = "sync_read_key";
     const std::string test_data = "Hello, Sync Read!";
     auto buffer = StringToBuffer(test_data);
-    auto put_result =
-        data_manager_->Put(key, std::move(buffer), test_data.size());
+    auto put_result = data_manager_->Put(key, {buffer.get(), test_data.size()});
     ASSERT_TRUE(put_result.has_value()) << "Put failed";
 
     RemoteReadRequest request;

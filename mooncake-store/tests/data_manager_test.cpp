@@ -137,7 +137,7 @@ TEST_F(DataManagerTest, PutSuccess) {
     const size_t data_size = test_data.size();
 
     auto buffer = StringToBuffer(test_data);
-    auto result = data_manager_->Put(key, std::move(buffer), data_size);
+    auto result = data_manager_->Put(key, {buffer.get(), data_size});
 
     ASSERT_TRUE(result.has_value())
         << "Put failed with error: " << toString(result.error());
@@ -162,7 +162,7 @@ TEST_F(DataManagerTest, PutAllocationFailure) {
     const size_t huge_size = 2ULL * 1024 * 1024 * 1024;  // 2GB
 
     auto test_data = CreateTestData(1024);
-    auto result = data_manager_->Put(key, std::move(test_data), huge_size);
+    auto result = data_manager_->Put(key, {test_data.get(), huge_size});
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), ErrorCode::NO_AVAILABLE_HANDLE);
@@ -178,7 +178,7 @@ TEST_F(DataManagerTest, PutWithTierId) {
 
     auto buffer = StringToBuffer(test_data);
     auto result =
-        data_manager_->Put(key, std::move(buffer), test_data.size(), tier_id);
+        data_manager_->Put(key, {buffer.get(), test_data.size()}, tier_id);
 
     ASSERT_TRUE(result.has_value()) << "Put with tier_id failed";
 
@@ -194,8 +194,7 @@ TEST_F(DataManagerTest, GetSuccess) {
 
     // First, put the data
     auto buffer = StringToBuffer(test_data);
-    auto put_result =
-        data_manager_->Put(key, std::move(buffer), test_data.size());
+    auto put_result = data_manager_->Put(key, {buffer.get(), test_data.size()});
     ASSERT_TRUE(put_result.has_value()) << "Put failed in Get test";
 
     // Then, get it
@@ -230,7 +229,7 @@ TEST_F(DataManagerTest, GetWithTierId) {
     // Put with specific tier
     auto buffer = StringToBuffer(test_data);
     auto put_result =
-        data_manager_->Put(key, std::move(buffer), test_data.size(), tier_id);
+        data_manager_->Put(key, {buffer.get(), test_data.size()}, tier_id);
     ASSERT_TRUE(put_result.has_value());
 
     // Get with same tier
@@ -248,8 +247,7 @@ TEST_F(DataManagerTest, DeleteSuccess) {
 
     // First, put the data
     auto buffer = StringToBuffer(test_data);
-    auto put_result =
-        data_manager_->Put(key, std::move(buffer), test_data.size());
+    auto put_result = data_manager_->Put(key, {buffer.get(), test_data.size()});
     ASSERT_TRUE(put_result.has_value());
 
     // Then, delete it
@@ -287,7 +285,7 @@ TEST_F(DataManagerTest, DeleteWithTierId) {
     // Put with specific tier
     auto buffer = StringToBuffer(test_data);
     auto put_result =
-        data_manager_->Put(key, std::move(buffer), test_data.size(), tier_id);
+        data_manager_->Put(key, {buffer.get(), test_data.size()}, tier_id);
     ASSERT_TRUE(put_result.has_value());
 
     // Delete with same tier
@@ -317,7 +315,7 @@ TEST_F(DataManagerTest, ConcurrentPut) {
             std::string data = "data_" + std::to_string(i);
             auto buffer = StringToBuffer(data);
             results[i] =
-                data_manager_->Put(keys[i], std::move(buffer), data.size());
+                data_manager_->Put(keys[i], {buffer.get(), data.size()});
         });
     }
 
@@ -346,8 +344,7 @@ TEST_F(DataManagerTest, PutGetDeleteSequence) {
 
     // Put
     auto buffer = StringToBuffer(test_data);
-    auto put_result =
-        data_manager_->Put(key, std::move(buffer), test_data.size());
+    auto put_result = data_manager_->Put(key, {buffer.get(), test_data.size()});
     ASSERT_TRUE(put_result.has_value());
 
     // Get
@@ -387,8 +384,8 @@ TEST_F(DataManagerTest, ReadRemoteDataEmptyBuffers) {
     const std::string test_data = "Hello";
 
     auto buffer = StringToBuffer(test_data);
-    ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), test_data.size())
-                    .has_value());
+    ASSERT_TRUE(
+        data_manager_->Put(key, {buffer.get(), test_data.size()}).has_value());
 
     std::vector<RemoteBufferDesc> empty_buffers;
     auto result = data_manager_->ReadRemoteData(key, empty_buffers);
@@ -444,8 +441,7 @@ TEST_F(DataManagerTest, LargeDataStorage) {
 
     auto large_data = CreateTestData(large_size, "LARGE");
 
-    auto put_result =
-        data_manager_->Put(key, std::move(large_data), large_size);
+    auto put_result = data_manager_->Put(key, {large_data.get(), large_size});
     ASSERT_TRUE(put_result.has_value());
 
     auto get_result = data_manager_->Get(key);
@@ -467,8 +463,8 @@ TEST_F(DataManagerTest, MultipleScatterGatherBuffers) {
     const std::string test_data = "ScatterGatherTestData";
 
     auto buffer = StringToBuffer(test_data);
-    ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), test_data.size())
-                    .has_value());
+    ASSERT_TRUE(
+        data_manager_->Put(key, {buffer.get(), test_data.size()}).has_value());
 
     auto handle_result = data_manager_->Get(key);
     ASSERT_TRUE(handle_result.has_value());
@@ -506,8 +502,8 @@ TEST_F(DataManagerTest, ConcurrentReadOperations) {
     const std::string test_data = "ConcurrentTestData";
 
     auto buffer = StringToBuffer(test_data);
-    ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), test_data.size())
-                    .has_value());
+    ASSERT_TRUE(
+        data_manager_->Put(key, {buffer.get(), test_data.size()}).has_value());
 
     const int num_threads = 10;
     std::vector<std::thread> threads;
@@ -536,9 +532,8 @@ TEST_F(DataManagerTest, DataIntegrityAcrossOperations) {
 
     // Store original data
     auto buffer1 = StringToBuffer(original_data);
-    ASSERT_TRUE(
-        data_manager_->Put(key, std::move(buffer1), original_data.size())
-            .has_value());
+    ASSERT_TRUE(data_manager_->Put(key, {buffer1.get(), original_data.size()})
+                    .has_value());
 
     // Retrieve and verify
     auto get_result1 = data_manager_->Get(key);
@@ -559,8 +554,8 @@ TEST_F(DataManagerTest, DataIntegrityAcrossOperations) {
     // Store new data with same key
     const std::string new_data = "NewDataForIntegrityCheck";
     auto buffer2 = StringToBuffer(new_data);
-    ASSERT_TRUE(data_manager_->Put(key, std::move(buffer2), new_data.size())
-                    .has_value());
+    ASSERT_TRUE(
+        data_manager_->Put(key, {buffer2.get(), new_data.size()}).has_value());
 
     // Retrieve and verify new data
     auto get_result3 = data_manager_->Get(key);
@@ -595,7 +590,7 @@ TEST_F(DataManagerTest, KeyPatternVariations) {
     for (const auto& key : test_keys) {
         auto buffer = StringToBuffer(test_data);
         auto put_result =
-            data_manager_->Put(key, std::move(buffer), test_data.size());
+            data_manager_->Put(key, {buffer.get(), test_data.size()});
 
         // Put should succeed for all valid string keys
         ASSERT_TRUE(put_result.has_value()) << "Put failed for key: " << key;
@@ -628,7 +623,7 @@ TEST_F(DataManagerTest, MemoryReleaseVerification) {
         auto buffer = CreateTestData(data_size, "MEM");
 
         // Put data
-        auto put_result = data_manager_->Put(key, std::move(buffer), data_size);
+        auto put_result = data_manager_->Put(key, {buffer.get(), data_size});
         ASSERT_TRUE(put_result.has_value()) << "Put failed at iteration " << i;
 
         // Verify data exists
@@ -648,9 +643,8 @@ TEST_F(DataManagerTest, MemoryReleaseVerification) {
     // released
     std::string final_key = "final_memory_test";
     auto final_buffer = CreateTestData(data_size, "FIN");
-    ASSERT_TRUE(
-        data_manager_->Put(final_key, std::move(final_buffer), data_size)
-            .has_value());
+    ASSERT_TRUE(data_manager_->Put(final_key, {final_buffer.get(), data_size})
+                    .has_value());
     ASSERT_TRUE(data_manager_->Delete(final_key).has_value());
 }
 
@@ -661,8 +655,8 @@ TEST_F(DataManagerTest, MultiBufferValidation) {
         "MultiBufferValidationTestData123456";  // 35 bytes
 
     auto buffer = StringToBuffer(test_data);
-    ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), test_data.size())
-                    .has_value());
+    ASSERT_TRUE(
+        data_manager_->Put(key, {buffer.get(), test_data.size()}).has_value());
 
     auto handle_result = data_manager_->Get(key);
     ASSERT_TRUE(handle_result.has_value());
@@ -754,8 +748,8 @@ TEST_F(DataManagerTest, TransferDataToRemoteDataPreparation) {
 
     // Store test data
     auto buffer = StringToBuffer(test_data);
-    ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), test_data.size())
-                    .has_value());
+    ASSERT_TRUE(
+        data_manager_->Put(key, {buffer.get(), test_data.size()}).has_value());
 
     // Get handle to the stored data
     auto handle_result = data_manager_->Get(key);
@@ -806,8 +800,7 @@ TEST_F(DataManagerTest, TransferDataFromRemoteValidation) {
 
     // Allocate space (simulate receiving data into this space)
     auto buffer = std::make_unique<char[]>(data_size);
-    ASSERT_TRUE(
-        data_manager_->Put(key, std::move(buffer), data_size).has_value());
+    ASSERT_TRUE(data_manager_->Put(key, {buffer.get(), data_size}).has_value());
 
     auto handle_result = data_manager_->Get(key);
     ASSERT_TRUE(handle_result.has_value());
@@ -851,8 +844,8 @@ TEST_F(DataManagerTest, ConcurrentDeleteOperations) {
         keys.push_back(key);
         std::string data = "data_for_deletion_" + std::to_string(i);
         auto buffer = StringToBuffer(data);
-        ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), data.size())
-                        .has_value());
+        ASSERT_TRUE(
+            data_manager_->Put(key, {buffer.get(), data.size()}).has_value());
     }
 
     // Verify all keys exist
@@ -892,7 +885,7 @@ TEST_F(DataManagerTest, RepeatedPutSameKey) {
     const std::string data1 = "FirstData";
     auto buffer1 = StringToBuffer(data1);
     ASSERT_TRUE(
-        data_manager_->Put(key, std::move(buffer1), data1.size()).has_value());
+        data_manager_->Put(key, {buffer1.get(), data1.size()}).has_value());
 
     // Verify first data
     auto result1 = data_manager_->Get(key);
@@ -904,8 +897,7 @@ TEST_F(DataManagerTest, RepeatedPutSameKey) {
     // Second Put with different data (overwrite)
     const std::string data2 = "SecondDataLonger";
     auto buffer2 = StringToBuffer(data2);
-    auto put_result2 =
-        data_manager_->Put(key, std::move(buffer2), data2.size());
+    auto put_result2 = data_manager_->Put(key, {buffer2.get(), data2.size()});
 
     // The behavior depends on implementation - it may fail or succeed
     // If it succeeds, verify the new data
@@ -921,7 +913,7 @@ TEST_F(DataManagerTest, RepeatedPutSameKey) {
     // Delete first to ensure clean state
     data_manager_->Delete(key);
     ASSERT_TRUE(
-        data_manager_->Put(key, std::move(buffer3), data3.size()).has_value());
+        data_manager_->Put(key, {buffer3.get(), data3.size()}).has_value());
 
     auto result3 = data_manager_->Get(key);
     ASSERT_TRUE(result3.has_value());
@@ -937,7 +929,7 @@ TEST_F(DataManagerTest, BoundaryConditionTests) {
         const std::string key = "single_byte_key";
         const std::string single_byte = "X";
         auto buffer = StringToBuffer(single_byte);
-        ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), 1).has_value());
+        ASSERT_TRUE(data_manager_->Put(key, {buffer.get(), 1}).has_value());
 
         auto result = data_manager_->Get(key);
         ASSERT_TRUE(result.has_value());
@@ -949,8 +941,7 @@ TEST_F(DataManagerTest, BoundaryConditionTests) {
         const std::string key = "power_of_two_key";
         const size_t size = 64 * 1024;  // 64KB
         auto buffer = CreateTestData(size, "P2");
-        ASSERT_TRUE(
-            data_manager_->Put(key, std::move(buffer), size).has_value());
+        ASSERT_TRUE(data_manager_->Put(key, {buffer.get(), size}).has_value());
 
         auto result = data_manager_->Get(key);
         ASSERT_TRUE(result.has_value());
@@ -962,8 +953,7 @@ TEST_F(DataManagerTest, BoundaryConditionTests) {
         const std::string key = "non_power_of_two_key";
         const size_t size = 100 * 1024 + 512;  // 100.5KB
         auto buffer = CreateTestData(size, "NP2");
-        ASSERT_TRUE(
-            data_manager_->Put(key, std::move(buffer), size).has_value());
+        ASSERT_TRUE(data_manager_->Put(key, {buffer.get(), size}).has_value());
 
         auto result = data_manager_->Get(key);
         ASSERT_TRUE(result.has_value());
@@ -1036,7 +1026,7 @@ TEST_F(DataManagerTest, LockContentionTest) {
             bool is_contended = lock_usage_count[lock_index] > 1;
 
             results[i] =
-                data_manager_->Put(keys[i], std::move(buffer), data.size());
+                data_manager_->Put(keys[i], {buffer.get(), data.size()});
 
             if (!results[i].has_value() && is_contended) {
                 std::lock_guard<std::mutex> lock(log_mutex);
@@ -1115,8 +1105,8 @@ TEST_F(DataManagerTest, ConcurrentGetAndDelete) {
         keys.push_back(key);
         std::string data = "test_data_" + std::to_string(i);
         auto buffer = StringToBuffer(data);
-        ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), data.size())
-                        .has_value());
+        ASSERT_TRUE(
+            data_manager_->Put(key, {buffer.get(), data.size()}).has_value());
     }
 
     std::atomic<int> successful_gets{0};
@@ -1172,8 +1162,8 @@ TEST_F(DataManagerTest, HandleKeepsDataAliveAfterDelete) {
 
     // Put data
     auto buffer = StringToBuffer(test_data);
-    ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), test_data.size())
-                    .has_value());
+    ASSERT_TRUE(
+        data_manager_->Put(key, {buffer.get(), test_data.size()}).has_value());
 
     // Get handle (increases ref count)
     auto handle_result = data_manager_->Get(key);
@@ -1248,8 +1238,7 @@ TEST_F(DataManagerTest, TransferDataFromRemoteReturnValue) {
 
     // Allocate space
     auto buffer = std::make_unique<char[]>(data_size);
-    ASSERT_TRUE(
-        data_manager_->Put(key, std::move(buffer), data_size).has_value());
+    ASSERT_TRUE(data_manager_->Put(key, {buffer.get(), data_size}).has_value());
 
     auto handle_result = data_manager_->Get(key);
     ASSERT_TRUE(handle_result.has_value());
@@ -1298,8 +1287,8 @@ TEST_F(DataManagerTest, TransferDataToRemoteDestBuffersTooSmall) {
 
     // Store test data
     auto buffer = StringToBuffer(test_data);
-    ASSERT_TRUE(data_manager_->Put(key, std::move(buffer), test_data.size())
-                    .has_value());
+    ASSERT_TRUE(
+        data_manager_->Put(key, {buffer.get(), test_data.size()}).has_value());
 
     auto handle_result = data_manager_->Get(key);
     ASSERT_TRUE(handle_result.has_value());
@@ -1417,8 +1406,7 @@ TEST_F(DataManagerTest, RealRDMALoopbackTransfer) {
         data_copy[i] = pattern[i % pattern.size()];
     }
 
-    auto put_result =
-        rdma_data_manager->Put(key, std::move(data_copy), test_size);
+    auto put_result = rdma_data_manager->Put(key, {data_copy.get(), test_size});
     ASSERT_TRUE(put_result.has_value())
         << "Failed to put data into DataManager";
     LOG(INFO) << "Data stored in DataManager";
@@ -1582,7 +1570,7 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchTransfer) {
     }
 
     auto put_result =
-        rdma_data_manager->Put(key, std::move(data_copy), total_data_size);
+        rdma_data_manager->Put(key, {data_copy.get(), total_data_size});
     ASSERT_TRUE(put_result.has_value())
         << "Failed to put data into DataManager";
     LOG(INFO) << "Data stored in DataManager (" << total_data_size << " bytes)";
@@ -1773,7 +1761,7 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchPartialFailure) {
     }
 
     auto put_result =
-        rdma_data_manager->Put(key, std::move(data_copy), total_data_size);
+        rdma_data_manager->Put(key, {data_copy.get(), total_data_size});
     ASSERT_TRUE(put_result.has_value())
         << "Failed to put data into DataManager";
     LOG(INFO) << "Data stored in DataManager (" << total_data_size << " bytes)";

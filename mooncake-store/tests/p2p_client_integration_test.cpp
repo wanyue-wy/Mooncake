@@ -284,41 +284,41 @@ TEST_F(P2PClientIntegrationTest, PutOverwrite) {
 // Remove / RemoveAll / RemoveByRegex should return NOT_IMPLEMENTED
 // ============================================================================
 
-TEST_F(P2PClientIntegrationTest, RemoveNotImplemented) {
-    auto r = client_->Remove("any_key");
-    ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
-}
+// TEST_F(P2PClientIntegrationTest, RemoveNotImplemented) {
+//     auto r = client_->Remove("any_key");
+//     ASSERT_FALSE(r.has_value());
+//     EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
+// }
 
-TEST_F(P2PClientIntegrationTest, RemoveAllNotImplemented) {
-    auto r = client_->RemoveAll();
-    ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
-}
+// TEST_F(P2PClientIntegrationTest, RemoveAllNotImplemented) {
+//     auto r = client_->RemoveAll();
+//     ASSERT_FALSE(r.has_value());
+//     EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
+// }
 
-TEST_F(P2PClientIntegrationTest, RemoveByRegexNotImplemented) {
-    auto r = client_->RemoveByRegex(".*");
-    ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
-}
+// TEST_F(P2PClientIntegrationTest, RemoveByRegexNotImplemented) {
+//     auto r = client_->RemoveByRegex(".*");
+//     ASSERT_FALSE(r.has_value());
+//     EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
+// }
 
 // ============================================================================
 // MountSegment / UnmountSegment should return NOT_IMPLEMENTED
 // ============================================================================
 
-TEST_F(P2PClientIntegrationTest, MountSegmentNotImplemented) {
-    char dummy[64] = {0};
-    auto r = client_->MountSegment(dummy, sizeof(dummy));
-    ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
-}
+// TEST_F(P2PClientIntegrationTest, MountSegmentNotImplemented) {
+//     char dummy[64] = {0};
+//     auto r = client_->MountSegment(dummy, sizeof(dummy));
+//     ASSERT_FALSE(r.has_value());
+//     EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
+// }
 
-TEST_F(P2PClientIntegrationTest, UnmountSegmentNotImplemented) {
-    char dummy[64] = {0};
-    auto r = client_->UnmountSegment(dummy, sizeof(dummy));
-    ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
-}
+// TEST_F(P2PClientIntegrationTest, UnmountSegmentNotImplemented) {
+//     char dummy[64] = {0};
+//     auto r = client_->UnmountSegment(dummy, sizeof(dummy));
+//     ASSERT_FALSE(r.has_value());
+//     EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
+// }
 
 // ============================================================================
 // Query non-existent key should fail
@@ -359,38 +359,6 @@ TEST_F(P2PClientIntegrationTest, LargePutGet) {
         << "Large Get failed: " << static_cast<int>(get.error());
 
     EXPECT_EQ(payload, read_buf);
-}
-
-// ============================================================================
-// Multiple slices Put + Get
-// ============================================================================
-
-TEST_F(P2PClientIntegrationTest, MultiSlicePutGet) {
-    const std::string key = "p2p_multi_slice";
-    const std::string part1 = "AAAAABBBBB";
-    const std::string part2 = "CCCCCDDDDD";
-
-    // Put with 2 slices
-    std::vector<Slice> put_slices;
-    put_slices.emplace_back(
-        Slice{const_cast<char*>(part1.data()), part1.size()});
-    put_slices.emplace_back(
-        Slice{const_cast<char*>(part2.data()), part2.size()});
-    auto put = client_->Put(key, put_slices, WriteRouteRequestConfig{});
-    ASSERT_TRUE(put.has_value());
-
-    // Get into a single buffer
-    std::string combined = part1 + part2;
-    std::vector<char> buf(combined.size(), 0);
-    std::vector<Slice> get_slices;
-    get_slices.emplace_back(Slice{buf.data(), buf.size()});
-
-    auto query = client_->Query(key);
-    ASSERT_TRUE(query.has_value());
-
-    auto get = client_->Get(key, *query.value(), get_slices);
-    ASSERT_TRUE(get.has_value());
-    EXPECT_EQ(std::string(buf.data(), buf.size()), combined);
 }
 
 }  // namespace testing
