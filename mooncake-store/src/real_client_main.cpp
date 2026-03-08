@@ -54,8 +54,10 @@ void RegisterClientRpcService(coro_rpc::coro_rpc_server& server,
 }  // namespace mooncake
 
 int main(int argc, char* argv[]) {
-    // Initialize ResourceTracker early to apply signal mask to the main thread
-    // before any other threads are spawned, avoiding signal handling races.
+    // Attention !!!
+    // Initialization of ResourceTracker must be the most earlist.
+    // Otherwise, the main thread will not apply signal mask before other
+    // spawning threads, leading to missing signal processing.
     mooncake::ResourceTracker::getInstance();
 
     gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -104,11 +106,6 @@ int main(int argc, char* argv[]) {
         [&](auto& cfg) { return client_inst->setup_internal(cfg); }, config);
     if (!res) {
         LOG(FATAL) << "Failed to setup client: " << toString(res.error());
-        return -1;
-    }
-
-    if (client_inst->start_dummy_client_monitor()) {
-        LOG(FATAL) << "Failed to start dummy client monitor thread";
         return -1;
     }
 

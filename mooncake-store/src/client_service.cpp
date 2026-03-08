@@ -57,6 +57,38 @@ ClientService::ClientService(const std::string& local_ip, uint16_t te_port,
     }
 }
 
+std::optional<std::shared_ptr<ClientService>> ClientService::Create(
+    const CentralizedClientConfig& config) {
+    auto client = std::make_shared<CentralizedClientService>(
+        config.local_ip, config.te_port, config.metadata_connstring,
+        config.labels);
+
+    auto err = client->init_client_service(config);
+    if (err != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to initialize centralized client service"
+                   << ", ret = " << err;
+        return std::nullopt;
+    }
+
+    return client;
+}
+
+std::optional<std::shared_ptr<ClientService>> ClientService::Create(
+    const P2PClientConfig& config) {
+    auto client = std::make_shared<P2PClientService>(
+        config.local_ip, config.te_port, config.metadata_connstring,
+        config.labels);
+
+    auto err = client->init_client_service(config);
+    if (err != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to initialize P2P client service"
+                   << ", ret = " << err;
+        return std::nullopt;
+    }
+
+    return client;
+}
+
 ClientService::~ClientService() {
     Stop();
     Destroy();
@@ -65,7 +97,11 @@ ClientService::~ClientService() {
 void ClientService::Stop() {
     // Stop ping thread only after no need to contact master anymore
     if (heartbeat_running_) {
-        heartbeat_running_ = false;
+        {
+            std::lock_guard<std::mutex> lock(heartbeat_mtx_);
+            heartbeat_running_ = false;
+        }
+        heartbeat_cv_.notify_all();
         if (heartbeat_thread_.joinable()) {
             heartbeat_thread_.join();
         }
@@ -76,6 +112,71 @@ void ClientService::Destroy() {
     // Free global segment memory
     segment_ptrs_.clear();
     ascend_segment_ptrs_.clear();
+}
+
+void ClientService::StartHeartbeat(const std::string& master_server_entry) {
+    if (heartbeat_running_) {
+        LOG(WARNING) << "Heartbeat thread already running, skip starting";
+        return;
+    }
+
+    bool is_ha_mode = (master_server_entry.find("etcd://") == 0);
+    std::string current_master_address;
+
+    if (is_ha_mode) {
+        // For HA mode, resolve the actual address from etcd
+        ViewVersionId master_version = 0;
+        auto err = master_view_helper_.GetMasterView(current_master_address,
+                                                     master_version);
+        if (err != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to get master address for heartbeat";
+            return;
+        }
+    } else {
+        current_master_address = master_server_entry;
+    }
+
+    heartbeat_running_ = true;
+    heartbeat_thread_ =
+        std::thread([this, is_ha_mode, current_master_address]() mutable {
+            this->HeartbeatThreadMain(is_ha_mode,
+                                      std::move(current_master_address));
+        });
+}
+
+ErrorCode ClientService::ConnectToMaster(
+    const std::string& master_server_entry) {
+    if (master_server_entry.find("etcd://") == 0) {
+        std::string etcd_entry = master_server_entry.substr(strlen("etcd://"));
+
+        // Get master address from etcd
+        auto err = master_view_helper_.ConnectToEtcd(etcd_entry);
+        if (err != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to connect to etcd";
+            return err;
+        }
+        std::string master_address;
+        ViewVersionId master_version = 0;
+        err = master_view_helper_.GetMasterView(master_address, master_version);
+        if (err != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to get master address";
+            return err;
+        }
+
+        err = GetMasterClient().Connect(master_address);
+        if (err != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to connect to master";
+            return err;
+        }
+
+        return ErrorCode::OK;
+    } else {
+        auto err = GetMasterClient().Connect(master_server_entry);
+        if (err != ErrorCode::OK) {
+            return err;
+        }
+        return ErrorCode::OK;
+    }
 }
 
 static std::optional<bool> get_auto_discover() {
@@ -153,71 +254,6 @@ tl::expected<void, ErrorCode> ClientService::CheckRegisterMemoryParams(
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
     return {};
-}
-
-ErrorCode ClientService::ConnectToMaster(
-    const std::string& master_server_entry) {
-    if (master_server_entry.find("etcd://") == 0) {
-        std::string etcd_entry = master_server_entry.substr(strlen("etcd://"));
-
-        // Get master address from etcd
-        auto err = master_view_helper_.ConnectToEtcd(etcd_entry);
-        if (err != ErrorCode::OK) {
-            LOG(ERROR) << "Failed to connect to etcd";
-            return err;
-        }
-        std::string master_address;
-        ViewVersionId master_version = 0;
-        err = master_view_helper_.GetMasterView(master_address, master_version);
-        if (err != ErrorCode::OK) {
-            LOG(ERROR) << "Failed to get master address";
-            return err;
-        }
-
-        err = GetMasterClient().Connect(master_address);
-        if (err != ErrorCode::OK) {
-            LOG(ERROR) << "Failed to connect to master";
-            return err;
-        }
-
-        return ErrorCode::OK;
-    } else {
-        auto err = GetMasterClient().Connect(master_server_entry);
-        if (err != ErrorCode::OK) {
-            return err;
-        }
-        return ErrorCode::OK;
-    }
-}
-
-void ClientService::StartHeartbeat(const std::string& master_server_entry) {
-    if (heartbeat_running_) {
-        LOG(WARNING) << "Heartbeat thread already running, skip starting";
-        return;
-    }
-
-    bool is_ha_mode = (master_server_entry.find("etcd://") == 0);
-    std::string current_master_address;
-
-    if (is_ha_mode) {
-        // For HA mode, resolve the actual address from etcd
-        ViewVersionId master_version = 0;
-        auto err = master_view_helper_.GetMasterView(current_master_address,
-                                                     master_version);
-        if (err != ErrorCode::OK) {
-            LOG(ERROR) << "Failed to get master address for heartbeat";
-            return;
-        }
-    } else {
-        current_master_address = master_server_entry;
-    }
-
-    heartbeat_running_ = true;
-    heartbeat_thread_ =
-        std::thread([this, is_ha_mode, current_master_address]() mutable {
-            this->HeartbeatThreadMain(is_ha_mode,
-                                      std::move(current_master_address));
-        });
 }
 
 ErrorCode ClientService::InitTransferEngine(
@@ -348,38 +384,6 @@ ErrorCode ClientService::InitTransferEngine(
     return ErrorCode::OK;
 }
 
-std::optional<std::shared_ptr<ClientService>> ClientService::Create(
-    const CentralizedClientConfig& config) {
-    auto client = std::make_shared<CentralizedClientService>(
-        config.local_ip, config.te_port, config.metadata_connstring,
-        config.labels);
-
-    auto err = client->init_client_service(config);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "Failed to initialize centralized client service"
-                   << ", ret = " << err;
-        return std::nullopt;
-    }
-
-    return client;
-}
-
-std::optional<std::shared_ptr<ClientService>> ClientService::Create(
-    const P2PClientConfig& config) {
-    auto client = std::make_shared<P2PClientService>(
-        config.local_ip, config.te_port, config.metadata_connstring,
-        config.labels);
-
-    auto err = client->init_client_service(config);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "Failed to initialize P2P client service"
-                   << ", ret = " << err;
-        return std::nullopt;
-    }
-
-    return client;
-}
-
 tl::expected<void, ErrorCode> ClientService::RegisterLocalMemory(
     void* addr, size_t length, const std::string& location,
     bool remote_accessible, bool update_metadata) {
@@ -440,16 +444,25 @@ void ClientService::HeartbeatThreadMain(bool is_ha_mode,
                 register_client_future =
                     std::async(std::launch::async, register_client);
             }
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(success_heartbeat_interval_ms));
+            {
+                std::unique_lock<std::mutex> lock{heartbeat_mtx_};
+                heartbeat_cv_.wait_for(
+                    lock,
+                    std::chrono::milliseconds(success_heartbeat_interval_ms),
+                    [this] { return !heartbeat_running_; });
+            }
             continue;
         }
 
         heartbeat_fail_count++;
         if (heartbeat_fail_count < max_heartbeat_fail_count) {
             LOG(ERROR) << "Failed to send heartbeat to master";
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(fail_heartbeat_interval_ms));
+            {
+                std::unique_lock<std::mutex> lock{heartbeat_mtx_};
+                heartbeat_cv_.wait_for(
+                    lock, std::chrono::milliseconds(fail_heartbeat_interval_ms),
+                    [this] { return !heartbeat_running_; });
+            }
             continue;
         }
 
@@ -466,8 +479,13 @@ void ClientService::HeartbeatThreadMain(bool is_ha_mode,
             if (err != ErrorCode::OK) {
                 LOG(ERROR) << "Failed to get new master view: "
                            << toString(err);
-                std::this_thread::sleep_for(
-                    std::chrono::milliseconds(fail_heartbeat_interval_ms));
+                {
+                    std::unique_lock<std::mutex> lock{heartbeat_mtx_};
+                    heartbeat_cv_.wait_for(
+                        lock,
+                        std::chrono::milliseconds(fail_heartbeat_interval_ms),
+                        [this] { return !heartbeat_running_; });
+                }
                 continue;
             }
 
@@ -475,8 +493,13 @@ void ClientService::HeartbeatThreadMain(bool is_ha_mode,
             if (err != ErrorCode::OK) {
                 LOG(ERROR) << "Failed to connect to master " << master_address
                            << ": " << toString(err);
-                std::this_thread::sleep_for(
-                    std::chrono::milliseconds(fail_heartbeat_interval_ms));
+                {
+                    std::unique_lock<std::mutex> lock{heartbeat_mtx_};
+                    heartbeat_cv_.wait_for(
+                        lock,
+                        std::chrono::milliseconds(fail_heartbeat_interval_ms),
+                        [this] { return !heartbeat_running_; });
+                }
                 continue;
             }
 
@@ -491,8 +514,13 @@ void ClientService::HeartbeatThreadMain(bool is_ha_mode,
             if (err != ErrorCode::OK) {
                 LOG(ERROR) << "Reconnect failed to " << current_master_address
                            << ": " << toString(err);
-                std::this_thread::sleep_for(
-                    std::chrono::milliseconds(fail_heartbeat_interval_ms));
+                {
+                    std::unique_lock<std::mutex> lock{heartbeat_mtx_};
+                    heartbeat_cv_.wait_for(
+                        lock,
+                        std::chrono::milliseconds(fail_heartbeat_interval_ms),
+                        [this] { return !heartbeat_running_; });
+                }
                 continue;
             }
             LOG(INFO) << "Reconnected to master " << current_master_address;

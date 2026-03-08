@@ -63,6 +63,8 @@ class DummyClient : public PyClient {
 
     uint64_t alloc_from_mem_pool(size_t size) override;
 
+    // if a dummy client has connected to a real client,
+    // return the mode of real client
     DeploymentMode deployment_mode() const override { return deployment_mode_; }
 
     int put(const std::string& key, std::span<const char> value,
@@ -73,19 +75,18 @@ class DummyClient : public PyClient {
     int unregister_buffer(void* buffer) override;
 
     int64_t get_into(const std::string& key, void* buffer, size_t size,
-                     const GetReplicaListRequestConfig& config = {}) override;
+                     const ReadRouteConfig& config = {}) override;
 
     std::vector<int64_t> batch_get_into(
         const std::vector<std::string>& keys, const std::vector<void*>& buffers,
         const std::vector<size_t>& sizes,
-        const GetReplicaListRequestConfig& config = {}) override;
+        const ReadRouteConfig& config = {}) override;
 
     std::vector<int> batch_get_into_multi_buffers(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
         const std::vector<std::vector<size_t>>& all_sizes,
-        bool prefer_same_node,
-        const GetReplicaListRequestConfig& config = {}) override;
+        bool prefer_same_node, const ReadRouteConfig& config = {}) override;
 
     int put_from(const std::string& key, void* buffer, size_t size,
                  const WriteConfig& config) override;
@@ -107,16 +108,14 @@ class DummyClient : public PyClient {
         const WriteConfig& config) override;
 
     std::shared_ptr<BufferHandle> get_buffer(
-        const std::string& key,
-        const GetReplicaListRequestConfig& config = {}) override;
+        const std::string& key, const ReadRouteConfig& config = {}) override;
 
     std::tuple<uint64_t, size_t> get_buffer_info(
-        const std::string& key,
-        const GetReplicaListRequestConfig& config = {}) override;
+        const std::string& key, const ReadRouteConfig& config = {}) override;
 
     std::vector<std::shared_ptr<BufferHandle>> batch_get_buffer(
         const std::vector<std::string>& keys,
-        const GetReplicaListRequestConfig& config = {}) override;
+        const ReadRouteConfig& config = {}) override;
 
     int put_parts(const std::string& key,
                   std::vector<std::span<const char>> values,

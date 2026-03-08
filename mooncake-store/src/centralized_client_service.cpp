@@ -223,7 +223,7 @@ void CentralizedClientService::InitTransferSubmitter() {
 
 tl::expected<std::unique_ptr<QueryResult>, ErrorCode>
 CentralizedClientService::Query(const std::string& object_key,
-                                const GetReplicaListRequestConfig& config) {
+                                const ReadRouteConfig& config) {
     std::chrono::steady_clock::time_point start_time =
         std::chrono::steady_clock::now();
     auto result = master_client_.GetReplicaList(object_key, config);
@@ -246,7 +246,7 @@ CentralizedClientService::Query(const std::string& object_key,
 std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
 CentralizedClientService::BatchQuery(
     const std::vector<std::string>& object_keys,
-    const GetReplicaListRequestConfig& config) {
+    const ReadRouteConfig& config) {
     std::chrono::steady_clock::time_point start_time =
         std::chrono::steady_clock::now();
     auto response = master_client_.BatchGetReplicaList(object_keys, config);

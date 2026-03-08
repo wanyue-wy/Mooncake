@@ -1,7 +1,9 @@
 #pragma once
 
 #include <boost/functional/hash.hpp>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -50,14 +52,12 @@ class ClientService {
     virtual ~ClientService();
 
     /**
-     * @brief Graceful stop: stops accepting new requests, drains in-flight
-     * operations. Safe to call multiple times.
+     * @brief stops background threads
      */
     virtual void Stop();
 
     /**
-     * @brief Release internal resources. Safe to call multiple times.
-     * Should be called AFTER Stop() and BEFORE the destructor.
+     * @brief Release internal resources. Should be called after Stop()
      */
     virtual void Destroy();
 
@@ -111,8 +111,7 @@ class ClientService {
      * indicating failure
      */
     virtual tl::expected<std::unique_ptr<QueryResult>, ErrorCode> Query(
-        const std::string& object_key,
-        const GetReplicaListRequestConfig& config = {}) = 0;
+        const std::string& object_key, const ReadRouteConfig& config = {}) = 0;
 
     /**
      * @brief Batch query object metadata without transferring data
@@ -121,7 +120,7 @@ class ClientService {
      */
     virtual std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
     BatchQuery(const std::vector<std::string>& object_keys,
-               const GetReplicaListRequestConfig& config = {}) = 0;
+               const ReadRouteConfig& config = {}) = 0;
 
     /**
      * @brief Transfers data using pre-queried object information
@@ -399,6 +398,8 @@ class ClientService {
     MasterViewHelper master_view_helper_;
     std::thread heartbeat_thread_;
     std::atomic<bool> heartbeat_running_{false};
+    std::condition_variable heartbeat_cv_;
+    std::mutex heartbeat_mtx_;
 };
 
 }  // namespace mooncake

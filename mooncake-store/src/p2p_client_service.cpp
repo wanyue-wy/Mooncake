@@ -641,7 +641,7 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchGet(
 // ============================================================================
 
 tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
-    const std::string& object_key, const GetReplicaListRequestConfig& config) {
+    const std::string& object_key, const ReadRouteConfig& config) {
     if (shutdown_done_.load(std::memory_order_acquire)) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
@@ -657,7 +657,7 @@ tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
 
 std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
 P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
-                             const GetReplicaListRequestConfig& config) {
+                             const ReadRouteConfig& config) {
     if (shutdown_done_.load(std::memory_order_acquire)) {
         LOG(ERROR) << "client is shutting down";
         std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>

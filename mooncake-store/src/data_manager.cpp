@@ -216,6 +216,9 @@ tl::expected<void, ErrorCode> DataManager::WriteRemoteData(
     return {};
 }
 
+// If user attempt to access data in this client by read route
+// and the data is not found,
+// the users will call this function to rectify the route of master
 void DataManager::RectifyReadRoute(const std::string& key,
                                    std::optional<UUID> tier_id) {
     if (!rectify_wrong_route_fn_) return;

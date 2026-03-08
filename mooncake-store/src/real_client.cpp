@@ -230,6 +230,11 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT& config) {
         }
         LOG(INFO) << "Starting IPC server at " << ipc_socket_path_;
     }
+    auto res = start_dummy_client_monitor();
+    if (!res) {
+        LOG(ERROR) << "Failed to start dummy client monitor";
+        return tl::unexpected(ErrorCode::INTERNAL_ERROR);
+    }
     return {};
 }
 
@@ -249,8 +254,6 @@ tl::expected<void, ErrorCode> RealClient::initAll_internal(
     return setup_internal(config);
 }
 
-// TODO:
-// currently the function is unused. Maybe we should remove it in the future.
 int RealClient::initAll(const std::string& protocol_,
                         const std::string& device_name,
                         size_t mount_segment_size) {
@@ -267,6 +270,7 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
     }
 
     stop_ipc_server();
+    stop_dummy_client_monitor();
 
     if (!client_service_) {
         // Not initialized or already cleaned; treat as success for idempotence
@@ -275,6 +279,7 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
     // Gracefully stop accepting new requests and drain in-flight operations
     client_service_->Stop();
     client_service_->Destroy();
+
     // Reset all resources
     client_service_.reset();
     client_buffer_allocator_.reset();
@@ -819,7 +824,7 @@ tl::expected<void, ErrorCode> RealClient::unregister_shm_buffer_internal(
 std::shared_ptr<BufferHandle> RealClient::get_buffer_internal(
     const std::string& key,
     std::shared_ptr<ClientBufferAllocator> client_buffer_allocator,
-    const GetReplicaListRequestConfig& config) {
+    const ReadRouteConfig& config) {
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return nullptr;
@@ -883,12 +888,12 @@ std::shared_ptr<BufferHandle> RealClient::get_buffer_internal(
 
 // Implementation of get_buffer method
 std::shared_ptr<BufferHandle> RealClient::get_buffer(
-    const std::string& key, const GetReplicaListRequestConfig& config) {
+    const std::string& key, const ReadRouteConfig& config) {
     return get_buffer_internal(key, client_buffer_allocator_, config);
 }
 
 std::tuple<uint64_t, size_t> RealClient::get_buffer_info(
-    const std::string& key, const GetReplicaListRequestConfig& config) {
+    const std::string& key, const ReadRouteConfig& config) {
     auto buffer_handle =
         get_buffer_internal(key, client_buffer_allocator_, config);
     if (!buffer_handle) {
@@ -901,9 +906,9 @@ std::tuple<uint64_t, size_t> RealClient::get_buffer_info(
 }
 
 tl::expected<std::tuple<uint64_t, size_t>, ErrorCode>
-RealClient::get_buffer_info_dummy_helper(
-    const std::string& key, const GetReplicaListRequestConfig& config,
-    const UUID& client_id) {
+RealClient::get_buffer_info_dummy_helper(const std::string& key,
+                                         const ReadRouteConfig& config,
+                                         const UUID& client_id) {
     std::shared_lock<std::shared_mutex> lock(dummy_client_mutex_);
     auto it = shm_contexts_.find(client_id);
     if (it == shm_contexts_.end()) {
@@ -939,9 +944,8 @@ RealClient::get_buffer_info_dummy_helper(
 
 // Implementation of batch_get_buffer_internal method
 std::vector<std::shared_ptr<BufferHandle>>
-RealClient::batch_get_buffer_internal(
-    const std::vector<std::string>& keys,
-    const GetReplicaListRequestConfig& config) {
+RealClient::batch_get_buffer_internal(const std::vector<std::string>& keys,
+                                      const ReadRouteConfig& config) {
     std::vector<std::shared_ptr<BufferHandle>> final_results(keys.size(),
                                                              nullptr);
 
@@ -1048,8 +1052,7 @@ RealClient::batch_get_buffer_internal(
 
 // Implementation of batch_get_buffer method
 std::vector<std::shared_ptr<BufferHandle>> RealClient::batch_get_buffer(
-    const std::vector<std::string>& keys,
-    const GetReplicaListRequestConfig& config) {
+    const std::vector<std::string>& keys, const ReadRouteConfig& config) {
     return batch_get_buffer_internal(keys, config);
 }
 
@@ -1089,7 +1092,7 @@ int RealClient::unregister_buffer(void* buffer) {
 
 tl::expected<int64_t, ErrorCode> RealClient::get_into_internal(
     const std::string& key, void* buffer, size_t size,
-    const GetReplicaListRequestConfig& config) {
+    const ReadRouteConfig& config) {
     // NOTE: The buffer address must be previously registered with
     // register_buffer() for zero-copy RDMA operations to work correctly
     if (!client_service_) {
@@ -1146,7 +1149,7 @@ tl::expected<int64_t, ErrorCode> RealClient::get_into_internal(
 }
 
 int64_t RealClient::get_into(const std::string& key, void* buffer, size_t size,
-                             const GetReplicaListRequestConfig& config) {
+                             const ReadRouteConfig& config) {
     return to_py_ret(get_into_internal(key, buffer, size, config));
 }
 
@@ -1329,8 +1332,7 @@ int RealClient::put_from(const std::string& key, void* buffer, size_t size,
 
 std::vector<int64_t> RealClient::batch_get_into(
     const std::vector<std::string>& keys, const std::vector<void*>& buffers,
-    const std::vector<size_t>& sizes,
-    const GetReplicaListRequestConfig& config) {
+    const std::vector<size_t>& sizes, const ReadRouteConfig& config) {
     auto internal_results =
         batch_get_into_internal(keys, buffers, sizes, config);
     std::vector<int64_t> results;
@@ -1347,7 +1349,7 @@ std::vector<tl::expected<int64_t, ErrorCode>>
 RealClient::batch_get_into_dummy_helper(
     const std::vector<std::string>& keys,
     const std::vector<uint64_t>& dummy_buffers,
-    const std::vector<size_t>& sizes, const GetReplicaListRequestConfig& config,
+    const std::vector<size_t>& sizes, const ReadRouteConfig& config,
     const UUID& client_id) {
     std::shared_lock<std::shared_mutex> lock(dummy_client_mutex_);
     auto it = shm_contexts_.find(client_id);
@@ -1402,7 +1404,7 @@ std::vector<tl::expected<int64_t, ErrorCode>>
 RealClient::batch_get_into_internal(const std::vector<std::string>& keys,
                                     const std::vector<void*>& buffers,
                                     const std::vector<size_t>& sizes,
-                                    const GetReplicaListRequestConfig& config) {
+                                    const ReadRouteConfig& config) {
     // Validate preconditions
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
@@ -1661,7 +1663,7 @@ std::vector<int> RealClient::batch_get_into_multi_buffers(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<void*>>& all_buffers,
     const std::vector<std::vector<size_t>>& all_sizes,
-    bool prefer_alloc_in_same_node, const GetReplicaListRequestConfig& config) {
+    bool prefer_alloc_in_same_node, const ReadRouteConfig& config) {
     auto start = std::chrono::steady_clock::now();
     auto internal_results = batch_get_into_multi_buffers_internal(
         keys, all_buffers, all_sizes, prefer_alloc_in_same_node, config);
@@ -1683,7 +1685,7 @@ RealClient::batch_get_into_multi_buffers_internal(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<void*>>& all_buffers,
     const std::vector<std::vector<size_t>>& all_sizes,
-    bool prefer_alloc_in_same_node, const GetReplicaListRequestConfig& config) {
+    bool prefer_alloc_in_same_node, const ReadRouteConfig& config) {
     // Validate preconditions
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
@@ -1863,8 +1865,10 @@ void RealClient::dummy_client_monitor_func() {
             }
         }
 
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(kDummyClientMonitorSleepMs));
+        std::unique_lock<std::mutex> lock(dummy_client_monitor_cv_mutex_);
+        dummy_client_monitor_cv_.wait_for(
+            lock, std::chrono::milliseconds(kDummyClientMonitorSleepMs),
+            [this] { return !dummy_client_monitor_running_.load(); });
     }
 }
 
@@ -1906,6 +1910,18 @@ int RealClient::stop_ipc_server() {
     }
     // jthread will join on destruction or we can explicitly join if needed
     // But recvmsg/accept might block. The logic above attempts to unblock.
+    return 0;
+}
+
+int RealClient::stop_dummy_client_monitor() {
+    {
+        std::lock_guard<std::mutex> lock(dummy_client_monitor_cv_mutex_);
+        dummy_client_monitor_running_ = false;
+    }
+    dummy_client_monitor_cv_.notify_all();
+    if (dummy_client_monitor_thread_.joinable()) {
+        dummy_client_monitor_thread_.join();
+    }
     return 0;
 }
 

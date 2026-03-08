@@ -52,11 +52,11 @@ class CentralizedClientService
 
     tl::expected<std::unique_ptr<QueryResult>, ErrorCode> Query(
         const std::string& object_key,
-        const GetReplicaListRequestConfig& config = {}) override;
+        const ReadRouteConfig& config = {}) override;
 
     std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
     BatchQuery(const std::vector<std::string>& object_keys,
-               const GetReplicaListRequestConfig& config = {}) override;
+               const ReadRouteConfig& config = {}) override;
 
     DeploymentMode deployment_mode() const override {
         return DeploymentMode::CENTRALIZATION;
