@@ -16,11 +16,11 @@ struct WriteRouteRequestConfig {
     static constexpr size_t RETURN_ALL_CANDIDATES = 0;
     size_t max_candidates = RETURN_ALL_CANDIDATES;
     ObjectIterateStrategy strategy = ObjectIterateStrategy::CAPACITY_PRIORITY;
-    bool allow_local = true;    // whether to filter local client
-    bool prefer_local = true;   // enhance the priority of local client
-                                // works only when allow_local==true
-    bool early_return = true;   // whether to return immediately once candidates
-                                // meet conditions of config
+    bool allow_local = true;   // whether to filter local client
+    bool prefer_local = true;  // enhance the priority of local client
+                               // works only when allow_local==true
+    bool early_return = true;  // whether to return immediately once candidates
+                               // meet conditions of config
 
     // segment level (TODO)
     // filter the segment with tag

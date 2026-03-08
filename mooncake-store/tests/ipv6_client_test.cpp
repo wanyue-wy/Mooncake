@@ -383,7 +383,8 @@ TEST_F(IPv6ClientTest, BatchOperationsOverIPv6) {
     ReplicateConfig replicate_config;
     replicate_config.replica_num = 1;
 
-    int batch_put_result = client_->put_batch(keys, data_spans, replicate_config);
+    int batch_put_result =
+        client_->put_batch(keys, data_spans, replicate_config);
     EXPECT_EQ(batch_put_result, 0) << "Batch put should succeed over IPv6";
 
     // Batch Get

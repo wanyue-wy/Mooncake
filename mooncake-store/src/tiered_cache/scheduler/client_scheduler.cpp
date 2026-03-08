@@ -82,8 +82,7 @@ void ClientScheduler::RegisterTier(CacheTier* tier) {
         if (auto* p = static_cast<LRUPolicy*>(policy_.get())) {
             p->SetFastTier(tier->GetTierId());
             LOG(INFO) << "Set Fast Tier (LRU) to " << tier->GetTierId();
-        } else if (auto* p =
-                       static_cast<SimplePolicy*>(policy_.get())) {
+        } else if (auto* p = static_cast<SimplePolicy*>(policy_.get())) {
             p->SetFastTier(tier->GetTierId());
             LOG(INFO) << "Set Fast Tier (Simple) to " << tier->GetTierId();
         } else {
