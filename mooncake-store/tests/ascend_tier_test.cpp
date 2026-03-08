@@ -633,8 +633,8 @@ TEST_F(AscendTierTest, CopyAscendToDramWithVerification) {
 
     // 4. Copy from Ascend to DRAM using DataCopier (this should invoke
     // CopyAscendToDram)
-    const AscendBuffer* ascend_buf =
-        dynamic_cast<const AscendBuffer*>(ascend_handle->loc.data.buffer.get());
+    const AscendBuffer* ascend_buf = static_pointer_cast<const AscendBuffer*>(
+        ascend_handle->loc.data.buffer.get());
     ASSERT_NE(ascend_buf, nullptr) << "Buffer should be AscendBuffer";
 
     DataSource ascend_source;

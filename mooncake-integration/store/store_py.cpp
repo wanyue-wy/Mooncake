@@ -1009,7 +1009,7 @@ PYBIND11_MODULE(store, m) {
                 self.use_dummy_client_ = false;
                 auto real_client = std::make_shared<RealClient>();
                 resource_tracker.registerInstance(
-                    std::dynamic_pointer_cast<PyClient>(real_client));
+                    std::static_pointer_cast<PyClient>(real_client));
                 std::shared_ptr<mooncake::TransferEngine> transfer_engine =
                     nullptr;
                 if (!engine.is_none()) {
@@ -1051,7 +1051,7 @@ PYBIND11_MODULE(store, m) {
                 self.use_dummy_client_ = false;
                 auto real_client = std::make_shared<RealClient>();
                 resource_tracker.registerInstance(
-                    std::dynamic_pointer_cast<PyClient>(real_client));
+                    std::static_pointer_cast<PyClient>(real_client));
                 std::shared_ptr<mooncake::TransferEngine> transfer_engine =
                     nullptr;
                 if (!engine.is_none()) {
@@ -1083,7 +1083,7 @@ PYBIND11_MODULE(store, m) {
                 self.use_dummy_client_ = true;
                 auto dummy_client = std::make_shared<DummyClient>();
                 resource_tracker.registerInstance(
-                    std::dynamic_pointer_cast<PyClient>(dummy_client));
+                    std::static_pointer_cast<PyClient>(dummy_client));
                 auto [ip, port] = parseHostNameWithPort(server_address);
                 auto config = ClientConfigBuilder::build_dummy(
                     mem_pool_size, local_buffer_size, server_address,

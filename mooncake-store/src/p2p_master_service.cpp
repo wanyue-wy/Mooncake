@@ -113,7 +113,7 @@ auto P2PMasterService::GetWriteRoute(const WriteRouteRequest& req)
         req.config.strategy,
         [&](const std::shared_ptr<ClientMeta>& client)
             -> tl::expected<bool, ErrorCode> {
-            auto p2p_client = std::dynamic_pointer_cast<P2PClientMeta>(client);
+            auto p2p_client = std::static_pointer_cast<P2PClientMeta>(client);
             if (!p2p_client) {
                 LOG(ERROR) << "unexpected client meta type";
                 return tl::make_unexpected(ErrorCode::INTERNAL_ERROR);
@@ -147,7 +147,7 @@ auto P2PMasterService::GetWriteRoute(const WriteRouteRequest& req)
 auto P2PMasterService::AddReplica(const AddReplicaRequest& req)
     -> tl::expected<void, ErrorCode> {
     auto accessor = GetMetadataAccessor(req.key);
-    auto client = std::dynamic_pointer_cast<P2PClientMeta>(
+    auto client = std::static_pointer_cast<P2PClientMeta>(
         client_manager_->GetClient(req.replica.client_id));
     if (!client) {
         LOG(ERROR) << "client not found"

@@ -119,7 +119,7 @@ tl::expected<void, ErrorCode> StorageTier::Allocate(size_t size,
 tl::expected<void, ErrorCode> StorageTier::Free(DataSource data) {
     if (!data.buffer) return {};
 
-    auto* staging = dynamic_cast<StorageBuffer*>(data.buffer.get());
+    auto* staging = static_cast<StorageBuffer*>(data.buffer.get());
     if (!staging) return {};
 
     size_t size = staging->size();
@@ -164,7 +164,7 @@ tl::expected<void, ErrorCode> StorageTier::Free(DataSource data) {
 
 tl::expected<void, ErrorCode> StorageTier::Commit(const std::string& key,
                                                   const DataSource& data) {
-    auto* staging = dynamic_cast<StorageBuffer*>(data.buffer.get());
+    auto* staging = static_cast<StorageBuffer*>(data.buffer.get());
     if (!staging) {
         LOG(ERROR) << "Invalid buffer type for StorageTier commit";
         return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
@@ -289,7 +289,7 @@ tl::expected<size_t, ErrorCode> StorageTier::TriggerBucketEviction(
 
     // Try to cast to BucketStorageBackend
     auto* bucket_backend =
-        dynamic_cast<BucketStorageBackend*>(storage_backend_.get());
+        static_cast<BucketStorageBackend*>(storage_backend_.get());
     if (!bucket_backend) {
         LOG(WARNING) << "Storage backend is not BucketStorageBackend, "
                         "bucket eviction not supported";
@@ -389,7 +389,7 @@ static CopierRegistrar storage_tier_copier_registrar(
             return tl::make_unexpected(ErrorCode::BUFFER_OVERFLOW);
 
         StorageBuffer* storage_buf =
-            dynamic_cast<StorageBuffer*>(src.buffer.get());
+            static_cast<StorageBuffer*>(src.buffer.get());
         if (storage_buf) {
             return storage_buf->ReadTo(
                 reinterpret_cast<void*>(dst.buffer->data()),

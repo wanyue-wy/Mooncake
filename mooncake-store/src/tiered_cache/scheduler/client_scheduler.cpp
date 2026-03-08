@@ -79,10 +79,11 @@ void ClientScheduler::RegisterTier(CacheTier* tier) {
 
     // Auto-Configuration: If tier is DRAM, set it as Fast Tier
     if (tier->GetMemoryType() == MemoryType::DRAM) {
-        if (auto* p = dynamic_cast<LRUPolicy*>(policy_.get())) {
+        if (auto* p = static_cast<LRUPolicy*>(policy_.get())) {
             p->SetFastTier(tier->GetTierId());
             LOG(INFO) << "Set Fast Tier (LRU) to " << tier->GetTierId();
-        } else if (auto* p = dynamic_cast<SimplePolicy*>(policy_.get())) {
+        } else if (auto* p =
+                       static_cast<SimplePolicy*>(policy_.get())) {
             p->SetFastTier(tier->GetTierId());
             LOG(INFO) << "Set Fast Tier (Simple) to " << tier->GetTierId();
         } else {

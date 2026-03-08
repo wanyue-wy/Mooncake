@@ -97,7 +97,7 @@ class ClientIntegrationTest : public ::testing::Test {
         }
 
         // Cast to CentralizedClientService for BatchReplicaClear access
-        auto client = std::dynamic_pointer_cast<CentralizedClientService>(
+        auto client = std::static_pointer_cast<CentralizedClientService>(
             client_opt.value());
         EXPECT_TRUE(client != nullptr)
             << "Failed to cast to CentralizedClientService";

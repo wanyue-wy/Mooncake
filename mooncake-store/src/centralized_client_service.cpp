@@ -369,7 +369,7 @@ tl::expected<void, ErrorCode> CentralizedClientService::Get(
         return tl::unexpected(err);
     }
     auto* centralized_result =
-        dynamic_cast<const CentralizedQueryResult*>(&query_result);
+        static_cast<const CentralizedQueryResult*>(&query_result);
     if (!centralized_result) {
         LOG(ERROR) << "query_result is not centralized key=" << object_key;
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -545,7 +545,7 @@ std::vector<tl::expected<void, ErrorCode>> CentralizedClientService::BatchGet(
     for (size_t i = 0; i < object_keys.size(); ++i) {
         const QueryResult* base_ptr = query_results[i].get();
         auto* centralized_result =
-            dynamic_cast<const CentralizedQueryResult*>(base_ptr);
+            static_cast<const CentralizedQueryResult*>(base_ptr);
         if (!centralized_result) {
             LOG(ERROR) << "query_result is not centralized key="
                        << object_keys[i];
