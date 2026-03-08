@@ -264,8 +264,6 @@ class P2PClientService final : public ClientService {
     // Each PeerClient instance maintains its own fixed-size connection pool.
     std::mutex peer_clients_mutex_;
     std::map<std::string, std::unique_ptr<PeerClient>> peer_clients_;
-
-    std::atomic<bool> shutdown_done_{false};
 };
 
 }  // namespace mooncake

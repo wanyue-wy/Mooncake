@@ -33,7 +33,10 @@ CentralizedClientService::~CentralizedClientService() {
 }
 
 void CentralizedClientService::Stop() {
-    // Stop heartbeat early so no more tasks are scheduled
+    if (!MarkShuttingDown()) {
+        return;  // Already shut down.
+    }
+
     ClientService::Stop();
 }
 
@@ -224,6 +227,11 @@ void CentralizedClientService::InitTransferSubmitter() {
 tl::expected<std::unique_ptr<QueryResult>, ErrorCode>
 CentralizedClientService::Query(const std::string& object_key,
                                 const ReadRouteConfig& config) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     std::chrono::steady_clock::time_point start_time =
         std::chrono::steady_clock::now();
     auto result = master_client_.GetReplicaList(object_key, config);
@@ -247,6 +255,17 @@ std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
 CentralizedClientService::BatchQuery(
     const std::vector<std::string>& object_keys,
     const ReadRouteConfig& config) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
+            results;
+        results.reserve(object_keys.size());
+        for (size_t i = 0; i < object_keys.size(); ++i) {
+            results.emplace_back(tl::unexpected(ErrorCode::SHUTTING_DOWN));
+        }
+        return results;
+    }
     std::chrono::steady_clock::time_point start_time =
         std::chrono::steady_clock::now();
     auto response = master_client_.BatchGetReplicaList(object_keys, config);
@@ -291,6 +310,11 @@ tl::expected<std::vector<std::string>, ErrorCode>
 CentralizedClientService::BatchReplicaClear(
     const std::vector<std::string>& object_keys, const UUID& client_id,
     const std::string& segment_name) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto result =
         master_client_.BatchReplicaClear(object_keys, client_id, segment_name);
     return result;
@@ -299,6 +323,11 @@ CentralizedClientService::BatchReplicaClear(
 tl::expected<void, ErrorCode> CentralizedClientService::Get(
     const std::string& object_key, const QueryResult& query_result,
     std::vector<Slice>& slices) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     // Find the first complete replica
     Replica::Descriptor replica;
     ErrorCode err = FindFirstCompleteReplica(query_result.replicas, replica);
@@ -427,6 +456,16 @@ std::vector<tl::expected<void, ErrorCode>> CentralizedClientService::BatchGet(
     const std::vector<std::unique_ptr<QueryResult>>& query_results,
     std::unordered_map<std::string, std::vector<Slice>>& slices,
     bool prefer_alloc_in_same_node) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        std::vector<tl::expected<void, ErrorCode>> results;
+        results.reserve(object_keys.size());
+        for (size_t i = 0; i < object_keys.size(); ++i) {
+            results.emplace_back(tl::unexpected(ErrorCode::SHUTTING_DOWN));
+        }
+        return results;
+    }
     if (!transfer_submitter_) {
         LOG(ERROR) << "TransferSubmitter not initialized";
         std::vector<tl::expected<void, ErrorCode>> results;
@@ -547,6 +586,11 @@ std::vector<tl::expected<void, ErrorCode>> CentralizedClientService::BatchGet(
 tl::expected<void, ErrorCode> CentralizedClientService::Put(
     const ObjectKey& key, std::vector<Slice>& slices,
     const WriteConfig& config) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     const auto* replicate_config = std::get_if<ReplicateConfig>(&config);
     if (!replicate_config) {
         LOG(ERROR) << "CentralizedClientService currently only supports "
@@ -1155,6 +1199,11 @@ std::vector<tl::expected<void, ErrorCode>> CentralizedClientService::BatchPut(
 
 tl::expected<void, ErrorCode> CentralizedClientService::Remove(
     const ObjectKey& key) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto result = master_client_.Remove(key);
     // if (storage_backend_) {
     //     storage_backend_->RemoveFile(key);
@@ -1167,6 +1216,11 @@ tl::expected<void, ErrorCode> CentralizedClientService::Remove(
 
 tl::expected<long, ErrorCode> CentralizedClientService::RemoveByRegex(
     const ObjectKey& str) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto result = master_client_.RemoveByRegex(str);
     // if (storage_backend_) {
     //     storage_backend_->RemoveByRegex(str);
@@ -1178,6 +1232,11 @@ tl::expected<long, ErrorCode> CentralizedClientService::RemoveByRegex(
 }
 
 tl::expected<long, ErrorCode> CentralizedClientService::RemoveAll() {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     // if (storage_backend_) {
     //     storage_backend_->RemoveAll();
     // }
@@ -1186,6 +1245,11 @@ tl::expected<long, ErrorCode> CentralizedClientService::RemoveAll() {
 
 tl::expected<void, ErrorCode> CentralizedClientService::MountSegment(
     const void* buffer, size_t size) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto check_result = CheckRegisterMemoryParams(buffer, size);
     if (!check_result) {
         return tl::unexpected(check_result.error());
@@ -1253,6 +1317,11 @@ tl::expected<void, ErrorCode> CentralizedClientService::MountSegment(
 
 tl::expected<void, ErrorCode> CentralizedClientService::UnmountSegment(
     const void* buffer, size_t size) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     std::lock_guard<std::mutex> lock(mounted_segments_mutex_);
     auto segment = mounted_segments_.end();
 
@@ -1302,6 +1371,11 @@ tl::expected<void, ErrorCode> CentralizedClientService::UnmountSegment(
 
 tl::expected<void, ErrorCode> CentralizedClientService::MountLocalDiskSegment(
     bool enable_offloading) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto response =
         master_client_.MountLocalDiskSegment(client_id_, enable_offloading);
 
@@ -1315,12 +1389,17 @@ tl::expected<void, ErrorCode> CentralizedClientService::MountLocalDiskSegment(
 tl::expected<void, ErrorCode> CentralizedClientService::OffloadObjectHeartbeat(
     bool enable_offloading,
     std::unordered_map<std::string, int64_t>& offloading_objects) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto response =
         master_client_.OffloadObjectHeartbeat(client_id_, enable_offloading);
     if (!response) {
         LOG(ERROR) << "OffloadObjectHeartbeat failed, error code is "
                    << response.error();
-        return tl::make_unexpected(response.error());
+        return tl::unexpected(response.error());
     }
     offloading_objects = std::move(response.value());
     return {};
@@ -1331,12 +1410,22 @@ tl::expected<void, ErrorCode> CentralizedClientService::BatchPutOffloadObject(
     const std::vector<std::string>& keys,
     const std::vector<uintptr_t>& pointers,
     const std::unordered_map<std::string, Slice>& batched_slices) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     return {};
 }
 
 tl::expected<void, ErrorCode> CentralizedClientService::NotifyOffloadSuccess(
     const std::vector<std::string>& keys,
     const std::vector<StorageObjectMetadata>& metadatas) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto response =
         master_client_.NotifyOffloadSuccess(client_id_, keys, metadatas);
     return response;

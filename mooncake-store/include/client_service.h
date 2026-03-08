@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -18,6 +19,8 @@
 #include "replica.h"
 #include "master_client.h"
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
+#include "client_config_builder.h"
+
 #include "client_config_builder.h"
 
 namespace mooncake {
@@ -87,9 +90,7 @@ class ClientService {
     virtual tl::expected<
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>
-    BatchQueryIp(const std::vector<UUID>& client_ids) {
-        return GetMasterClient().BatchQueryIp(client_ids);
-    }
+    BatchQueryIp(const std::vector<UUID>& client_ids);
 
     /**
      * @brief Queries replica lists for object keys that match a regex pattern.
@@ -100,9 +101,7 @@ class ClientService {
     virtual tl::expected<
         std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
         ErrorCode>
-    QueryByRegex(const std::string& str) {
-        return GetMasterClient().GetReplicaListByRegex(str);
-    }
+    QueryByRegex(const std::string& str);
 
     /**
      * @brief Gets object metadata without transferring data
@@ -236,9 +235,7 @@ class ClientService {
      * @param key Key to check
      * @return True if exists, false if not, or ErrorCode for unexpected errors.
      */
-    virtual tl::expected<bool, ErrorCode> IsExist(const std::string& key) {
-        return GetMasterClient().ExistKey(key);
-    }
+    virtual tl::expected<bool, ErrorCode> IsExist(const std::string& key);
 
     /**
      * @brief Checks if multiple objects exist
@@ -246,9 +243,7 @@ class ClientService {
      * @return Vector of existence results for each key
      */
     virtual std::vector<tl::expected<bool, ErrorCode>> BatchIsExist(
-        const std::vector<std::string>& keys) {
-        return GetMasterClient().BatchExistKey(keys);
-    }
+        const std::vector<std::string>& keys);
 
     // For human-readable metrics
     tl::expected<std::string, ErrorCode> GetSummaryMetrics() {
@@ -260,6 +255,11 @@ class ClientService {
 
     tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
     CalcCacheStats() {
+        auto guard = AcquireInflightGuard();
+        if (!guard.is_valid()) {
+            LOG(ERROR) << "client is shutting down";
+            return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+        }
         return GetMasterClient().CalcCacheStats();
     }
 
@@ -358,6 +358,54 @@ class ClientService {
     virtual tl::expected<void, ErrorCode> RegisterClient() = 0;
 
    protected:
+    /**
+     * @brief RAII guard for managing in-flight requests during service
+     * shutdown.
+     */
+    class InflightRequestGuard {
+       public:
+        explicit InflightRequestGuard(ClientService* client)
+            : client_(client), valid_(false), lock_(client_->running_rw_mtx_) {
+            valid_ = client_->is_running_;
+        }
+        ~InflightRequestGuard() = default;
+
+        InflightRequestGuard(const InflightRequestGuard&) = delete;
+        InflightRequestGuard& operator=(const InflightRequestGuard&) = delete;
+        InflightRequestGuard(InflightRequestGuard&& other) = delete;
+        InflightRequestGuard& operator=(InflightRequestGuard&& other) = delete;
+
+        bool is_valid() const { return valid_; }
+
+       private:
+        ClientService* client_;
+        bool valid_;
+        std::shared_lock<std::shared_mutex> lock_;
+    };
+
+    /**
+     * @brief Acquires an inflight request guard.
+     * @return An InflightRequestGuard. If shutting down, is_valid() will be
+     * false.
+     */
+    InflightRequestGuard AcquireInflightGuard() {
+        return InflightRequestGuard(this);
+    }
+
+    /**
+     * @brief Marks the service as shutting down.
+     * @return true if successfully marked, false if already shutting down.
+     */
+    bool MarkShuttingDown() {
+        std::unique_lock<std::shared_mutex> lock(running_rw_mtx_);
+        if (!is_running_) return false;
+        is_running_ = false;
+        return true;
+    }
+
+    friend class InflightRequestGuard;
+
+   protected:
     // Client identification
     const UUID client_id_;
 
@@ -400,6 +448,10 @@ class ClientService {
     std::atomic<bool> heartbeat_running_{false};
     std::condition_variable heartbeat_cv_;
     std::mutex heartbeat_mtx_;
+
+    // Shutdown protection
+    std::shared_mutex running_rw_mtx_;
+    bool is_running_{false} GUARDED_BY(running_rw_mtx_);
 };
 
 }  // namespace mooncake

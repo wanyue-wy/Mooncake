@@ -22,9 +22,7 @@ P2PClientService::P2PClientService(
                      metrics_ ? &metrics_->master_client_metric : nullptr) {}
 
 void P2PClientService::Stop() {
-    bool expected = false;
-    if (!shutdown_done_.compare_exchange_strong(expected, true,
-                                                std::memory_order_acq_rel)) {
+    if (!MarkShuttingDown()) {
         return;  // Already shut down.
     }
 
@@ -332,7 +330,8 @@ std::vector<Segment> P2PClientService::CollectTierSegments() const {
 }
 
 tl::expected<void, ErrorCode> P2PClientService::RegisterClient() {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -458,7 +457,8 @@ tl::expected<void, ErrorCode> P2PClientService::PutViaRoute(
 tl::expected<void, ErrorCode> P2PClientService::Put(const ObjectKey& key,
                                                     std::vector<Slice>& slices,
                                                     const WriteConfig& config) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -485,7 +485,8 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchPut(
     const std::vector<ObjectKey>& keys,
     std::vector<std::vector<Slice>>& batched_slices,
     const WriteConfig& config) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return std::vector<tl::expected<void, ErrorCode>>(
             keys.size(), tl::make_unexpected(ErrorCode::SHUTTING_DOWN));
@@ -602,7 +603,8 @@ tl::expected<void, ErrorCode> P2PClientService::GetRemoteViaRoute(
 tl::expected<void, ErrorCode> P2PClientService::Get(
     const std::string& object_key, const QueryResult& query_result,
     std::vector<Slice>& slices) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -618,7 +620,8 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchGet(
     const std::vector<std::unique_ptr<QueryResult>>& query_results,
     std::unordered_map<std::string, std::vector<Slice>>& slices,
     bool prefer_same_node) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return std::vector<tl::expected<void, ErrorCode>>(
             object_keys.size(), tl::make_unexpected(ErrorCode::SHUTTING_DOWN));
@@ -642,7 +645,8 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchGet(
 
 tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
     const std::string& object_key, const ReadRouteConfig& config) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -658,7 +662,8 @@ tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
 std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
 P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
                              const ReadRouteConfig& config) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
             results;
@@ -691,7 +696,8 @@ P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
 // ============================================================================
 
 tl::expected<void, ErrorCode> P2PClientService::Remove(const ObjectKey& key) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -701,7 +707,8 @@ tl::expected<void, ErrorCode> P2PClientService::Remove(const ObjectKey& key) {
 
 tl::expected<long, ErrorCode> P2PClientService::RemoveByRegex(
     const ObjectKey& str) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -710,7 +717,8 @@ tl::expected<long, ErrorCode> P2PClientService::RemoveByRegex(
 }
 
 tl::expected<long, ErrorCode> P2PClientService::RemoveAll() {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -724,7 +732,8 @@ tl::expected<long, ErrorCode> P2PClientService::RemoveAll() {
 
 tl::expected<void, ErrorCode> P2PClientService::MountSegment(const void* buffer,
                                                              size_t size) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -740,7 +749,8 @@ tl::expected<void, ErrorCode> P2PClientService::MountSegment(const void* buffer,
 
 tl::expected<void, ErrorCode> P2PClientService::UnmountSegment(
     const void* buffer, size_t size) {
-    if (shutdown_done_.load(std::memory_order_acquire)) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }

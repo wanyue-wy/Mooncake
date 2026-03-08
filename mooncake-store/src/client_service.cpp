@@ -384,6 +384,48 @@ ErrorCode ClientService::InitTransferEngine(
     return ErrorCode::OK;
 }
 
+tl::expected<bool, ErrorCode> ClientService::IsExist(const std::string& key) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
+    return GetMasterClient().ExistKey(key);
+}
+
+std::vector<tl::expected<bool, ErrorCode>> ClientService::BatchIsExist(
+    const std::vector<std::string>& keys) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
+    return GetMasterClient().BatchExistKey(keys);
+}
+
+tl::expected<
+    std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+    ErrorCode>
+ClientService::BatchQueryIp(const std::vector<UUID>& client_ids) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
+    return GetMasterClient().BatchQueryIp(client_ids);
+}
+
+tl::expected<std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+             ErrorCode>
+ClientService::QueryByRegex(const std::string& str) {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
+    return GetMasterClient().GetReplicaListByRegex(str);
+}
+
 tl::expected<void, ErrorCode> ClientService::RegisterLocalMemory(
     void* addr, size_t length, const std::string& location,
     bool remote_accessible, bool update_metadata) {
