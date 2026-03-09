@@ -280,6 +280,7 @@ class ClientService {
     [[nodiscard]] std::string GetTransportEndpoint() {
         return transfer_engine_->getLocalIpAndPort();
     }
+    UUID GetClientID() const { return client_id_; }
 
    public:
     /**

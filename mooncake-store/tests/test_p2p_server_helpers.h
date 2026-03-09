@@ -78,6 +78,7 @@ class InProcP2PMaster {
     std::string master_address() const {
         return std::string("127.0.0.1:") + std::to_string(rpc_port_);
     }
+    WrappedP2PMasterService& GetWrapped() { return *wrapped_; }
 
    private:
     std::unique_ptr<coro_rpc::coro_rpc_server> server_;

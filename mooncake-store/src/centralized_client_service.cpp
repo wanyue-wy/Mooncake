@@ -57,7 +57,7 @@ void CentralizedClientService::Destroy() {
             LOG(ERROR) << "Segment " << segment.id << " is not centralized";
             continue;
         }
-        auto result = UnmountSegment(
+        auto result = InnerUnmountSegment(
             reinterpret_cast<void*>(segment.GetCentralizedExtra().base),
             segment.size);
         if (!result) {
@@ -1389,6 +1389,11 @@ tl::expected<void, ErrorCode> CentralizedClientService::UnmountSegment(
         LOG(ERROR) << "client is shutting down";
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
     }
+    return InnerUnmountSegment(buffer, size);
+}
+
+tl::expected<void, ErrorCode> CentralizedClientService::InnerUnmountSegment(
+    const void* buffer, size_t size) {
     std::lock_guard<std::mutex> lock(mounted_segments_mutex_);
     auto segment = mounted_segments_.end();
 

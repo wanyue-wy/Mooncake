@@ -167,6 +167,9 @@ class CentralizedClientService
     ErrorCode TransferRead(const Replica::Descriptor& replica_descriptor,
                            std::vector<Slice>& slices);
 
+    tl::expected<void, ErrorCode> InnerUnmountSegment(const void* buffer,
+                                                      size_t size);
+
     ErrorCode FindFirstCompleteReplica(
         const std::vector<Replica::Descriptor>& replica_list,
         Replica::Descriptor& replica);
