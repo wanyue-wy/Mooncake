@@ -12,9 +12,11 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "p2p_client_service.h"
@@ -380,6 +382,78 @@ TEST_F(P2PClientIntegrationTest, LargePutGet) {
         << "Large Get failed: " << static_cast<int>(get.error());
 
     EXPECT_EQ(payload, read_buf);
+}
+// ============================================================================
+// Concurrency Tests
+// ============================================================================
+
+TEST_F(P2PClientIntegrationTest, ConcurrentPutGet) {
+    constexpr int kNumWriterThreads = 4;
+    constexpr int kKeysPerThread = 10;
+
+    std::atomic<int> put_success{0};
+    std::atomic<int> get_success{0};
+    std::vector<std::thread> threads;
+
+    // Writer threads: each writes unique keys
+    for (int i = 0; i < kNumWriterThreads; ++i) {
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < kKeysPerThread; ++j) {
+                std::string key = "p2p_concurrent_" + std::to_string(i) + "_" +
+                                  std::to_string(j);
+                std::string data(1024, 'A' + (i % 26));
+
+                std::vector<Slice> slices;
+                slices.emplace_back(
+                    Slice{const_cast<char*>(data.data()), data.size()});
+
+                auto put_result =
+                    client_->Put(key, slices, WriteRouteRequestConfig{});
+                if (put_result.has_value()) {
+                    put_success.fetch_add(1);
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+    threads.clear();
+
+    LOG(INFO) << "P2P concurrent puts completed: " << put_success << "/"
+              << (kNumWriterThreads * kKeysPerThread);
+    EXPECT_GT(put_success.load(), 0);
+
+    // Reader threads: read back keys concurrently via Query + Get
+    for (int i = 0; i < kNumWriterThreads; ++i) {
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < kKeysPerThread; ++j) {
+                std::string key = "p2p_concurrent_" + std::to_string(i) + "_" +
+                                  std::to_string(j);
+
+                auto query = client_->Query(key);
+                if (!query.has_value()) continue;
+
+                std::vector<char> buf(1024, 0);
+                std::vector<Slice> slices;
+                slices.emplace_back(Slice{buf.data(), buf.size()});
+
+                auto get_result = client_->Get(key, *query.value(), slices);
+                if (get_result.has_value()) {
+                    get_success.fetch_add(1);
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    LOG(INFO) << "P2P concurrent gets completed: " << get_success << "/"
+              << (kNumWriterThreads * kKeysPerThread);
+    EXPECT_GT(get_success.load(), 0);
 }
 
 }  // namespace testing

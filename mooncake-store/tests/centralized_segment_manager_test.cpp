@@ -3,6 +3,10 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <thread>
+#include <vector>
+
 #include <boost/functional/hash.hpp>
 
 namespace mooncake {
@@ -314,6 +318,83 @@ TEST_F(SegmentTest, MountLocalDiskSegmentDuplicate) {
 
     // Verify state remains the same after duplicate mount
     ValidateMountedLocalDiskSegments(segment_manager, segment);
+}
+
+// ============================================================
+// Concurrency Tests
+// ============================================================
+
+TEST_F(SegmentTest, ConcurrentMountAndUnmount) {
+    CentralizedSegmentManager segment_manager;
+    constexpr int kNumThreads = 16;
+    std::vector<std::thread> threads;
+    std::atomic<int> success_count{0};
+
+    for (int i = 0; i < kNumThreads; i++) {
+        threads.emplace_back([&segment_manager, &success_count, i]() {
+            Segment segment;
+            segment.id = generate_uuid();
+            segment.name = "concurrent_seg_" + std::to_string(i);
+            segment.size = 1024 * 1024 * 16;
+            segment.extra = CentralizedSegmentExtraData{
+                .base =
+                    static_cast<uintptr_t>(0x100000000 + i * 0x100000000ULL),
+                .te_endpoint = ""};
+
+            auto mount_result = segment_manager.MountSegment(segment);
+            ASSERT_TRUE(mount_result.has_value());
+            success_count.fetch_add(1);
+
+            auto unmount_result = segment_manager.UnmountSegment(segment.id);
+            ASSERT_TRUE(unmount_result.has_value());
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    EXPECT_EQ(success_count, kNumThreads);
+
+    // All segments should be unmounted
+    std::vector<Segment> empty_vec;
+    ValidateMountedSegments(segment_manager, empty_vec);
+}
+
+TEST_F(SegmentTest, ConcurrentMountSameSegment) {
+    CentralizedSegmentManager segment_manager;
+    constexpr int kNumThreads = 16;
+
+    Segment segment;
+    segment.id = generate_uuid();
+    segment.name = "same_segment";
+    segment.size = 1024 * 1024 * 16;
+    segment.extra =
+        CentralizedSegmentExtraData{.base = 0x100000000, .te_endpoint = ""};
+
+    std::vector<std::thread> threads;
+    std::atomic<int> mount_success{0};
+    std::atomic<int> mount_duplicate{0};
+
+    for (int i = 0; i < kNumThreads; i++) {
+        threads.emplace_back([&segment_manager, &segment, &mount_success,
+                              &mount_duplicate]() {
+            auto result = segment_manager.MountSegment(segment);
+            if (result.has_value()) {
+                mount_success.fetch_add(1);
+            } else if (result.error() == ErrorCode::SEGMENT_ALREADY_EXISTS) {
+                mount_duplicate.fetch_add(1);
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    // Exactly one mount should succeed
+    EXPECT_EQ(mount_success, 1);
+    EXPECT_EQ(mount_duplicate, kNumThreads - 1);
 }
 
 }  // namespace mooncake

@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 #include <glog/logging.h>
+#include <atomic>
 #include <filesystem>
+#include <thread>
+#include <vector>
 
 #include "tiered_cache/tiers/storage_tier.h"
 #include "tiered_cache/tiered_backend.h"
@@ -379,6 +382,180 @@ TEST_F(StorageTierTest, AutoEvictionOnCapacityExceeded) {
 
     // Cleanup
     fs::remove_all("/tmp/mooncake_test_auto_eviction");
+}
+
+// ============================================================
+// Concurrency Tests
+// ============================================================
+
+// Test concurrent BatchOffload to BucketStorageBackend
+TEST_F(StorageTierTest, ConcurrentBucketOffload) {
+    setenv("MOONCAKE_OFFLOAD_STORAGE_BACKEND_DESCRIPTOR",
+           "bucket_storage_backend", 1);
+    setenv("MOONCAKE_OFFLOAD_FILE_STORAGE_PATH",
+           "/tmp/mooncake_test_concurrent_offload", 1);
+
+    fs::remove_all("/tmp/mooncake_test_concurrent_offload");
+    fs::create_directories("/tmp/mooncake_test_concurrent_offload");
+
+    FileStorageConfig config;
+    config.storage_filepath = "/tmp/mooncake_test_concurrent_offload";
+    config.storage_backend_type = StorageBackendType::kBucket;
+
+    BucketBackendConfig bucket_config;
+    bucket_config.bucket_size_limit = 1024 * 1024;
+    bucket_config.bucket_keys_limit = 50;
+
+    BucketStorageBackend backend(config, bucket_config);
+    ASSERT_TRUE(backend.Init());
+
+    constexpr int kNumThreads = 4;
+    constexpr int kKeysPerThread = 10;
+    std::atomic<int> offload_success{0};
+    std::vector<std::thread> threads;
+
+    for (int i = 0; i < kNumThreads; ++i) {
+        threads.emplace_back([&, i]() {
+            std::vector<char> data(512, 'A' + (i % 26));
+            for (int j = 0; j < kKeysPerThread; ++j) {
+                std::string key =
+                    "cc_offload_" + std::to_string(i) + "_" + std::to_string(j);
+                std::unordered_map<std::string, std::vector<Slice>> batch;
+                batch[key] = {Slice{data.data(), data.size()}};
+                auto res = backend.BatchOffload(batch, nullptr);
+                if (res.has_value()) {
+                    offload_success.fetch_add(1);
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    LOG(INFO) << "Concurrent offloads completed: " << offload_success << "/"
+              << (kNumThreads * kKeysPerThread);
+    EXPECT_GT(offload_success.load(), 0);
+
+    // Verify some keys exist
+    int exist_count = 0;
+    for (int i = 0; i < kNumThreads; ++i) {
+        for (int j = 0; j < kKeysPerThread; ++j) {
+            std::string key =
+                "cc_offload_" + std::to_string(i) + "_" + std::to_string(j);
+            auto res = backend.IsExist(key);
+            if (res.has_value() && res.value()) {
+                exist_count++;
+            }
+        }
+    }
+    LOG(INFO) << "Keys found after concurrent offload: " << exist_count;
+    EXPECT_GT(exist_count, 0);
+
+    fs::remove_all("/tmp/mooncake_test_concurrent_offload");
+}
+
+// Test concurrent Allocate+Write+Commit and Get on TieredBackend
+TEST_F(StorageTierTest, ConcurrentReadWrite) {
+    setenv("MOONCAKE_OFFLOAD_STORAGE_BACKEND_DESCRIPTOR",
+           "file_per_key_storage_backend", 1);
+    setenv("MOONCAKE_OFFLOAD_FILE_STORAGE_PATH",
+           "/tmp/mooncake_test_concurrent_rw", 1);
+
+    fs::remove_all("/tmp/mooncake_test_concurrent_rw");
+    fs::create_directories("/tmp/mooncake_test_concurrent_rw");
+
+    std::string json_config_str = R"({
+        "tiers": [
+            {
+                "type": "STORAGE",
+                "capacity": 1073741824,
+                "priority": 5,
+                "tags": ["ssd"]
+            }
+        ]
+    })";
+    Json::Value config;
+    ASSERT_TRUE(parseJsonString(json_config_str, config));
+
+    TieredBackend backend;
+    auto init_res = backend.Init(config, nullptr, nullptr, nullptr, nullptr);
+    ASSERT_TRUE(init_res.has_value());
+
+    // Phase 1: Concurrent writes
+    constexpr int kNumWriters = 4;
+    constexpr int kKeysPerWriter = 10;
+    constexpr size_t kDataSize = 1024;
+    std::atomic<int> write_success{0};
+    std::vector<std::thread> threads;
+
+    for (int i = 0; i < kNumWriters; ++i) {
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < kKeysPerWriter; ++j) {
+                std::string key =
+                    "rw_key_" + std::to_string(i) + "_" + std::to_string(j);
+
+                auto alloc_result = backend.Allocate(kDataSize);
+                if (!alloc_result.has_value()) continue;
+                AllocationHandle handle = alloc_result.value();
+
+                auto test_buffer = CreateTestBuffer(kDataSize);
+                DataSource source;
+                source.buffer = std::make_unique<TempDRAMBuffer>(
+                    std::move(test_buffer), kDataSize);
+                source.type = MemoryType::DRAM;
+
+                auto write_result = backend.Write(source, handle);
+                if (!write_result.has_value()) continue;
+
+                auto commit_result = backend.Commit(key, handle);
+                if (commit_result.has_value()) {
+                    write_success.fetch_add(1);
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+    threads.clear();
+
+    LOG(INFO) << "Concurrent writes completed: " << write_success << "/"
+              << (kNumWriters * kKeysPerWriter);
+    EXPECT_GT(write_success.load(), 0);
+
+    // Flush to persist
+    auto tier_views = backend.GetTierViews();
+    ASSERT_FALSE(tier_views.empty());
+    auto tier = backend.GetTier(tier_views[0].id);
+    const_cast<CacheTier*>(tier)->Flush();
+
+    // Phase 2: Concurrent reads
+    std::atomic<int> read_success{0};
+    for (int i = 0; i < kNumWriters; ++i) {
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < kKeysPerWriter; ++j) {
+                std::string key =
+                    "rw_key_" + std::to_string(i) + "_" + std::to_string(j);
+                auto get_result = backend.Get(key);
+                if (get_result.has_value()) {
+                    read_success.fetch_add(1);
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    LOG(INFO) << "Concurrent reads completed: " << read_success << "/"
+              << (kNumWriters * kKeysPerWriter);
+    EXPECT_GT(read_success.load(), 0);
+
+    fs::remove_all("/tmp/mooncake_test_concurrent_rw");
 }
 
 }  // namespace mooncake::test
