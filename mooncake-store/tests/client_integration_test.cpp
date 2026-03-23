@@ -1001,6 +1001,175 @@ TEST_F(ClientIntegrationTest, BatchReplicaClearOperations) {
     EXPECT_TRUE(non_existent_result.value().empty())
         << "Non-existent keys should return empty results";
 }
+// ============================================================
+// Concurrency Tests
+// ============================================================
+
+// Test concurrent Put and Get operations from multiple threads
+TEST_F(ClientIntegrationTest, ConcurrentPutGet) {
+    constexpr int kNumWriterThreads = 4;
+    constexpr int kKeysPerThread = 10;
+    const size_t data_size = 1024;  // 1KB per key
+
+    ReplicateConfig config;
+    config.replica_num = 1;
+
+    std::atomic<int> put_success{0};
+    std::atomic<int> get_success{0};
+    std::vector<std::thread> threads;
+
+    // Writer threads: each writes unique keys
+    for (int i = 0; i < kNumWriterThreads; i++) {
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < kKeysPerThread; j++) {
+                std::string key = "concurrent_key_" + std::to_string(i) + "_" +
+                                  std::to_string(j);
+                std::string data(data_size, 'A' + (i % 26));
+
+                void* buffer = client_buffer_allocator_->allocate(data_size);
+                if (!buffer) continue;
+                memcpy(buffer, data.data(), data_size);
+
+                std::vector<Slice> slices;
+                slices.emplace_back(Slice{buffer, data_size});
+
+                auto put_result = test_client_->Put(key, slices, config);
+                if (put_result.has_value()) {
+                    put_success.fetch_add(1);
+                }
+                client_buffer_allocator_->deallocate(buffer, data_size);
+            }
+        });
+    }
+
+    // Wait for all writers
+    for (auto& t : threads) {
+        t.join();
+    }
+    threads.clear();
+
+    LOG(INFO) << "Concurrent puts completed: " << put_success << "/"
+              << (kNumWriterThreads * kKeysPerThread);
+    EXPECT_GT(put_success.load(), 0);
+
+    // Reader threads: read back keys concurrently
+    for (int i = 0; i < kNumWriterThreads; i++) {
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < kKeysPerThread; j++) {
+                std::string key = "concurrent_key_" + std::to_string(i) + "_" +
+                                  std::to_string(j);
+
+                void* buffer = client_buffer_allocator_->allocate(data_size);
+                if (!buffer) continue;
+
+                std::vector<Slice> slices;
+                slices.emplace_back(Slice{buffer, data_size});
+
+                auto get_result = test_client_->Get(key, slices);
+                if (get_result.has_value()) {
+                    get_success.fetch_add(1);
+                }
+                client_buffer_allocator_->deallocate(buffer, data_size);
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    LOG(INFO) << "Concurrent gets completed: " << get_success << "/"
+              << (kNumWriterThreads * kKeysPerThread);
+    EXPECT_GT(get_success.load(), 0);
+
+    // Cleanup: remove all keys
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(default_kv_lease_ttl_));
+    for (int i = 0; i < kNumWriterThreads; i++) {
+        for (int j = 0; j < kKeysPerThread; j++) {
+            std::string key =
+                "concurrent_key_" + std::to_string(i) + "_" + std::to_string(j);
+            test_client_->Remove(key);  // Best effort cleanup
+        }
+    }
+}
+
+// Test InflightRequestGuard behavior: requests receive appropriate
+// errors when the client service is shutting down.
+// NOTE: This test is DISABLED because calling Stop() on a shared
+// test_client_ would affect other tests. Enable only when running
+// in isolation with a dedicated client instance.
+TEST_F(ClientIntegrationTest, DISABLED_ShutdownDuringConcurrentRequests) {
+    // Create a dedicated client for this test
+    auto dedicated_client = CreateClient("localhost:17814");
+    ASSERT_TRUE(dedicated_client != nullptr);
+
+    const size_t data_size = 1024;
+    ReplicateConfig config;
+    config.replica_num = 1;
+
+    std::atomic<int> success_count{0};
+    std::atomic<int> error_count{0};
+    std::atomic<bool> shutdown_triggered{false};
+
+    constexpr int kNumThreads = 4;
+    constexpr int kOpsPerThread = 20;
+    std::vector<std::thread> threads;
+
+    // Worker threads: continuously try to Put
+    for (int i = 0; i < kNumThreads; i++) {
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < kOpsPerThread; j++) {
+                std::string key = "shutdown_key_" + std::to_string(i) + "_" +
+                                  std::to_string(j);
+                std::string data(data_size, 'X');
+
+                void* buffer = client_buffer_allocator_->allocate(data_size);
+                if (!buffer) {
+                    error_count.fetch_add(1);
+                    continue;
+                }
+                memcpy(buffer, data.data(), data_size);
+
+                std::vector<Slice> slices;
+                slices.emplace_back(Slice{buffer, data_size});
+
+                auto result = dedicated_client->Put(key, slices, config);
+                if (result.has_value()) {
+                    success_count.fetch_add(1);
+                } else {
+                    error_count.fetch_add(1);
+                }
+                client_buffer_allocator_->deallocate(buffer, data_size);
+
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(rand() % 5));
+            }
+        });
+    }
+
+    // Shutdown thread
+    std::thread shutdown_thread([&]() {
+        // Let some operations start
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        dedicated_client->Stop();
+        shutdown_triggered = true;
+        LOG(INFO) << "Client stopped during concurrent operations";
+    });
+
+    for (auto& t : threads) {
+        t.join();
+    }
+    shutdown_thread.join();
+
+    LOG(INFO) << "Operations before/during shutdown - success: "
+              << success_count << ", errors: " << error_count;
+
+    // Some operations should have succeeded before shutdown
+    EXPECT_GT(success_count, 0);
+    // Some operations should have failed after shutdown
+    EXPECT_GT(error_count, 0);
+}
 
 }  // namespace testing
 

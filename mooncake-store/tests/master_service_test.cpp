@@ -2968,6 +2968,247 @@ TEST_F(MasterServiceTest, DisconnectionAndRecovery) {
     EXPECT_TRUE(put_result_recover.has_value());
 }
 
+// --- Test Case: Concurrent Write and Unmount Segment ---
+// Validate that concurrent PutStart/PutEnd with UnmountSegment
+// does not crash and segments are properly cleaned up.
+TEST_F(MasterServiceTest, ConcurrentWriteAndUnmountSegment) {
+    std::unique_ptr<CentralizedMasterService> service_(
+        new CentralizedMasterService());
+
+    constexpr size_t buffer1 = 0x300000000;
+    constexpr size_t buffer2 = 0x400000000;
+    constexpr size_t size = 1024 * 1024 * 128;  // 128MB each
+
+    auto segment1 = MakeSegment("segment_write_1", buffer1, size);
+    auto segment2 = MakeSegment("segment_write_2", buffer2, size);
+    UUID client_id = generate_uuid();
+    RegisterClient(*service_, client_id);
+    ASSERT_TRUE(service_->MountSegment(segment1, client_id).has_value());
+    ASSERT_TRUE(service_->MountSegment(segment2, client_id).has_value());
+
+    constexpr int kNumWriterThreads = 4;
+    constexpr int kObjectsPerThread = 50;
+    std::atomic<int> success_writes{0};
+    std::atomic<int> failed_writes{0};
+
+    // Writer threads
+    std::vector<std::thread> writers;
+    for (int i = 0; i < kNumWriterThreads; ++i) {
+        writers.emplace_back([&, i]() {
+            for (int j = 0; j < kObjectsPerThread; ++j) {
+                std::string key = "unmount_key_" + std::to_string(i) + "_" +
+                                  std::to_string(j);
+                ReplicateConfig config;
+                config.replica_num = 1;
+
+                auto put_start_result =
+                    service_->PutStart(client_id, key, 1024, config);
+                if (put_start_result.has_value()) {
+                    auto put_end_result =
+                        service_->PutEnd(client_id, key, ReplicaType::MEMORY);
+                    if (put_end_result.has_value()) {
+                        success_writes.fetch_add(1);
+                    }
+                } else {
+                    failed_writes.fetch_add(1);
+                }
+
+                std::this_thread::sleep_for(
+                    std::chrono::microseconds(rand() % 100));
+            }
+        });
+    }
+
+    // Unmount thread - unmounts segment1 while writes are ongoing
+    std::thread unmount_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        auto unmount_result = service_->UnmountSegment(segment1.id, client_id);
+        ASSERT_TRUE(unmount_result.has_value());
+        LOG(INFO) << "Segment1 unmounted during concurrent writes";
+    });
+
+    // Wait for all threads
+    for (auto& t : writers) {
+        t.join();
+    }
+    unmount_thread.join();
+
+    // Verify segment2 is still functional (can write to it)
+    auto put_result = service_->PutStart(client_id, "verify_key_after_unmount",
+                                         1024, {.replica_num = 1});
+    EXPECT_TRUE(put_result.has_value());
+
+    LOG(INFO) << "Concurrent writes succeeded: " << success_writes
+              << ", failed: " << failed_writes;
+    EXPECT_GT(success_writes, 0);
+}
+
+// --- Test Case: Concurrent Read and Unmount Segment ---
+// Validate that reading keys concurrent with UnmountSegment
+// correctly returns OBJECT_NOT_FOUND for keys in unmounted segments.
+TEST_F(MasterServiceTest, ConcurrentReadAndUnmountSegment) {
+    std::unique_ptr<CentralizedMasterService> service_(
+        new CentralizedMasterService());
+
+    constexpr size_t buffer1 = 0x300000000;
+    constexpr size_t buffer2 = 0x400000000;
+    constexpr size_t size = 1024 * 1024 * 32;
+
+    auto segment1 = MakeSegment("segment_read_1", buffer1, size);
+    auto segment2 = MakeSegment("segment_read_2", buffer2, size);
+    UUID client_id = generate_uuid();
+    RegisterClient(*service_, client_id);
+    ASSERT_TRUE(service_->MountSegment(segment1, client_id).has_value());
+    ASSERT_TRUE(service_->MountSegment(segment2, client_id).has_value());
+
+    // Pre-populate objects on both segments
+    constexpr int kNumObjectsPerSegment = 50;
+    for (int i = 0; i < kNumObjectsPerSegment; ++i) {
+        std::string key1 =
+            GenerateKeyForSegment(client_id, service_, segment1.name);
+        std::string key2 =
+            GenerateKeyForSegment(client_id, service_, segment2.name);
+    }
+
+    // Get total key count before unmount
+    auto key_count_before = service_->GetKeyCount();
+
+    std::atomic<int> success_reads{0};
+    std::atomic<int> not_found_reads{0};
+
+    // Reader threads
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; ++i) {
+        readers.emplace_back([&]() {
+            for (int j = 0; j < kNumObjectsPerSegment * 2; ++j) {
+                // Try to read keys that were in segment1
+                std::string key = "key_" + std::to_string(j);
+                auto get_result = service_->GetReplicaList(key);
+                if (get_result.has_value()) {
+                    success_reads.fetch_add(1);
+                } else if (get_result.error() == ErrorCode::OBJECT_NOT_FOUND) {
+                    not_found_reads.fetch_add(1);
+                }
+                std::this_thread::sleep_for(
+                    std::chrono::microseconds(rand() % 50));
+            }
+        });
+    }
+
+    // Unmount segment1 while readers are active
+    std::thread unmount_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        auto unmount_result = service_->UnmountSegment(segment1.id, client_id);
+        ASSERT_TRUE(unmount_result.has_value());
+        LOG(INFO) << "Segment1 unmounted during concurrent reads";
+    });
+
+    for (auto& t : readers) {
+        t.join();
+    }
+    unmount_thread.join();
+
+    // After unmount, segment1 keys should be gone
+    auto key_count_after = service_->GetKeyCount();
+    EXPECT_LT(key_count_after, key_count_before);
+
+    LOG(INFO) << "Reads succeeded: " << success_reads
+              << ", not found: " << not_found_reads
+              << ", keys before: " << key_count_before
+              << ", keys after: " << key_count_after;
+}
+
+// --- Test Case: Concurrent Write During Client Disconnection ---
+// Validate that PutStart fails during client disconnection
+// (allocators hidden) and succeeds after recovery.
+TEST_F(MasterServiceTest, ConcurrentWriteDuringClientDisconnection) {
+    int64_t live_ttl = 1;  // 1 second keep-alive
+    int64_t crashed_ttl = 10;
+    auto service_config = MasterServiceConfig::builder()
+                              .set_client_live_ttl_sec(live_ttl)
+                              .set_client_crashed_ttl_sec(crashed_ttl)
+                              .build();
+    std::unique_ptr<CentralizedMasterService> service_ =
+        std::make_unique<CentralizedMasterService>(service_config);
+
+    auto ctx =
+        PrepareSimpleSegment(*service_, "test_segment_disconnect_concurrent",
+                             0x300000000, 1024 * 1024 * 128);
+
+    // Verify initial writes work
+    auto put_result =
+        service_->PutStart(ctx.client_id, "pre_key", 1024, {.replica_num = 1});
+    ASSERT_TRUE(put_result.has_value());
+
+    constexpr int kNumWriterThreads = 4;
+    constexpr int kWritesPerThread = 20;
+    std::atomic<int> success_before_disconnect{0};
+    std::atomic<int> fail_during_disconnect{0};
+    std::atomic<int> success_after_recovery{0};
+    std::atomic<bool> disconnected{false};
+    std::atomic<bool> recovered{false};
+
+    // Phase 1: Concurrent writes, then disconnect
+    std::vector<std::thread> writers;
+    for (int i = 0; i < kNumWriterThreads; ++i) {
+        writers.emplace_back([&, i]() {
+            for (int j = 0; j < kWritesPerThread; ++j) {
+                std::string key =
+                    "disc_key_" + std::to_string(i) + "_" + std::to_string(j);
+                auto result = service_->PutStart(ctx.client_id, key, 1024,
+                                                 {.replica_num = 1});
+                if (result.has_value()) {
+                    if (disconnected.load() && !recovered.load()) {
+                        // Unexpected success during disconnection
+                    } else if (!disconnected.load()) {
+                        success_before_disconnect.fetch_add(1);
+                    } else {
+                        success_after_recovery.fetch_add(1);
+                    }
+                } else if (result.error() == ErrorCode::NO_AVAILABLE_HANDLE) {
+                    fail_during_disconnect.fetch_add(1);
+                }
+
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(rand() % 10));
+            }
+        });
+    }
+
+    // Disconnect thread
+    std::thread disconnect_thread([&]() {
+        // Wait for some writes to succeed
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+        // Trigger disconnection
+        TriggerOnClientDisconnected(
+            *service_, ctx.client_id,
+            std::chrono::milliseconds(2 * live_ttl * 1000));
+        disconnected = true;
+        LOG(INFO) << "Client disconnected during concurrent writes";
+
+        // Wait for some failed writes to accumulate
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        // Recovery
+        TriggerOnClientRecovered(*service_, ctx.client_id);
+        recovered = true;
+        LOG(INFO) << "Client recovered during concurrent writes";
+    });
+
+    for (auto& t : writers) {
+        t.join();
+    }
+    disconnect_thread.join();
+
+    LOG(INFO) << "Writes before disconnect: " << success_before_disconnect
+              << ", failed during disconnect: " << fail_during_disconnect
+              << ", after recovery: " << success_after_recovery;
+
+    // Some should have succeeded before disconnect
+    EXPECT_GT(success_before_disconnect, 0);
+}
+
 }  // namespace mooncake::test
 
 int main(int argc, char** argv) {

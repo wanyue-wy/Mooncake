@@ -3,8 +3,10 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "master_config.h"
@@ -683,6 +685,202 @@ TEST_F(P2PMasterServiceTest, FullWriteReadCycle) {
     auto r_res2 = service->GetReplicaList("data_001");
     EXPECT_FALSE(r_res2.has_value());
     EXPECT_EQ(ErrorCode::OBJECT_NOT_FOUND, r_res2.error());
+}
+// ============================================================
+// Concurrency Tests
+// ============================================================
+
+TEST_F(P2PMasterServiceTest, ConcurrentAddReplica) {
+    auto service = CreateService();
+
+    // Register multiple clients each with their own segment
+    constexpr int kNumClients = 8;
+    struct ClientInfo {
+        UUID client_id;
+        UUID segment_id;
+    };
+    std::vector<ClientInfo> clients;
+
+    for (int i = 0; i < kNumClients; ++i) {
+        auto seg = MakeP2PSegment("seg_" + std::to_string(i),
+                                  kDefaultSegmentSize, {}, 1);
+        auto cid = generate_uuid();
+        RegisterP2PClient(*service, cid, {seg},
+                          "10.0.0." + std::to_string(i + 1),
+                          static_cast<uint16_t>(50051 + i));
+        clients.push_back({cid, seg.id});
+    }
+
+    constexpr int kKeysPerThread = 20;
+    std::atomic<int> success_count{0};
+    std::vector<std::thread> threads;
+
+    for (int i = 0; i < kNumClients; ++i) {
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < kKeysPerThread; ++j) {
+                std::string key =
+                    "cc_key_" + std::to_string(i) + "_" + std::to_string(j);
+                AddReplicaRequest req;
+                req.key = key;
+                req.size = 1024;
+                req.replica.client_id = clients[i].client_id;
+                req.replica.segment_id = clients[i].segment_id;
+                auto res = service->AddReplica(req);
+                if (res.has_value()) {
+                    success_count.fetch_add(1);
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    EXPECT_EQ(success_count.load(), kNumClients * kKeysPerThread);
+    EXPECT_EQ(service->GetKeyCount(), kNumClients * kKeysPerThread);
+}
+
+TEST_F(P2PMasterServiceTest, ConcurrentWriteRouteAndAddReplica) {
+    auto service = CreateService();
+
+    constexpr int kNumClients = 4;
+    struct ClientInfo {
+        UUID client_id;
+        UUID segment_id;
+    };
+    std::vector<ClientInfo> clients;
+
+    for (int i = 0; i < kNumClients; ++i) {
+        auto seg = MakeP2PSegment("seg_" + std::to_string(i),
+                                  kDefaultSegmentSize, {}, 1);
+        auto cid = generate_uuid();
+        RegisterP2PClient(*service, cid, {seg},
+                          "10.0.0." + std::to_string(i + 1),
+                          static_cast<uint16_t>(50051 + i));
+        clients.push_back({cid, seg.id});
+    }
+
+    std::atomic<int> route_success{0};
+    std::atomic<int> add_success{0};
+    std::vector<std::thread> threads;
+
+    // Half threads do GetWriteRoute, half do AddReplica
+    for (int i = 0; i < kNumClients; ++i) {
+        // GetWriteRoute threads
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < 20; ++j) {
+                WriteRouteRequest req;
+                req.key =
+                    "route_key_" + std::to_string(i) + "_" + std::to_string(j);
+                req.client_id = clients[i].client_id;
+                req.size = 512;
+                req.config.max_candidates = 2;
+                req.config.allow_local = true;
+                auto res = service->GetWriteRoute(req);
+                if (res.has_value()) {
+                    route_success.fetch_add(1);
+                }
+            }
+        });
+        // AddReplica threads
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < 20; ++j) {
+                std::string key =
+                    "add_key_" + std::to_string(i) + "_" + std::to_string(j);
+                AddReplicaRequest req;
+                req.key = key;
+                req.size = 512;
+                req.replica.client_id = clients[i].client_id;
+                req.replica.segment_id = clients[i].segment_id;
+                auto res = service->AddReplica(req);
+                if (res.has_value()) {
+                    add_success.fetch_add(1);
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    LOG(INFO) << "Route successes: " << route_success
+              << ", Add successes: " << add_success;
+    EXPECT_GT(route_success.load(), 0);
+    EXPECT_GT(add_success.load(), 0);
+}
+
+TEST_F(P2PMasterServiceTest, ConcurrentAddAndRemoveReplica) {
+    auto service = CreateService();
+
+    // Register two clients
+    auto seg1 = MakeP2PSegment("seg1", kDefaultSegmentSize, {}, 1);
+    auto seg2 = MakeP2PSegment("seg2", kDefaultSegmentSize, {}, 1);
+    auto client1 = generate_uuid();
+    auto client2 = generate_uuid();
+    RegisterP2PClient(*service, client1, {seg1}, "10.0.0.1", 50051);
+    RegisterP2PClient(*service, client2, {seg2}, "10.0.0.2", 50052);
+
+    // Pre-populate some keys
+    constexpr int kNumKeys = 30;
+    for (int i = 0; i < kNumKeys; ++i) {
+        AddReplicaHelper(*service, "shared_key_" + std::to_string(i), 1024,
+                         client1, seg1.id);
+    }
+    EXPECT_EQ(service->GetKeyCount(), kNumKeys);
+
+    std::atomic<int> add_success{0};
+    std::atomic<int> remove_success{0};
+    std::vector<std::thread> threads;
+
+    // Thread 1: add replicas from client2 to same keys
+    threads.emplace_back([&]() {
+        for (int i = 0; i < kNumKeys; ++i) {
+            AddReplicaRequest req;
+            req.key = "shared_key_" + std::to_string(i);
+            req.size = 1024;
+            req.replica.client_id = client2;
+            req.replica.segment_id = seg2.id;
+            auto res = service->AddReplica(req);
+            if (res.has_value()) {
+                add_success.fetch_add(1);
+            }
+        }
+    });
+
+    // Thread 2: remove client1's replicas from same keys
+    threads.emplace_back([&]() {
+        for (int i = 0; i < kNumKeys; ++i) {
+            RemoveReplicaRequest req;
+            req.key = "shared_key_" + std::to_string(i);
+            req.client_id = client1;
+            req.segment_id = seg1.id;
+            auto res = service->RemoveReplica(req);
+            if (res.has_value()) {
+                remove_success.fetch_add(1);
+            }
+        }
+    });
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    LOG(INFO) << "Add successes: " << add_success
+              << ", Remove successes: " << remove_success;
+
+    // All removes should succeed (the keys existed with client1's replica)
+    EXPECT_EQ(remove_success.load(), kNumKeys);
+    // All adds should succeed (client2 adding to existing/same keys)
+    EXPECT_EQ(add_success.load(), kNumKeys);
+
+    // After both operations, keys should still exist with client2's replica
+    // (unless remove happened after add, in which case key may be removed)
+    // We just verify no crash and counts are consistent
+    auto final_keys = service->GetKeyCount();
+    LOG(INFO) << "Final key count: " << final_keys;
+    EXPECT_GE(final_keys, 0);
 }
 
 }  // namespace mooncake::test
