@@ -48,6 +48,9 @@ namespace mooncake {
  *    For avoiding deadlock, each metadata managers should follow this order.
  */
 class P2PMasterService {
+   protected:
+    struct ObjectMetadata;
+
    public:
     explicit P2PMasterService(const MasterServiceConfig& config);
     ~P2PMasterService() = default;
