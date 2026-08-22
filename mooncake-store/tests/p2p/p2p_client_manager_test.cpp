@@ -7,6 +7,7 @@
 #define private public
 #define protected public
 #include "p2p/master/p2p_client_manager.h"
+#include "p2p/master/p2p_master_metric_manager.h"
 #undef private
 #undef protected
 #include "p2p/master/p2p_client_meta.h"

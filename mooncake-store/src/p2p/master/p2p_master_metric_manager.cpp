@@ -1137,7 +1137,7 @@ std::string P2PMasterMetricManager::get_summary_string() {
     std::string shared_summary = ss.str();
     std::string summary = "[Arch: P2P] ";
     summary += shared_summary;
-    std::stringstream ss;
+    std::stringstream arch_ss;
 
     int64_t get_write_routes = get_write_route_requests_.value();
     int64_t get_write_route_fails = get_write_route_failures_.value();
@@ -1161,22 +1161,22 @@ std::string P2PMasterMetricManager::get_summary_string() {
     int64_t batch_remove_replica_failed_items =
         batch_remove_replica_failed_items_.value();
 
-    ss << "Requests (Success/Total): ";
-    ss << "GetWriteRoute=" << get_write_routes - get_write_route_fails << "/"
+    arch_ss << "Requests (Success/Total): ";
+    arch_ss << "GetWriteRoute=" << get_write_routes - get_write_route_fails << "/"
        << get_write_routes << ", ";
-    ss << "AddReplica=" << add_replicas - add_replica_fails << "/"
+    arch_ss << "AddReplica=" << add_replicas - add_replica_fails << "/"
        << add_replicas << ", ";
-    ss << "RemoveReplica=" << remove_replicas - remove_replica_fails << "/"
+    arch_ss << "RemoveReplica=" << remove_replicas - remove_replica_fails << "/"
        << remove_replicas;
 
-    ss << " | Batch Requests "
+    arch_ss << " | Batch Requests "
           "(Req=Success/PartialSuccess/Total, Item=Success/Total): ";
-    ss << "GetWriteRoute:(Req="
+    arch_ss << "GetWriteRoute:(Req="
        << batch_get_write_route_requests - batch_get_write_route_fails -
               batch_get_write_route_partial_successes
        << "/" << batch_get_write_route_partial_successes << "/"
        << batch_get_write_route_requests << "), ";
-    ss << "RemoveReplica:(Req="
+    arch_ss << "RemoveReplica:(Req="
        << batch_remove_replica_requests - batch_remove_replica_fails -
               batch_remove_replica_partial_successes
        << "/" << batch_remove_replica_partial_successes << "/"
@@ -1185,7 +1185,7 @@ std::string P2PMasterMetricManager::get_summary_string() {
        << batch_remove_replica_items << ")";
 
     summary += " | ";
-    summary += ss.str();
+    summary += arch_ss.str();
     summary += client_metrics_aggregator_.Summary();
     return summary;
 }
