@@ -578,12 +578,12 @@ TEST_F(P2PClientManagerTest, ForEachClientOrdered) {
     }
 
     std::vector<UUID> ids1, ids2;
-    auto visitor1 = [&ids1](const std::shared_ptr<ClientMeta>& client)
+    auto visitor1 = [&ids1](const std::shared_ptr<P2PClientMeta>& client)
         -> tl::expected<bool, ErrorCode> {
         ids1.push_back(client->get_client_id());
         return false;
     };
-    auto visitor2 = [&ids2](const std::shared_ptr<ClientMeta>& client)
+    auto visitor2 = [&ids2](const std::shared_ptr<P2PClientMeta>& client)
         -> tl::expected<bool, ErrorCode> {
         ids2.push_back(client->get_client_id());
         return false;
@@ -611,7 +611,7 @@ TEST_F(P2PClientManagerTest, ForEachClientCapacityPriority) {
     }
 
     std::vector<UUID> ids;
-    auto visitor = [&ids](const std::shared_ptr<ClientMeta>& client)
+    auto visitor = [&ids](const std::shared_ptr<P2PClientMeta>& client)
         -> tl::expected<bool, ErrorCode> {
         ids.push_back(client->get_client_id());
         return false;
@@ -688,7 +688,7 @@ TEST_F(P2PClientManagerTest, ForEachClientHealthEffect) {
     std::set<UUID> found_ids;
     mgr->ForEachClient(
         ObjectIterateStrategy::ORDERED,
-        [&count, &found_ids](const std::shared_ptr<ClientMeta>& client)
+        [&count, &found_ids](const std::shared_ptr<P2PClientMeta>& client)
             -> tl::expected<bool, ErrorCode> {
             count++;
             found_ids.insert(client->get_client_id());
@@ -741,7 +741,7 @@ TEST_F(P2PClientManagerTest, ConcurrentRegister) {
     std::set<UUID> registered_ids;
     auto res = mgr->ForEachClient(
         ObjectIterateStrategy::ORDERED,
-        [&registered_ids](const std::shared_ptr<ClientMeta>& client)
+        [&registered_ids](const std::shared_ptr<P2PClientMeta>& client)
             -> tl::expected<bool, ErrorCode> {
             registered_ids.insert(client->get_client_id());
             return false;
@@ -821,7 +821,7 @@ TEST_F(P2PClientManagerTest, ConcurrentRegisterSameClient) {
     int count = 0;
     auto res =
         mgr->ForEachClient(ObjectIterateStrategy::ORDERED,
-                           [&count](const std::shared_ptr<ClientMeta>& client)
+                           [&count](const std::shared_ptr<P2PClientMeta>& client)
                                -> tl::expected<bool, ErrorCode> {
                                count++;
                                return false;
