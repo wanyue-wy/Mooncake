@@ -214,7 +214,7 @@ P2PMasterMetricManager::P2PMasterMetricManager()
           "Total number of items processed in BatchGetWriteRoute requests"),
       batch_get_write_route_failed_items_(
           "master_batch_get_write_route_failed_items_total",
-          "Total number of failed items in BatchGetWriteRoute requests") { {
+          "Total number of failed items in BatchGetWriteRoute requests") {
     update_metrics_for_zero_output();
     update_arch_metrics_for_zero_output();
 }
