@@ -938,39 +938,44 @@ int main(int argc, char* argv[]) {
                 master_config.rpc_enable_tcp_no_delay);
         }
 
-        // Declare service object outside if block to ensure it lives until
-        // server.start() completes
-        std::unique_ptr<mooncake::WrappedMasterService> master_service;
+        // Declare service objects outside the if block to ensure they live
+        // until server.start() completes. The two architectures use
+        // independent standalone service types.
+        std::unique_ptr<mooncake::WrappedCentralizedMasterService>
+            centralized_service;
+        std::unique_ptr<mooncake::WrappedP2PMasterService> p2p_service;
 
         if (master_config.deployment_mode == "Centralization") {
-            master_service =
+            centralized_service =
                 std::make_unique<mooncake::WrappedCentralizedMasterService>(
                     mooncake::WrappedMasterServiceConfig(master_config,
                                                          version));
-            master_service->init();
+            centralized_service->init();
 
             mooncake::RegisterCentralizedRpcService(
-                server,
-                static_cast<mooncake::WrappedCentralizedMasterService&>(
-                    *master_service),
+                server, *centralized_service,
                 /*include_heartbeat=*/main_includes_heartbeat);
-        } else {
-            master_service =
-                std::make_unique<mooncake::WrappedP2PMasterService>(
-                    mooncake::WrappedMasterServiceConfig(master_config,
-                                                         version));
-            master_service->init();
 
-            mooncake::RegisterP2PRpcService(
-                server,
-                static_cast<mooncake::WrappedP2PMasterService&>(
-                    *master_service),
-                /*include_heartbeat=*/main_includes_heartbeat);
+            if (dedicated_heartbeat) {
+                mooncake::RegisterHeartbeatRpcService(*heartbeat_server,
+                                                      *centralized_service);
+            }
+        } else {
+            p2p_service = std::make_unique<mooncake::WrappedP2PMasterService>(
+                mooncake::WrappedMasterServiceConfig(master_config, version));
+            p2p_service->init();
+
+            mooncake::RegisterP2PRpcService(server, *p2p_service,
+                                            /*include_heartbeat=*/
+                                            main_includes_heartbeat);
+
+            if (dedicated_heartbeat) {
+                mooncake::RegisterP2PHeartbeatRpcService(*heartbeat_server,
+                                                         *p2p_service);
+            }
         }
 
         if (dedicated_heartbeat) {
-            mooncake::RegisterHeartbeatRpcService(*heartbeat_server,
-                                                  *master_service);
             LOG(INFO) << "Starting dedicated heartbeat RPC server on port "
                       << master_config.heartbeat_rpc_port;
             auto heartbeat_ec = heartbeat_server->async_start();
