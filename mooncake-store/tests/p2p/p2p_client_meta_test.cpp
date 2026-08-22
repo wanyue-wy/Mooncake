@@ -929,7 +929,7 @@ TEST_F(P2PClientMetaTest, ConcurrentMountUnmountAndUsageSyncNoDeadlock) {
     syncer.join();
 
     // client_usage_ must equal the sum of the stored per-segment usages.
-    auto segments = meta->GetSegmentManager()->GetSegments();
+    auto segments = meta->GetSegments();
     ASSERT_TRUE(segments.has_value());
     size_t total_capacity = 0;
     size_t total_usage = 0;
