@@ -2,6 +2,8 @@
 
 #include <glog/logging.h>
 #include <algorithm>
+#include <regex>
+#include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 #include <variant>
@@ -15,16 +17,469 @@
 namespace mooncake {
 
 P2PMasterService::P2PMasterService(const MasterServiceConfig& config)
-    : MasterService(config),
-      max_client_per_key_(config.max_client_per_key),
+    : max_client_per_key_(config.max_client_per_key),
       enable_async_oplog_write_(ParseOpLogStoreType(config.oplog_store_type) ==
-                                OpLogStoreType::REDIS) {
+                                OpLogStoreType::REDIS),
+      view_version_(config.view_version) {
+    // OpLog setup (absorbed from the former MasterService base ctor).
+    if (config.enable_oplog) {
+        auto store_type = ParseOpLogStoreType(config.oplog_store_type);
+        const std::string& store_location =
+            store_type == OpLogStoreType::REDIS ? config.redis_endpoint
+                                                : config.oplog_data_dir;
+        auto store = OpLogStoreFactory::Create(
+            store_type, config.cluster_id, OpLogStoreRole::WRITER,
+            store_location, kDefaultOpLogPollIntervalMs, config.redis_password,
+            config.redis_username, config.redis_db_index,
+            config.oplog_async_queue_max_entries,
+            config.oplog_async_queue_overflow_mode,
+            config.oplog_best_effort_max_retries);
+        if (!store) {
+            LOG(ERROR) << "P2PMasterService: failed to initialize OpLogStore"
+                       << ", type=" << config.oplog_store_type
+                       << ", location=" << store_location
+                       << ", cluster_id=" << config.cluster_id;
+            throw std::runtime_error(
+                "failed to initialize OpLogStore while oplog is enabled: "
+                "type=" +
+                config.oplog_store_type + ", location=" + store_location +
+                ", cluster_id=" + config.cluster_id);
+        }
+
+        oplog_manager_ = std::make_unique<OpLogManager>();
+        oplog_manager_->SetOpLogStore(
+            std::shared_ptr<OpLogStore>(std::move(store)));
+    }
+
     P2PMasterMetricManager::instance();
     client_manager_ = std::make_shared<P2PClientManager>(
         config.client_live_ttl_sec, config.client_crashed_ttl_sec,
         config.view_version);
     InitializeClientManager();
     client_manager_->Start();
+}
+
+P2PMasterService::ObjectMetadata::~ObjectMetadata() {
+    P2PMasterMetricManager::instance().dec_key_count(1);
+}
+
+P2PMasterService::ObjectMetadata::ObjectMetadata(
+    size_t value_length, std::vector<Replica>&& reps)
+    : replicas_(std::move(reps)), size_(value_length) {
+    P2PMasterMetricManager::instance().inc_key_count(1);
+    P2PMasterMetricManager::instance().observe_value_size(value_length);
+}
+
+void P2PMasterService::InitializeClientManager() {
+    client_manager_->SetSegmentRemovalCallback([this](
+                                                     const UUID& segment_id) {
+        this->OnSegmentRemoved(segment_id);
+    });
+}
+
+auto P2PMasterService::Heartbeat(const HeartbeatRequest& req)
+    -> tl::expected<HeartbeatResponse, ErrorCode> {
+    return client_manager_->Heartbeat(req);
+}
+
+auto P2PMasterService::QueryClientStatus(const QueryClientStatusRequest& req)
+    -> tl::expected<QueryClientStatusResponse, ErrorCode> {
+    return client_manager_->QueryClientStatus(req);
+}
+
+auto P2PMasterService::ExistKey(std::string_view key)
+    -> tl::expected<bool, ErrorCode> {
+    MetadataAccessorRO accessor(this, key);
+    if (!accessor.Exists()) {
+        VLOG(1) << "key=" << key << ", info=object_not_found";
+        return false;
+    }
+
+    const auto& metadata = accessor.Get();
+    if (metadata.IsObjectAccessible()) {
+        OnObjectAccessed(metadata);
+        return true;
+    }
+
+    return false;
+}
+
+std::vector<tl::expected<bool, ErrorCode>> P2PMasterService::BatchExistKey(
+    const std::vector<std::string_view>& keys) {
+    std::vector<tl::expected<bool, ErrorCode>> results;
+    results.reserve(keys.size());
+    for (const auto& key : keys) {
+        results.emplace_back(ExistKey(key));
+    }
+    return results;
+}
+
+auto P2PMasterService::GetAllKeys()
+    -> tl::expected<std::vector<std::string>, ErrorCode> {
+    std::vector<std::string> all_keys;
+    for (size_t i = 0; i < GetShardCount(); i++) {
+        MetadataShardAccessorRO shard(this, i);
+        for (const auto& item : shard->metadata) {
+            all_keys.push_back(item.first);
+        }
+    }
+    return all_keys;
+}
+
+auto P2PMasterService::GetAllSegments()
+    -> tl::expected<std::vector<std::string>, ErrorCode> {
+    auto result = client_manager_->GetAllSegments();
+    if (!result.has_value()) {
+        LOG(ERROR) << "fail to get all segments"
+                   << ", ret=" << result.error();
+    }
+    return result;
+}
+
+auto P2PMasterService::GetClientSegments(const UUID& client_id)
+    -> tl::expected<std::vector<std::string>, ErrorCode> {
+    auto result = client_manager_->GetClientSegments(client_id);
+    if (!result.has_value()) {
+        LOG(ERROR) << "fail to get client segments"
+                   << ", client_id=" << client_id << ", ret=" << result.error();
+    }
+    return result;
+}
+
+auto P2PMasterService::QuerySegments(const std::string& segment)
+    -> tl::expected<std::pair<size_t, size_t>, ErrorCode> {
+    auto result = client_manager_->QuerySegments(segment);
+    if (!result.has_value()) {
+        LOG(ERROR) << "fail to query segment"
+                   << ", segment=" << segment << ", ret=" << result.error();
+    }
+    return result;
+}
+
+auto P2PMasterService::QueryIp(const UUID& client_id)
+    -> tl::expected<std::vector<std::string>, ErrorCode> {
+    auto result = client_manager_->QueryIp(client_id);
+    if (!result.has_value()) {
+        LOG(ERROR) << "fail to query ip"
+                   << ", client_id=" << client_id << ", ret=" << result.error();
+    }
+    return result;
+}
+
+auto P2PMasterService::BatchQueryIp(const std::vector<UUID>& client_ids)
+    -> tl::expected<
+        std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+        ErrorCode> {
+    std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>
+        results;
+    results.reserve(client_ids.size());
+    for (const auto& client_id : client_ids) {
+        auto ip_result = QueryIp(client_id);
+        if (ip_result.has_value()) {
+            results.emplace(client_id, std::move(ip_result.value()));
+        } else {
+            LOG(WARNING) << "fail to query ip"
+                         << ", client_id=" << client_id
+                         << ", ret=" << ip_result.error();
+        }
+    }
+    return results;
+}
+
+auto P2PMasterService::GetReplicaListByRegex(const std::string& regex_pattern)
+    -> tl::expected<
+        std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+        ErrorCode> {
+    std::unordered_map<std::string, std::vector<Replica::Descriptor>> results;
+    std::regex pattern;
+
+    try {
+        pattern = std::regex(regex_pattern, std::regex::ECMAScript);
+    } catch (const std::regex_error& e) {
+        LOG(ERROR) << "Invalid regex pattern: " << regex_pattern
+                   << ", error: " << e.what();
+        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
+    }
+
+    for (size_t i = 0; i < GetShardCount(); ++i) {
+        MetadataShardAccessorRO shard(this, i);
+
+        for (const auto& [key, metadata] : shard->metadata) {
+            if (std::regex_search(key, pattern)) {
+                std::vector<Replica::Descriptor> replica_list;
+                replica_list.reserve(metadata->replicas_.size());
+                for (const auto& replica : metadata->replicas_) {
+                    if (metadata->IsReplicaAccessible(replica)) {
+                        replica_list.emplace_back(replica.get_descriptor());
+                    }
+                }
+                if (replica_list.empty()) {
+                    LOG(WARNING)
+                        << "key=" << key
+                        << " matched by regex, but has no complete replicas.";
+                    continue;
+                }
+
+                results.emplace(key, std::move(replica_list));
+                OnObjectHit(*metadata);
+                OnObjectAccessed(*metadata);
+            }
+        }
+    }
+
+    return results;
+}
+
+auto P2PMasterService::GetReplicaList(
+    std::string_view key, const GetReplicaListRequestConfig& config)
+    -> tl::expected<GetReplicaListResponse, ErrorCode> {
+    MetadataAccessorRO accessor(this, key);
+
+    P2PMasterMetricManager::instance().inc_total_get_nums();
+
+    if (!accessor.Exists()) {
+        VLOG(1) << "key=" << key << ", info=object_not_found";
+        return tl::make_unexpected(ErrorCode::OBJECT_NOT_FOUND);
+    }
+    const auto& metadata = accessor.Get();
+
+    std::vector<Replica::Descriptor> replica_list =
+        FilterReplicas(config, metadata);
+
+    if (replica_list.empty()) {
+        LOG(WARNING) << "key=" << key << ", error=replica_not_ready";
+        return tl::make_unexpected(ErrorCode::REPLICA_IS_NOT_READY);
+    }
+
+    // TODO: wanyue-wy
+    // Currently, the hit statistics is maintained in object level in master.
+    // If `max_candidates` of config is larger than 1, the statistics is not
+    // accurate. (Because we don't know which replica is chosen in client)
+    // For more accurate recording, we should maintain it in client in replica
+    // level and sync it to master.
+    OnObjectHit(metadata);
+    OnObjectAccessed(metadata);
+
+    GetReplicaListResponse resp;
+    resp.replicas = std::move(replica_list);
+    return resp;
+}
+
+auto P2PMasterService::Remove(std::string_view key, bool force)
+    -> tl::expected<void, ErrorCode> {
+    MetadataAccessorRW accessor(this, key);
+    if (!accessor.Exists()) {
+        VLOG(1) << "key=" << key << ", error=object_not_found";
+        return tl::make_unexpected(ErrorCode::OBJECT_NOT_FOUND);
+    }
+
+    auto& metadata = accessor.Get();
+
+    if (auto res = metadata.IsObjectRemovable(force); !res) {
+        VLOG(1) << "key=" << key << ", error=" << res.error();
+        return tl::make_unexpected(res.error());
+    }
+
+    // Remove object metadata
+    OnObjectRemoved(metadata);
+    accessor.Erase();
+    return {};
+}
+
+auto P2PMasterService::RemoveByRegex(std::string_view regex_pattern, bool force)
+    -> tl::expected<long, ErrorCode> {
+    long removed_count = 0;
+    std::regex pattern;
+
+    try {
+        pattern = std::regex(regex_pattern.data(),
+                             regex_pattern.data() + regex_pattern.size(),
+                             std::regex::ECMAScript);
+    } catch (const std::regex_error& e) {
+        LOG(ERROR) << "Invalid regex pattern: " << regex_pattern
+                   << ", error: " << e.what();
+        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
+    }
+
+    for (size_t i = 0; i < GetShardCount(); ++i) {
+        MetadataShardAccessorRW shard(this, i);
+
+        for (auto it = shard->metadata.begin(); it != shard->metadata.end();) {
+            if (std::regex_search(it->first, pattern)) {
+                if (!it->second->IsObjectRemovable(force)) {
+                    VLOG(1) << "key=" << it->first
+                            << " matched by regex, but object is not removable";
+                    ++it;
+                    continue;
+                }
+
+                VLOG(1) << "key=" << it->first
+                        << " matched by regex. Removing.";
+                OnObjectRemoved(*it->second);
+                RemoveReplicaFromSegmentIndex(shard.GetRef(), it->first,
+                                              it->second->replicas_);
+                it = shard->metadata.erase(it);
+                removed_count++;
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    VLOG(1) << "action=remove_by_regex, pattern=" << regex_pattern
+            << ", removed_count=" << removed_count;
+    return removed_count;
+}
+
+long P2PMasterService::RemoveAll(bool force) {
+    long removed_count = 0;
+    uint64_t total_freed_size = 0;
+
+    for (size_t i = 0; i < GetShardCount(); ++i) {
+        MetadataShardAccessorRW shard(this, i);
+        if (shard->metadata.empty()) {
+            continue;
+        }
+
+        auto it = shard->metadata.begin();
+        while (it != shard->metadata.end()) {
+            if (it->second->IsObjectRemovable(force)) {
+                auto mem_rep_count =
+                    it->second->CountReplicas(&Replica::fn_is_memory_replica);
+                total_freed_size += it->second->size_ * mem_rep_count;
+                OnObjectRemoved(*it->second);
+                RemoveReplicaFromSegmentIndex(shard.GetRef(), it->first,
+                                              it->second->replicas_);
+                it = shard->metadata.erase(it);
+                removed_count++;
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    VLOG(1) << "action=remove_all_objects"
+            << ", removed_count=" << removed_count
+            << ", total_freed_size=" << total_freed_size;
+    return removed_count;
+}
+
+size_t P2PMasterService::GetKeyCount() const {
+    size_t total = 0;
+    for (size_t i = 0; i < GetShardCount(); ++i) {
+        MetadataShardAccessorRO shard(this, i);
+        total += shard->metadata.size();
+    }
+    return total;
+}
+
+void P2PMasterService::OnObjectRemoved(ObjectMetadata& metadata) {
+    for (auto& replica : metadata.replicas_) {
+        OnReplicaRemoved(replica);
+    }
+}
+
+// As a callback, called by P2PSegmentManager when a segment is removed:
+// 1. remove reverse index of segment
+// 2. remove the replica in metadata about the segment
+void P2PMasterService::OnSegmentRemoved(const UUID& segment_id) {
+    for (size_t i = 0; i < GetShardCount(); ++i) {
+        MetadataShardAccessorRW shard_rw(this, i);
+        auto& shard = shard_rw.GetRef();
+
+        auto idx_it = shard.segment_key_index.find(segment_id);
+        if (idx_it == shard.segment_key_index.end()) {
+            continue;
+        }
+
+        // the reverse index using string_view acquired from metadata.
+        // before remove the reverse index, we should acquire the key copier.
+        std::vector<std::string> affected_keys;
+        affected_keys.reserve(idx_it->second.size());
+        for (const auto& item : idx_it->second) {
+            affected_keys.emplace_back(item.first);
+        }
+
+        // 1. Remove the segment from the reverse index
+        shard.segment_key_index.erase(idx_it);
+
+        // 2. Remove the replica in metadata about the segment
+        for (const auto& key : affected_keys) {
+            auto meta_it = shard.metadata.find(key);
+            if (meta_it == shard.metadata.end()) {
+                continue;
+            }
+
+            auto& metadata = *meta_it->second;
+            auto& replicas = metadata.replicas_;
+
+            for (int k = replicas.size() - 1; k >= 0; --k) {
+                auto id = replicas[k].get_segment_id();
+                if (id.has_value() && id.value() == segment_id) {
+                    OnReplicaRemoved(replicas[k]);
+                    replicas.erase(replicas.begin() + k);
+                    break;
+                }
+            }
+
+            if (replicas.empty()) {
+                OnObjectRemoved(metadata);
+                shard.metadata.erase(meta_it);
+            }
+        }
+    }  // end for
+}
+
+void P2PMasterService::AddReplicaToSegmentIndex(MetadataShard& shard,
+                                                const std::string& key,
+                                                const Replica& replica) {
+    if (replica.status() != ReplicaStatus::COMPLETE) {
+        return;
+    }
+    auto seg_id = replica.get_segment_id();
+    if (seg_id.has_value()) {
+        shard.segment_key_index[seg_id.value()][std::string_view(key)]++;
+    }
+}
+
+void P2PMasterService::RemoveReplicaFromSegmentIndex(
+    MetadataShard& shard, const std::string& key,
+    const std::vector<Replica>& replicas) {
+    for (const auto& replica : replicas) {
+        RemoveReplicaFromSegmentIndex(shard, key, replica);
+    }
+}
+
+void P2PMasterService::RemoveReplicaFromSegmentIndex(MetadataShard& shard,
+                                                     const std::string& key,
+                                                     const Replica& replica) {
+    if (replica.status() != ReplicaStatus::COMPLETE) {
+        return;
+    }
+
+    auto seg_id = replica.get_segment_id();
+    if (seg_id.has_value()) {
+        auto seg_it = shard.segment_key_index.find(seg_id.value());
+        if (seg_it != shard.segment_key_index.end()) {
+            auto key_it = seg_it->second.find(key);
+            if (key_it != seg_it->second.end()) {
+                if (--key_it->second == 0) {
+                    seg_it->second.erase(key_it);
+                }
+                if (seg_it->second.empty()) {
+                    shard.segment_key_index.erase(seg_it);
+                }
+            } else {
+                LOG(WARNING)
+                    << "RemoveReplicaFromSegmentIndex: key not found"
+                    << ", segment_id=" << seg_id.value() << ", key=" << key;
+            }
+        } else {
+            LOG(WARNING) << "RemoveReplicaFromSegmentIndex: segment not found"
+                         << ", segment_id=" << seg_id.value()
+                         << ", key=" << key;
+        }
+    }
 }
 
 ErrorCode P2PMasterService::RecordOplog(OpType type, const std::string& key,
@@ -73,14 +528,14 @@ auto P2PMasterService::RegisterClient(const RegisterClientRequest& req)
         return response;
     };
 
-    if (GetClientManager().GetClient(req.client_id)) {
+    if (client_manager_->GetClient(req.client_id)) {
         return make_idempotent_response();
     }
 
-    auto result = MasterService::RegisterClient(req);
+    auto result = client_manager_->RegisterClient(req);
     if (!result.has_value()) {
         if (result.error() == ErrorCode::CLIENT_ALREADY_EXISTS &&
-            GetClientManager().GetClient(req.client_id)) {
+            client_manager_->GetClient(req.client_id)) {
             return make_idempotent_response();
         }
         LOG(ERROR) << "RegisterClient(P2P): failed"
@@ -107,7 +562,7 @@ auto P2PMasterService::RegisterClient(const RegisterClientRequest& req)
 
 auto P2PMasterService::UnregisterClient(const UnregisterClientRequest& req)
     -> tl::expected<UnregisterClientResponse, ErrorCode> {
-    auto result = MasterService::UnregisterClient(req);
+    auto result = client_manager_->UnregisterClient(req);
     if (!result.has_value()) {
         LOG(ERROR) << "UnregisterClient(P2P): failed"
                    << ", client_id=" << req.client_id
@@ -131,7 +586,22 @@ auto P2PMasterService::UnregisterClient(const UnregisterClientRequest& req)
 auto P2PMasterService::MountSegment(const Segment& segment,
                                     const UUID& client_id)
     -> tl::expected<void, ErrorCode> {
-    auto result = MasterService::MountSegment(segment, client_id);
+    // Base logic (absorbed): resolve the client and mount on its meta.
+    tl::expected<void, ErrorCode> result;
+    auto client = client_manager_->GetClient(client_id);
+    if (!client) {
+        LOG(ERROR) << "MountSegment: client not found"
+                   << ", client_id=" << client_id;
+        result = tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
+    } else {
+        result = client->MountSegment(segment);
+        if (!result) {
+            LOG(ERROR) << "fail to mount segment"
+                       << ", segment=" << segment.name
+                       << ", client_id=" << client_id
+                       << ", ret=" << result.error();
+        }
+    }
     if (!result.has_value()) {
         LOG(ERROR) << "MountSegment(P2P): failed"
                    << ", client_id=" << client_id
@@ -160,7 +630,22 @@ auto P2PMasterService::MountSegment(const Segment& segment,
 auto P2PMasterService::UnmountSegment(const UUID& segment_id,
                                       const UUID& client_id)
     -> tl::expected<void, ErrorCode> {
-    auto result = MasterService::UnmountSegment(segment_id, client_id);
+    // Base logic (absorbed): resolve the client and unmount on its meta.
+    tl::expected<void, ErrorCode> result;
+    auto client = client_manager_->GetClient(client_id);
+    if (!client) {
+        LOG(ERROR) << "UnmountSegment: client not found"
+                   << ", client_id=" << client_id;
+        result = tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
+    } else {
+        result = client->UnmountSegment(segment_id);
+        if (!result) {
+            LOG(ERROR) << "fail to unmount segment"
+                       << ", segment_id=" << segment_id
+                       << ", client_id=" << client_id
+                       << ", ret=" << result.error();
+        }
+    }
     if (!result.has_value()) {
         LOG(ERROR) << "UnmountSegment(P2P): failed"
                    << ", client_id=" << client_id
@@ -766,7 +1251,7 @@ ErrorCode P2PMasterService::RestoreFromStandbyMetadata(
         req.segments = client_info.segments;
         req.deployment_mode = DeploymentMode::P2P;
 
-        auto result = MasterService::RegisterClient(req);
+        auto result = client_manager_->RegisterClient(req);
         if (!result.has_value()) {
             HAMetricManager::instance().inc_promotion_restore_failures();
             LOG(ERROR) << "RestoreFromStandbyMetadata: failed to restore client"
@@ -893,7 +1378,7 @@ void P2PMasterService::OnObjectAccessed(const ObjectMetadata& metadata) {
 // The detailed hit statistic of replica should be synced from
 // client to master.
 void P2PMasterService::OnObjectHit(const ObjectMetadata& metadata) {
-    MasterMetricManager::instance().inc_valid_get_nums();
+    P2PMasterMetricManager::instance().inc_valid_get_nums();
 }
 
 void P2PMasterService::OnReplicaRemoved(const Replica& replica) {
@@ -903,9 +1388,9 @@ void P2PMasterService::OnReplicaRemoved(const Replica& replica) {
             LOG(ERROR) << "invalid memory type"
                        << ", replica: " << replica;
         } else if (*type == MemoryType::DRAM) {
-            MasterMetricManager::instance().dec_mem_cache_nums();
+            P2PMasterMetricManager::instance().dec_mem_cache_nums();
         } else if (*type == MemoryType::NVME) {
-            MasterMetricManager::instance().dec_file_cache_nums();
+            P2PMasterMetricManager::instance().dec_file_cache_nums();
         }
     }
 }
@@ -917,9 +1402,9 @@ void P2PMasterService::OnReplicaAdded(const Replica& replica) {
             LOG(ERROR) << "invalid memory type"
                        << ", replica: " << replica;
         } else if (*type == MemoryType::DRAM) {
-            MasterMetricManager::instance().inc_mem_cache_nums();
+            P2PMasterMetricManager::instance().inc_mem_cache_nums();
         } else if (*type == MemoryType::NVME) {
-            MasterMetricManager::instance().inc_file_cache_nums();
+            P2PMasterMetricManager::instance().inc_file_cache_nums();
         }
     }
 }
