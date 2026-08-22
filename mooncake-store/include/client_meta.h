@@ -13,10 +13,6 @@
 
 namespace mooncake {
 
-struct ClientHealthState {
-    ClientStatus status = ClientStatus::UNDEFINED;
-    std::chrono::steady_clock::time_point last_heartbeat;
-};
 /**
  * @brief ClientMeta records the meta data of a client including health status
  * and segment information.

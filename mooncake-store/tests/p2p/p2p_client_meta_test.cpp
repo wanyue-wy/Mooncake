@@ -19,7 +19,7 @@ class P2PClientMetaTest : public ::testing::Test {
         google::InitGoogleLogging("P2PClientMetaTest");
         FLAGS_logtostderr = 1;
         // Set short timeouts for health state testing
-        ClientMeta::SetTimeouts(2, 5);
+        P2PClientMeta::SetTimeouts(2, 5);
     }
 
     void TearDown() override { google::ShutdownGoogleLogging(); }
@@ -142,7 +142,7 @@ TEST_F(P2PClientMetaTest, MountFailsWhenUnhealthy) {
     // Explicitly set short timeouts
     constexpr int kDisconnectTimeoutSec = 1;
     constexpr int kCrashTimeoutSec = 2;
-    ClientMeta::SetTimeouts(kDisconnectTimeoutSec, kCrashTimeoutSec);
+    P2PClientMeta::SetTimeouts(kDisconnectTimeoutSec, kCrashTimeoutSec);
 
     meta->Heartbeat();
     auto seg = MakeP2PSegment();
@@ -172,7 +172,7 @@ TEST_F(P2PClientMetaExtendedTest, UnmountSegmentCheckHealth) {
     auto seg = MakeP2PSegment();
     constexpr int kDiscTimeout = 1;
     constexpr int kCrashTimeout = 2;
-    ClientMeta::SetTimeouts(kDiscTimeout, kCrashTimeout);
+    P2PClientMeta::SetTimeouts(kDiscTimeout, kCrashTimeout);
 
     // Case 1: Health -> OK
     meta->Heartbeat();
@@ -280,7 +280,7 @@ TEST_F(P2PClientMetaExtendedTest, HealthStateMachineTransitions) {
     auto meta = CreateExtendedMeta();
     constexpr int64_t kDisconnectSec = 1;
     constexpr int64_t kCrashSec = 2;
-    ClientMeta::SetTimeouts(kDisconnectSec, kCrashSec);
+    P2PClientMeta::SetTimeouts(kDisconnectSec, kCrashSec);
 
     meta->Heartbeat();
     EXPECT_TRUE(meta->is_health());
@@ -548,7 +548,7 @@ TEST_F(P2PClientMetaExtendedTest, QueryIpCheckHealth) {
     UUID id = meta->get_client_id();
     constexpr int kDiscTimeout = 1;
     constexpr int kCrashTimeout = 2;
-    ClientMeta::SetTimeouts(kDiscTimeout, kCrashTimeout);
+    P2PClientMeta::SetTimeouts(kDiscTimeout, kCrashTimeout);
 
     meta->Heartbeat();
     auto res_healthy = meta->QueryIp(id);

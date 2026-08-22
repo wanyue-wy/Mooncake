@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -393,6 +394,14 @@ inline std::ostream& operator<<(std::ostream& os,
                                         : "UNKNOWN");
     return os;
 }
+
+/**
+ * @brief Health state snapshot of a client (status + last heartbeat time).
+ */
+struct ClientHealthState {
+    ClientStatus status = ClientStatus::UNDEFINED;
+    std::chrono::steady_clock::time_point last_heartbeat;
+};
 
 /**
  * @enum DummyClientStatus

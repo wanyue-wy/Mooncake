@@ -36,7 +36,7 @@ P2PClientManager::P2PClientManager(const int64_t disconnect_timeout_sec,
                                    const int64_t crash_timeout_sec,
                                    const ViewVersionId view_version)
     : view_version_(view_version) {
-    ClientMeta::SetTimeouts(disconnect_timeout_sec, crash_timeout_sec);
+    P2PClientMeta::SetTimeouts(disconnect_timeout_sec, crash_timeout_sec);
 }
 
 void P2PClientManager::Start() { StartClientMonitor(); }
