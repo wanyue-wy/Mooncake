@@ -17,7 +17,7 @@
 #include <ylt/util/tl/expected.hpp>
 
 #include "master_config.h"
-#include "master_metric_manager.h"
+#include "p2p/master/p2p_master_metric_manager.h"
 #include "p2p/master/p2p_master_service.h"
 #include "p2p/master/p2p_rpc_types.h"
 #include "replica.h"
@@ -116,7 +116,7 @@ class WrappedP2PMasterService {
 
     tl::expected<bool, ErrorCode> ExistKey(std::string_view key);
 
-    tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
+    tl::expected<P2PMasterMetricManager::CacheHitStatDict, ErrorCode>
     CalcCacheStats();
 
     std::vector<tl::expected<bool, ErrorCode>> BatchExistKey(

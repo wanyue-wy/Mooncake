@@ -25,11 +25,8 @@ class P2PMasterMetricsTest : public ::testing::Test {
 };
 
 TEST_F(P2PMasterMetricsTest, SingletonRoutingTest) {
-    // The base singleton must route to the registered P2P instance.
-    EXPECT_EQ(&MasterMetricManager::instance(),
-              &P2PMasterMetricManager::instance());
-
-    // Idempotent.
+    // The P2P singleton is standalone (Phase 2 detached it from the
+    // MasterMetricManager base); access must be idempotent.
     EXPECT_EQ(&P2PMasterMetricManager::instance(),
               &P2PMasterMetricManager::instance());
 }
@@ -65,7 +62,7 @@ TEST_F(P2PMasterMetricsTest, CountersAndResetTest) {
 TEST_F(P2PMasterMetricsTest, SerializeMetricsContentTest) {
     // After reset, zeros are force-marked changed so all owned metrics
     // appear.
-    std::string text = MasterMetricManager::instance().serialize_metrics();
+    std::string text = P2PMasterMetricManager::instance().serialize_metrics();
 
     EXPECT_NE(text.find("master_total_capacity_bytes"), std::string::npos);
     EXPECT_NE(text.find("master_key_count"), std::string::npos);
@@ -98,7 +95,7 @@ TEST_F(P2PMasterMetricsTest, SerializeMetricsContentTest) {
 }
 
 TEST_F(P2PMasterMetricsTest, SummaryArchTagTest) {
-    std::string summary = MasterMetricManager::instance().get_summary_string();
+    std::string summary = P2PMasterMetricManager::instance().get_summary_string();
     EXPECT_EQ(summary.find("[Arch: P2P] "), 0u);
     EXPECT_NE(summary.find("GetWriteRoute="), std::string::npos);
     EXPECT_NE(summary.find("AddReplica="), std::string::npos);
@@ -116,20 +113,20 @@ TEST_F(P2PMasterMetricsTest, ResetClearsClusterMetrics) {
     ClientMetricSnapshot second;
     second.total_request.get_requests = 9;
     metrics.UpdateClientMetrics({1, 1}, second);  // total 9
-    EXPECT_NE(MasterMetricManager::instance().serialize_metrics().find(
+    EXPECT_NE(P2PMasterMetricManager::instance().serialize_metrics().find(
                   "master_cluster_total_get_requests 9\n"),
               std::string::npos);
 
     metrics.reset_all_metrics();
     const std::string text =
-        MasterMetricManager::instance().serialize_metrics();
+        P2PMasterMetricManager::instance().serialize_metrics();
     EXPECT_NE(text.find("master_cluster_total_get_requests 0\n"),
               std::string::npos);
 
     // Reset must also drop the per-client baselines: the same snapshot is
     // added in full again (fresh join), not applied as a zero delta.
     metrics.UpdateClientMetrics({1, 1}, second);
-    EXPECT_NE(MasterMetricManager::instance().serialize_metrics().find(
+    EXPECT_NE(P2PMasterMetricManager::instance().serialize_metrics().find(
                   "master_cluster_total_get_requests 9\n"),
               std::string::npos);
 }
