@@ -1,8 +1,83 @@
 #include "p2p/master/p2p_segment_manager.h"
-#include "p2p/master/p2p_master_metric_manager.h"
+
 #include <glog/logging.h>
 
+#include "p2p/master/p2p_master_metric_manager.h"
+
 namespace mooncake {
+
+tl::expected<void, ErrorCode> P2PSegmentManager::MountSegment(
+    const Segment& segment) {
+    SharedMutexLocker lock(&segment_mutex_);
+    auto it = mounted_segments_.find(segment.id);
+    if (it != mounted_segments_.end()) {
+        LOG(WARNING) << "segment_name=" << segment.name
+                     << ", warn=segment_already_exists";
+        return tl::make_unexpected(ErrorCode::SEGMENT_ALREADY_EXISTS);
+    }
+    auto ret = InnerMountSegment(segment);
+    if (!ret.has_value()) {
+        LOG(ERROR) << "fail to mount segment"
+                   << ", segment_id=" << segment.id
+                   << ", segment_name=" << segment.name
+                   << ", segment_size=" << segment.size
+                   << ", ret=" << ret.error();
+        return ret;
+    }
+    return {};
+}
+
+tl::expected<void, ErrorCode> P2PSegmentManager::UnmountSegment(
+    const UUID& segment_id) {
+    {
+        // Phase 1: Remove segment under segment_mutex_ (fast).
+        SharedMutexLocker lock(&segment_mutex_);
+        auto it = mounted_segments_.find(segment_id);
+        if (it == mounted_segments_.end()) {
+            LOG(WARNING) << "attempt to unmount segment but it does not exist";
+            return tl::make_unexpected(ErrorCode::SEGMENT_NOT_FOUND);
+        }
+        auto ret = OnUnmountSegment(it->second);
+        if (!ret.has_value()) {
+            LOG(ERROR) << "fail to unmount segment"
+                       << ", segment_id=" << segment_id
+                       << ", ret=" << ret.error();
+            return ret;
+        }
+        mounted_segments_.erase(it);
+    }
+    // Phase 2: Clean up metadata referencing this segment WITHOUT holding
+    // segment_mutex_. This avoids blocking MountSegment/QuerySegments etc.
+    if (segment_removal_cb_) {
+        segment_removal_cb_(segment_id);
+    }
+    return {};
+}
+
+tl::expected<std::vector<Segment>, ErrorCode> P2PSegmentManager::GetSegments() {
+    SharedMutexLocker lock(&segment_mutex_, shared_lock);
+    std::vector<Segment> segments;
+    for (const auto& entry : mounted_segments_) {
+        segments.push_back(*entry.second);
+    }
+    return segments;
+}
+
+tl::expected<std::shared_ptr<Segment>, ErrorCode>
+P2PSegmentManager::QuerySegment(const UUID& segment_id) {
+    SharedMutexLocker lock(&segment_mutex_, shared_lock);
+    auto it = mounted_segments_.find(segment_id);
+    if (it == mounted_segments_.end()) {
+        LOG(WARNING) << "QuerySegment: segment not found"
+                     << ", segment_id=" << segment_id;
+        return tl::make_unexpected(ErrorCode::SEGMENT_NOT_FOUND);
+    }
+    return it->second;
+}
+
+void P2PSegmentManager::SetSegmentRemovalCallback(SegmentRemovalCallback cb) {
+    segment_removal_cb_ = std::move(cb);
+}
 
 tl::expected<std::pair<size_t, size_t>, ErrorCode>
 P2PSegmentManager::QuerySegments(const std::string& segment) {
