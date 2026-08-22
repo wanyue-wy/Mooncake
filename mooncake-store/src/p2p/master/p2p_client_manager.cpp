@@ -504,7 +504,7 @@ HeartbeatTaskResult P2PClientManager::ProcessTask(const UUID& client_id,
                         LOG(ERROR) << "fail to update segment usages"
                                    << ", client_id=" << client_id
                                    << ", segment_id=" << sub.segment_id
-                                   << ", error=" << sub.error();
+                                   << ", error=" << sub.error;
                     }
                 }
             } else {
