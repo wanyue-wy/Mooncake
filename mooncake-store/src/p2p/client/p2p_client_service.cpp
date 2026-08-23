@@ -677,6 +677,14 @@ std::string P2PClientService::GetHealthStatus() const {
     return "OK";
 }
 
+tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
+P2PClientService::CalcCacheStats() {
+    // TODO: Calculate cache statistics locally from P2P client metrics and
+    // DataManager state instead of querying the master.
+    LOG(ERROR) << "CalcCacheStats is not implemented for P2P client service";
+    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+}
+
 // ============================================================================
 // Put Operations
 // ============================================================================

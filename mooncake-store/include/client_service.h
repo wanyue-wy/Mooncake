@@ -372,7 +372,7 @@ class ClientService {
         return metrics->summary_metrics();
     }
 
-    tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
+    virtual tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
     CalcCacheStats() {
         auto guard = AcquireInflightGuard();
         if (!guard.is_valid()) {

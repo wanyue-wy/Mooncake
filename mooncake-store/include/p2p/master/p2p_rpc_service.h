@@ -116,9 +116,6 @@ class WrappedP2PMasterService {
 
     tl::expected<bool, ErrorCode> ExistKey(std::string_view key);
 
-    tl::expected<P2PMasterMetricManager::CacheHitStatDict, ErrorCode>
-    CalcCacheStats();
-
     std::vector<tl::expected<bool, ErrorCode>> BatchExistKey(
         const std::vector<std::string_view>& keys);
 

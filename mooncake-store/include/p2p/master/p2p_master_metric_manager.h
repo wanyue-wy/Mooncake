@@ -53,20 +53,6 @@ class P2PMasterMetricManager {
     void inc_valid_get_nums(int64_t val = 1);
     void inc_total_get_nums(int64_t val = 1);
 
-    enum class CacheHitStat {
-        MEMORY_HITS,
-        SSD_HITS,
-        MEMORY_TOTAL,
-        SSD_TOTAL,
-        MEMORY_HIT_RATE,
-        SSD_HIT_RATE,
-        OVERALL_HIT_RATE,
-        VALID_GET_RATE
-    };
-    using CacheHitStatDict = std::unordered_map<CacheHitStat, double>;
-    void add_stat_to_dict(CacheHitStatDict&, CacheHitStat, double);
-    CacheHitStatDict calculate_cache_stats();
-
     // Memory Storage Metrics
     void inc_allocated_mem_size(int64_t val = 1);
     void dec_allocated_mem_size(int64_t val = 1);
@@ -331,16 +317,6 @@ class P2PMasterMetricManager {
 
     ylt::metric::counter_t valid_get_nums_;
     ylt::metric::counter_t total_get_nums_;
-
-    static const inline std::unordered_map<CacheHitStat, std::string>
-        stat_names_ = {{CacheHitStat::MEMORY_HITS, "memory_hits"},
-                       {CacheHitStat::SSD_HITS, "ssd_hits"},
-                       {CacheHitStat::MEMORY_TOTAL, "memory_total"},
-                       {CacheHitStat::SSD_TOTAL, "ssd_total"},
-                       {CacheHitStat::MEMORY_HIT_RATE, "memory_hit_rate"},
-                       {CacheHitStat::SSD_HIT_RATE, "ssd_hit_rate"},
-                       {CacheHitStat::OVERALL_HIT_RATE, "overall_hit_rate"},
-                       {CacheHitStat::VALID_GET_RATE, "valid_get_rate"}};
 
     // Operation Statistics
     ylt::metric::counter_t get_write_route_requests_;

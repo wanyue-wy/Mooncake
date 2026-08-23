@@ -241,11 +241,6 @@ void WrappedP2PMasterService::init_http_server() {
     LOG(INFO) << "HTTP metrics server started on port " << http_server_.port();
 }
 
-tl::expected<P2PMasterMetricManager::CacheHitStatDict, ErrorCode>
-WrappedP2PMasterService::CalcCacheStats() {
-    return P2PMasterMetricManager::instance().calculate_cache_stats();
-}
-
 tl::expected<bool, ErrorCode> WrappedP2PMasterService::ExistKey(
     std::string_view key) {
     return execute_rpc(
