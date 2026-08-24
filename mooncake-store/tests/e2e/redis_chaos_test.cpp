@@ -26,7 +26,7 @@
 #include "p2p/ha/oplog/p2p_standby_snapshot_service.h"
 #include "p2p/ha/oplog/redis_oplog_store.h"
 #include "process_handler.h"
-#include "p2p/ha/redis_master_view_helper.h"
+#include "ha/redis_master_view_helper.h"
 #include "../p2p/redis_test_utils.h"
 #include "types.h"
 

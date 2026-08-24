@@ -48,6 +48,10 @@ echo "Verifying mooncake_master entry point..."
 which mooncake_master || { echo "ERROR: mooncake_master entry point not found!"; exit 1; }
 echo "Success: mooncake_master entry point found"
 
+echo "Verifying mooncake_master_p2p entry point..."
+which mooncake_master_p2p || { echo "ERROR: mooncake_master_p2p entry point not found!"; exit 1; }
+echo "Success: mooncake_master_p2p entry point found"
+
 # Check if the mooncake_client entry point is installed and executable
 which mooncake_client || { echo "ERROR: mooncake_client entry point not found!"; exit 1; }
 echo "Success: mooncake_client entry point found"

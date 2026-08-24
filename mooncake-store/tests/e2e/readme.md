@@ -23,7 +23,9 @@ All test programs support configurable parameters, such as `--protocol`, `--mast
 **Brief**: An interactive client control tool for convenient and straightforward manual testing and debugging. This tool can start multiple clients and perform various operations like `put`, `get`, and `mount` from a specified client.
 
 **Usage**:
-1. Start the transfer-engine's meta server and `mooncake_master`. If using HA mode, also start the etcd servers.
+1. Start the transfer-engine metadata server and the matching master binary:
+   `mooncake_master` for centralized tests or `mooncake_master_p2p` for P2P
+   tests. If using etcd HA, also start the etcd servers.
 2. Launch `clientctl` and manually type in commands. Several predefined scenarios can be found in the `client_ctl_cases` directory.
 
 **Commands**:

@@ -36,10 +36,9 @@ cp build/mooncake-integration/engine.*.so mooncake-wheel/mooncake/engine.so
 if [ -f build/mooncake-integration/store.*.so ]; then
     echo "Copying store.so..."
     cp build/mooncake-integration/store.*.so mooncake-wheel/mooncake/store.so
-    echo "Copying master binary..."
-    # Copy master binary
+    echo "Copying master binaries..."
     cp build/mooncake-store/src/mooncake_master mooncake-wheel/mooncake/
-    # Copy client binary
+    cp build/mooncake-store/src/mooncake_master_p2p mooncake-wheel/mooncake/
     cp build/mooncake-store/src/mooncake_client mooncake-wheel/mooncake/
     # Copy async_store.py
     cp mooncake-integration/store/async_store.py mooncake-wheel/mooncake/async_store.py
@@ -51,6 +50,16 @@ fi
 if [ -f build/mooncake-store/src/libmooncake_store.so ]; then
     echo "Copying libmooncake_store.so..."
     cp build/mooncake-store/src/libmooncake_store.so mooncake-wheel/mooncake/libmooncake_store.so
+fi
+
+if [ -f build/mooncake-store/src/libmooncake_store_p2p.so ]; then
+    echo "Copying libmooncake_store_p2p.so..."
+    cp build/mooncake-store/src/libmooncake_store_p2p.so mooncake-wheel/mooncake/
+fi
+
+if [ -f build/mooncake-store/src/libmooncake_store_client_entry.so ]; then
+    echo "Copying libmooncake_store_client_entry.so..."
+    cp build/mooncake-store/src/libmooncake_store_client_entry.so mooncake-wheel/mooncake/
 fi
 
 # Copy libtransfer_engine.so to mooncake directory (only when USE_ETCD is set)
@@ -239,8 +248,11 @@ case "$ARCH" in
         ;;
 esac
 
-# Set platform tag if not already set
-PLATFORM_TAG=${PLATFORM_TAG:-"manylinux_${GLIBC_VERSION}_${ARCH_SUFFIX}"}
+# Let auditwheel choose the highest compatible policy by default. Not every
+# host glibc minor has a corresponding auditwheel policy (for example 2.32),
+# so constructing a manylinux tag directly from the host version is invalid.
+# Release jobs may still pin PLATFORM_TAG explicitly.
+PLATFORM_TAG=${PLATFORM_TAG:-"auto"}
 
 echo "Detected architecture: $ARCH_SUFFIX"
 echo "Detected glibc version: $GLIBC_VERSION"

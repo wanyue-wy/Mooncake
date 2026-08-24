@@ -103,6 +103,9 @@ jobs:
       run: |
         cd build
         cmake --build .
+        test -x mooncake-store/src/mooncake_master
+        test -x mooncake-store/src/mooncake_master_p2p
+        test -x mooncake-store/src/mooncake_client
         sudo cmake --install .
       shell: bash
 

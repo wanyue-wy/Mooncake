@@ -22,7 +22,27 @@ import subprocess
 import sys
 from collections import defaultdict
 
-SCOPE = ["mooncake-store", "mooncake-integration"]
+SCOPE = [
+    "mooncake-store",
+    "mooncake-integration",
+    ".github/workflows/ci.yml",
+    ".github/workflows/ci_cu13.yml",
+    "CMakeLists.txt",
+    "dependencies.sh",
+    "extern/pybind11",
+    "mooncake-common/limit_jobs.cmake",
+    "scripts/build_wheel.sh",
+    "scripts/test_installation.sh",
+    "scripts/test_tensor_api.py",
+    "scripts/p2p_split_diff_audit.py",
+    "docs/source/deployment/mooncake-store-deployment-guide.md",
+    "docs/source/design/mooncake-store.md",
+    "docs/source/troubleshooting/error-code.md",
+    "mooncake-wheel/pyproject.toml",
+    "mooncake-wheel/mooncake/cli_master_p2p.py",
+    "mooncake-wheel/tests/test_cli.py",
+    "mooncake-store/tests/e2e/readme.md",
+]
 
 # ---------------------------------------------------------------------------
 # Disposition table (§4 of p2p-split-plan.md, Phase 0 confirmed edition).
@@ -65,7 +85,6 @@ CAT_A = [
     "mooncake-store/include/runtime_config_store.h",
     "mooncake-store/src/runtime_config_store.cpp",
     "mooncake-store/include/task_handle.h",
-    "mooncake-store/include/heartbeat_type.h",
     # HA (oplog dir + standalone redis/standby/metric files)
     "mooncake-store/include/ha/oplog/*",
     "mooncake-store/src/ha/oplog/*",
@@ -111,6 +130,16 @@ CAT_K_CLIENT = [
     "mooncake-store/src/client_metric.cpp",
     "mooncake-store/include/ha_helper.h",
     "mooncake-store/src/ha_helper.cpp",
+    "mooncake-store/include/inflight_tracker.h",
+    "mooncake-store/include/runtime_config_store.h",
+    "mooncake-store/src/runtime_config_store.cpp",
+    "mooncake-store/include/heartbeat_type.h",
+    "mooncake-store/include/ha/redis_election_helper.h",
+    "mooncake-store/src/ha/redis_election_helper.cpp",
+    "mooncake-store/include/ha/redis_master_view_helper.h",
+    "mooncake-store/src/ha/redis_master_view_helper.cpp",
+    "mooncake-store/include/ha/redis_util.h",
+    "mooncake-store/src/ha/redis_util.cpp",
 ]
 
 # §4.B — base classes: centralized side restored to a00f757 (M files);
@@ -126,6 +155,8 @@ CAT_B_BASE = [
     "mooncake-store/src/rpc_service.cpp",
     "mooncake-store/include/master_metric_manager.h",
     "mooncake-store/src/master_metric_manager.cpp",
+    "mooncake-store/include/segment.h",
+    "mooncake-store/src/segment.cpp",
     "mooncake-store/include/client_metric.h",
     "mooncake-store/src/client_metric.cpp",
 ]
@@ -184,11 +215,8 @@ CAT_D = [
     "mooncake-store/src/storage_backend.cpp",
     "mooncake-store/include/file_storage.h",
     "mooncake-store/src/file_storage.cpp",
-    "mooncake-store/include/ha_helper.h",
-    "mooncake-store/src/ha_helper.cpp",
     "mooncake-store/include/rpc_types.h",
     "mooncake-store/include/master_config.h",
-    "mooncake-store/include/offset_allocator/offset_allocator.hpp",
     "mooncake-store/include/cachelib_memory_allocator/SlabAllocator.h",
     # fork-added generic helper, kept in the shared layer (post-review)
     "mooncake-store/include/utils/base64.h",
@@ -197,9 +225,29 @@ CAT_D = [
 # §4.E — deletions of post-a00f757 files (subset of CAT_B_SUBCLASS_DELETE).
 CAT_E = [
     "mooncake-store/conf/centralized_runtime_config.json",
-    # eviction_strategy.h / transfer_task.{h,cpp} + their tests are unchanged
-    # since a00f757, hence absent from this diff; deletion (Phase 3/4) keeps
-    # them absent. Confirmed dead code in Phase 0.
+    "mooncake-store/include/eviction_strategy.h",
+    "mooncake-store/tests/eviction_strategy_test.cpp",
+]
+
+# §4.F — repository-level binary, packaging, CI, and documentation support.
+CAT_F = [
+    ".github/workflows/ci.yml",
+    ".github/workflows/ci_cu13.yml",
+    "CMakeLists.txt",
+    "dependencies.sh",
+    "extern/pybind11",
+    "mooncake-common/limit_jobs.cmake",
+    "scripts/build_wheel.sh",
+    "scripts/test_installation.sh",
+    "scripts/test_tensor_api.py",
+    "scripts/p2p_split_diff_audit.py",
+    "docs/source/deployment/mooncake-store-deployment-guide.md",
+    "docs/source/design/mooncake-store.md",
+    "docs/source/troubleshooting/error-code.md",
+    "mooncake-wheel/pyproject.toml",
+    "mooncake-wheel/mooncake/cli_master_p2p.py",
+    "mooncake-wheel/tests/test_cli.py",
+    "mooncake-store/tests/e2e/readme.md",
 ]
 
 # conf files modified for P2P keys (DoD (d): additive conf changes).
@@ -225,9 +273,7 @@ CAT_G_P2P = [
     "mooncake-store/tests/tier_role_resolver_test.cpp",
     "mooncake-store/tests/data_manager_test.cpp",
     "mooncake-store/tests/route_cache_test.cpp",
-    "mooncake-store/tests/inflight_tracker_test.cpp",
     "mooncake-store/tests/client_rpc_service_test.cpp",
-    "mooncake-store/tests/runtime_config_store_test.cpp",
     "mooncake-store/tests/async_metadata_notifier_test.cpp",
     "mooncake-store/tests/client_metrics_aggregator_test.cpp",
     "mooncake-store/tests/client_http_metrics_test.cpp",
@@ -247,6 +293,7 @@ CAT_G_RESTORE = [
     "mooncake-store/tests/master_service_ssd_test.cpp",
     "mooncake-store/tests/master_metrics_test.cpp",
     "mooncake-store/tests/client_integration_test.cpp",
+    "mooncake-store/tests/segment_test.cpp",
     "mooncake-store/tests/allocation_strategy_test.cpp",
     "mooncake-store/tests/buffer_allocator_test.cpp",
     "mooncake-store/tests/storage_backend_test.cpp",
@@ -278,44 +325,29 @@ CAT_G_KEEP = [
     # Entry/e2e tests with direct includes after ClientService header narrowing.
     "mooncake-store/tests/e2e/chaos_test.cpp",
     "mooncake-store/tests/e2e/chaos_rand_test.cpp",
-]
-
-# Pending Phase 2 decisions (tracked, not violations).
-CAT_PENDING = [
-    # Belongs to B-9 client_metric rework; placement decided when metrics are
-    # made self-contained.
     "mooncake-store/tests/client_metrics_test.cpp",
+    "mooncake-store/tests/inflight_tracker_test.cpp",
 ]
 
-# §4.B-7 — deleted by the fork, restored to a00f757 in Phase 3; appears as D
-# in the diff until then.
-CAT_RESTORE_PENDING = [
-    "mooncake-store/include/segment.h",
-    "mooncake-store/src/segment.cpp",
-    "mooncake-store/tests/segment_test.cpp",
-]
-
-# Deletions allowed to appear as 'D' in the diff (Phase 3 restores them).
+# Base files intentionally deleted after the Phase 4 dead-code audit.
 ALLOWED_D = {
-    "mooncake-store/include/segment.h",
-    "mooncake-store/src/segment.cpp",
-    "mooncake-store/tests/segment_test.cpp",
+    "mooncake-store/include/eviction_strategy.h",
+    "mooncake-store/tests/eviction_strategy_test.cpp",
 }
 
 CATEGORIES = [
     ("A (move to p2p/)", CAT_A),
     ("K (stable client entry/common base)", CAT_K_CLIENT),
-    ("restore-pending (segment trio, back in Phase 3)", CAT_RESTORE_PENDING),
     ("B-base (restore a00f757 + merge into P2P)", CAT_B_BASE),
     ("B-sub/E (fork subclasses, delete in Phase 3)", CAT_B_SUBCLASS_DELETE),
     ("C (entry adaptation)", CAT_C),
     ("D (leaf convergence)", CAT_D),
     ("E (delete)", CAT_E),
+    ("F (repo-level support)", CAT_F),
     ("conf additive", CAT_CONF),
     ("G-p2p (tests move to tests/p2p/)", CAT_G_P2P),
     ("G-restore (tests back to a00f757)", CAT_G_RESTORE),
     ("G-keep (entry-layer tests whitelist)", CAT_G_KEEP),
-    ("PENDING (Phase 2 decision)", CAT_PENDING),
 ]
 
 
@@ -333,7 +365,10 @@ def main():
     parser.add_argument("--head", default="HEAD")
     args = parser.parse_args()
 
-    cmd = ["git", "diff", "--name-status", args.base, args.head, "--"] + SCOPE
+    if args.head == "WORKTREE":
+        cmd = ["git", "diff", "--name-status", args.base, "--"] + SCOPE
+    else:
+        cmd = ["git", "diff", "--name-status", args.base, args.head, "--"] + SCOPE
     out = subprocess.check_output(cmd, text=True)
 
     entries = []  # (status, path, old_path_or_None)
@@ -371,7 +406,7 @@ def main():
         "D (leaf convergence)",
         "conf additive",
         "G-keep (entry-layer tests whitelist)",
-        "PENDING (Phase 2 decision)",
+        "F (repo-level support)",
     }
     expected_changed = set()
     for name, patterns in CATEGORIES:

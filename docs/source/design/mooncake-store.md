@@ -679,7 +679,7 @@ sudo make install # Install Python interface support package
 Mooncake Store uses the Transfer Engine as its core transfer engine, so it is necessary to start the metadata service (etcd/redis/http). The startup and configuration of the `metadata` service can be referred to in the relevant sections of [Transfer Engine](./transfer-engine/index.md). **Special Note**: For the etcd service, by default, it only provides services for local processes. You need to modify the listening options (IP to 0.0.0.0 instead of the default 127.0.0.1). You can use commands like curl to verify correctness.
 
 ### Starting the Master Service
-The Master Service runs as an independent process, provides gRPC interfaces externally, and is responsible for the metadata management of Mooncake Store (note that the Master Service does not reuse the metadata service of the Transfer Engine). The default listening port is `50051`. After compilation, you can directly run `mooncake_master` located in the `build/mooncake-store/src/` directory. After starting, the Master Service will output the following content in the log:
+The Master Service runs as an independent process, provides gRPC interfaces externally, and is responsible for the metadata management of Mooncake Store (note that the Master Service does not reuse the metadata service of the Transfer Engine). The default listening port is `50051`. After compilation, run `mooncake_master` for the centralized architecture or `mooncake_master_p2p` for the P2P architecture; both are located in `build/mooncake-store/src/`. Clients continue to use the shared `mooncake_client` executable and select their deployment mode in client configuration. After starting, the centralized Master Service will output the following content in the log:
 ```
 Starting Mooncake Master Service
 Port: 50051
@@ -689,12 +689,12 @@ Master service listening on 0.0.0.0:50051
 
 **High availability mode**:
 
-HA mode relies on an external coordination backend for master election. Mooncake Store supports etcd and Redis election backends. If Transfer Engine also uses etcd or Redis as its metadata service, the backend used by Mooncake Store can either be shared with or separate from the one used by Transfer Engine.
+HA mode relies on an external coordination backend for master election. The centralized `mooncake_master` supports etcd election. The P2P `mooncake_master_p2p` supports etcd or Redis election and can additionally use the P2P OpLog/standby recovery path. If Transfer Engine also uses etcd or Redis as its metadata service, that metadata backend is independent from the Store master election backend.
 
 HA mode allows deployment of multiple master instances to eliminate the single point of failure. Each master instance must be started with the following parameters:
 ```
 --enable-ha: enables high availability mode
---election-backend: election backend, "etcd" by default or "redis"
+--election-backend: `etcd` for centralized master; `etcd` or `redis` for P2P master
 --etcd-endpoints: specifies endpoints for etcd service, separated by ';'
 --redis-endpoint: specifies the Redis endpoint when election_backend is redis
 --cluster-id: cluster ID used to isolate HA metadata in the election backend
@@ -710,9 +710,9 @@ For etcd-based HA:
     --rpc-address=10.0.0.1
 ```
 
-For Redis-based HA:
+For Redis-based P2P HA:
 ```
-./build/mooncake-store/src/mooncake_master \
+./build/mooncake-store/src/mooncake_master_p2p \
     --enable-ha=true \
     --election-backend=redis \
     --redis-endpoint="10.0.0.10:6379" \
