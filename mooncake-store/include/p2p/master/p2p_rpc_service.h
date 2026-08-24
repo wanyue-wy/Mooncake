@@ -15,6 +15,7 @@
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include <ylt/struct_pack/md5_constexpr.hpp>
 #include <ylt/util/tl/expected.hpp>
+#include <ylt/util/utils.hpp>
 
 #include "master_config.h"
 #include "p2p/master/p2p_master_metric_manager.h"
@@ -240,3 +241,109 @@ void RegisterP2PHeartbeatRpcService(
     mooncake::WrappedP2PMasterService& wrapped_master_service);
 
 }  // namespace mooncake
+
+namespace coro_rpc {
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::ExistKey>() {
+    return mooncake::p2p_rpc_wire::kExistKey;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::BatchExistKey>() {
+    return mooncake::p2p_rpc_wire::kBatchExistKey;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::BatchQueryIp>() {
+    return mooncake::p2p_rpc_wire::kBatchQueryIp;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::GetReplicaListByRegex>() {
+    return mooncake::p2p_rpc_wire::kGetReplicaListByRegex;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::GetReplicaList>() {
+    return mooncake::p2p_rpc_wire::kGetReplicaList;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::BatchGetReplicaList>() {
+    return mooncake::p2p_rpc_wire::kBatchGetReplicaList;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::Remove>() {
+    return mooncake::p2p_rpc_wire::kRemove;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::RemoveByRegex>() {
+    return mooncake::p2p_rpc_wire::kRemoveByRegex;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::RemoveAll>() {
+    return mooncake::p2p_rpc_wire::kRemoveAll;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::MountSegment>() {
+    return mooncake::p2p_rpc_wire::kMountSegment;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::UnmountSegment>() {
+    return mooncake::p2p_rpc_wire::kUnmountSegment;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::Heartbeat>() {
+    return mooncake::p2p_rpc_wire::kHeartbeat;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::QueryClientStatus>() {
+    return mooncake::p2p_rpc_wire::kQueryClientStatus;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::RegisterClient>() {
+    return mooncake::p2p_rpc_wire::kRegisterClient;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::UnregisterClient>() {
+    return mooncake::p2p_rpc_wire::kUnregisterClient;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::ServiceReady>() {
+    return mooncake::p2p_rpc_wire::kServiceReady;
+}
+
+template <>
+consteval auto
+func_id<&mooncake::WrappedP2PMasterService::HeartbeatServiceReady>() {
+    return mooncake::p2p_rpc_wire::kHeartbeatServiceReady;
+}
+
+}  // namespace coro_rpc

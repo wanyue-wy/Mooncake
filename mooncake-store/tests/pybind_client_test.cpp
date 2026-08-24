@@ -9,6 +9,7 @@
 
 #include "real_client.h"
 #include "test_server_helpers.h"
+#include "transfer_engine.h"
 
 DEFINE_string(protocol, "tcp", "Transfer protocol: rdma|tcp");
 DEFINE_string(device_name, "", "Device name to use, valid if protocol=rdma");

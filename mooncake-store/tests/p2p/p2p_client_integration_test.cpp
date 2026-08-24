@@ -189,7 +189,7 @@ TEST_F(P2PClientIntegrationTest, ForceLocalWriteBypass) {
         EXPECT_EQ(std::string(buf.data(), buf.size()), data);
 
         // Verify via master that the replica is on client_ (local).
-        auto resp = client_->GetMasterClient().GetReplicaList(key);
+        auto resp = master_.GetWrapped().GetReplicaList(key);
         ASSERT_TRUE(resp.has_value());
         ASSERT_FALSE(resp->replicas.empty());
         const auto& desc = resp->replicas[0];
@@ -222,7 +222,7 @@ TEST_F(P2PClientIntegrationTest, ForceLocalWriteBypass) {
         EXPECT_EQ(std::string(buf.data(), buf.size()), data);
 
         // Verify via master that the replica is on client2_ (remote).
-        auto resp = client_->GetMasterClient().GetReplicaList(key);
+        auto resp = master_.GetWrapped().GetReplicaList(key);
         ASSERT_TRUE(resp.has_value());
         ASSERT_FALSE(resp->replicas.empty());
         const auto& desc = resp->replicas[0];
@@ -259,7 +259,7 @@ TEST_F(P2PClientIntegrationTest, WaterlineBypassWritesLocal) {
     EXPECT_EQ(std::string(buf.data(), buf.size()), data);
 
     // Verify via master that the replica is on client_ (local).
-    auto resp = client_->GetMasterClient().GetReplicaList(key);
+    auto resp = master_.GetWrapped().GetReplicaList(key);
     ASSERT_TRUE(resp.has_value());
     ASSERT_FALSE(resp->replicas.empty());
     const auto& desc = resp->replicas[0];

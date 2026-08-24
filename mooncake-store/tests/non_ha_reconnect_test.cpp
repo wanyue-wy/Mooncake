@@ -210,6 +210,17 @@ class NonHAReconnectTest : public ::testing::TestWithParam<TestMode> {
         allocated_buffers_.clear();
     }
 
+    tl::expected<HeartbeatResponse, ErrorCode> SendManualHeartbeat(
+        const std::shared_ptr<ClientService>& client,
+        const HeartbeatRequest& request) {
+        if (mode_ == TestMode::CENTRALIZED) {
+            return std::dynamic_pointer_cast<CentralizedClientService>(client)
+                ->SendHeartbeat(request);
+        }
+        return std::dynamic_pointer_cast<P2PClientService>(client)
+            ->SendHeartbeat(request);
+    }
+
     void CreateClientAndMount(std::shared_ptr<ClientService>& client_out,
                               std::vector<std::string>& segments_out,
                               const std::string& local_hostname,
@@ -366,7 +377,7 @@ TEST_P(NonHAReconnectTest, ClientDisconnectAndRecover) {
     // Resume heartbeats by making the manual heartbeat calls
     HeartbeatRequest req;
     req.client_id = client1->GetClientID();
-    auto hb_res = client1->GetMasterClient().Heartbeat(req);
+    auto hb_res = SendManualHeartbeat(client1, req);
     ASSERT_TRUE(hb_res.has_value()) << "Heartbeat failed";
     // In mooncake-store design, a heartbeat from a DISCONNECTION client
     // immediately recovers its state to HEALTH and returns HEALTH.
@@ -432,7 +443,7 @@ TEST_P(NonHAReconnectTest, ClientCrash) {
     // Now send a manual heartbeat and expect UNDEFINED
     HeartbeatRequest req;
     req.client_id = client1->GetClientID();
-    auto hb_res = client1->GetMasterClient().Heartbeat(req);
+    auto hb_res = SendManualHeartbeat(client1, req);
     ASSERT_TRUE(hb_res.has_value() &&
                 hb_res.value().status == ClientStatus::UNDEFINED)
         << "Master should report UNDEFINED for an evicted client";

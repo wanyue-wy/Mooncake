@@ -7,6 +7,7 @@ set(MOONCAKE_STORE_SOURCES
     master_service.cpp
     centralized_master_service.cpp
     client_service.cpp
+    client_service_base.cpp
     centralized_client_service.cpp
     client_metric.cpp
     types.cpp
@@ -125,6 +126,7 @@ target_link_libraries(mooncake_store
 # in Phase 2; the leaf-only layering constraint (§3.2) is enforced in Phase 3.
 list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/master/p2p_master_service.cpp
+    p2p/master/p2p_common_master_client.cpp
     p2p/master/p2p_master_client.cpp
     p2p/master/p2p_master_metric_manager.cpp
     p2p/master/p2p_segment_manager.cpp

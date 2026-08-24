@@ -1,33 +1,29 @@
 #pragma once
 
-#include <csignal>
 #include <boost/functional/hash.hpp>
-#include <condition_variable>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <shared_mutex>
-#include <optional>
-#include <string>
-#include <thread>
-#include <vector>
-#include <ylt/util/tl/expected.hpp>
-#include "mutex.h"
 
-#include "client_metric.h"
-#include "ha_helper.h"
-#include "p2p/client/inflight_tracker.h"
-#include "transfer_engine.h"
-#include "types.h"
-#include "p2p/master/p2p_rpc_types.h"
-#include "rpc_types.h"
-#include "replica.h"
-#include "master_client.h"
-#include <ylt/coro_rpc/coro_rpc_server.hpp>
-#include <ylt/coro_http/coro_http_server.hpp>
-#include "client_config_builder.h"
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include <ylt/util/tl/expected.hpp>
+
 #include "client_buffer.hpp"
+#include "client_config_builder.h"
+#include "master_metric_manager.h"
 #include "p2p/client/runtime_config_store.h"
+#include "p2p/master/p2p_rpc_types.h"
+#include "replica.h"
+#include "rpc_types.h"
+#include "types.h"
 
 namespace mooncake {
 
@@ -42,12 +38,8 @@ struct ClientMasterDiscoveryConfig {
     int redis_heartbeat_interval_sec = 1;
 };
 
-/**
- * @brief Result of a query operation containing replica information
- */
 class QueryResult {
    public:
-    /** @brief List of available replicas for the queried key */
     const std::vector<Replica::Descriptor> replicas;
 
     explicit QueryResult(std::vector<Replica::Descriptor>&& replicas_param)
@@ -55,7 +47,6 @@ class QueryResult {
 
     virtual ~QueryResult() = default;
 
-    // Disable copy to prevent slicing; allow move
     QueryResult(const QueryResult&) = delete;
     QueryResult& operator=(const QueryResult&) = delete;
     QueryResult(QueryResult&&) = default;
@@ -63,92 +54,40 @@ class QueryResult {
 };
 
 /**
- * @brief Client for interacting with the mooncake distributed object store
+ * @brief Stable polymorphic client interface shared by all deployment modes.
  */
 class ClientService {
    public:
-    virtual ~ClientService();
+    virtual ~ClientService() = default;
 
-    /**
-     * @brief stops background threads
-     */
-    virtual void Stop();
-
-    /**
-     * @brief Stops the heartbeat thread
-     */
-    virtual void StopHeartbeat() EXCLUDES(registration_mutex_);
-
-    /**
-     * @brief Release internal resources. Should be called after Stop()
-     */
-    virtual void Destroy();
-
-    /**
-     * @brief Creates and initializes a new ClientService instance
-     * @param config The start up configuration for the client service.
-     * @return std::optional containing a shared_ptr to ClientService if
-     * successful, std::nullopt otherwise
-     */
     static std::optional<std::shared_ptr<ClientService>> Create(
         const CentralizedClientConfig& config);
     static std::optional<std::shared_ptr<ClientService>> Create(
         const P2PClientConfig& config);
 
-    /**
-     * @brief Returns the deployment mode of the client service.
-     * @return DeploymentMode (CENTRALIZATION or P2P).
-     */
+    virtual void Stop() = 0;
+    virtual void StopHeartbeat() = 0;
+    virtual void Destroy() = 0;
+
     virtual DeploymentMode deployment_mode() const = 0;
 
-    /**
-     * @brief Batch query IP addresses for multiple client IDs.
-     * @param client_ids Vector of client UUIDs to query.
-     * @return An expected object containing a map from client_id to their IP
-     * address lists on success, or an ErrorCode on failure.
-     */
     virtual tl::expected<
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>
-    BatchQueryIp(const std::vector<UUID>& client_ids);
+    BatchQueryIp(const std::vector<UUID>& client_ids) = 0;
 
-    /**
-     * @brief Queries replica lists for object keys that match a regex pattern.
-     * @param str The regular expression string to match against object keys.
-     * @return An expected object containing a map from object keys to their
-     * replica descriptors on success, or an ErrorCode on failure.
-     */
     virtual tl::expected<
         std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
         ErrorCode>
-    QueryByRegex(const std::string& str);
+    QueryByRegex(const std::string& str) = 0;
 
-    /**
-     * @brief Gets object metadata without transferring data
-     * @param object_key Key to query
-     * @return QueryResult (or its subclass) containing replicas, or ErrorCode
-     * indicating failure
-     */
     virtual tl::expected<std::unique_ptr<QueryResult>, ErrorCode> Query(
         const std::string& object_key, const ReadRouteConfig& config = {}) = 0;
 
-    /**
-     * @brief Batch query object metadata without transferring data
-     * @param object_keys Keys to query
-     * @return Vector of QueryResult (or its subclass) containing replicas
-     */
     virtual std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
     BatchQuery(const std::vector<std::string>& object_keys,
                const ReadRouteConfig& config = {}) = 0;
 
-    /**
-     * @brief Gets data with memory allocation
-     * @param key Object key
-     * @param allocator Read buffer allocator
-     * @param config Read route config
-     * @return BufferHandle allocated by `allocator` on success.
-     *         ErrorCode on failure.
-     */
     virtual tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Get(
         const std::string& key,
         std::shared_ptr<ClientBufferAllocator> allocator,
@@ -159,31 +98,11 @@ class ClientService {
              std::shared_ptr<ClientBufferAllocator> allocator,
              const ReadRouteConfig& config = {}) = 0;
 
-    /**
-     * @brief Gets data into user-provided buffers without memory allocation
-     * @param key Object key
-     * @param buffers Vector of destination buffer pointers
-     * @param sizes Vector of buffer sizes (must match buffers.size())
-     * @param config Read route config
-     * @return Number of bytes read on success. ErrorCode on failure.
-     */
     virtual tl::expected<int64_t, ErrorCode> Get(
         const std::string& key, const std::vector<void*>& buffers,
         const std::vector<size_t>& sizes,
         const ReadRouteConfig& config = {}) = 0;
 
-    /**
-     * @brief Batch get data into user-provided buffers
-     * @param keys Object keys
-     * @param all_buffers Vector of buffer pointer vectors (one per key)
-     * @param all_sizes Vector of buffer size vectors (one per key)
-     * @param config Read route config
-     * @param aggregate_same_segment_task
-     * Whether to aggregate read tasks on the same segment.
-     * If false, each key will be generated as a independent task.
-     * Otherwise, the tasks will be aggregated on the same segment.
-     * @return Vector of bytes read on success. ErrorCode on failure.
-     */
     virtual std::vector<tl::expected<int64_t, ErrorCode>> BatchGet(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
@@ -191,519 +110,77 @@ class ClientService {
         const ReadRouteConfig& config = {},
         bool aggregate_same_segment_task = false) = 0;
 
-    /**
-     * @brief Stores data with replication
-     * @param key Object key
-     * @param slices Vector of data slices to store
-     * @param config Replication configuration
-     * @return ErrorCode indicating success/failure
-     */
     virtual tl::expected<void, ErrorCode> Put(const ObjectKey& key,
                                               std::vector<Slice>& slices,
                                               const WriteConfig& config) = 0;
 
-    /**
-     * @brief Batch put data with replication
-     * @param keys Object keys
-     * @param batched_slices Vector of vectors of data slices to store (indexed
-     * to match keys)
-     * @param config Replication configuration
-     */
     virtual std::vector<tl::expected<void, ErrorCode>> BatchPut(
         const std::vector<ObjectKey>& keys,
         std::vector<std::vector<Slice>>& batched_slices,
         const WriteConfig& config) = 0;
 
-    /**
-     * @brief Removes an object and all its replicas
-     * @param key Key to remove
-     * @param force If true, skip lease and replication task checks
-     * @return ErrorCode indicating success/failure
-     */
     virtual tl::expected<void, ErrorCode> Remove(const ObjectKey& key,
                                                  bool force = false) = 0;
-
-    /**
-     * @brief Removes objects from the store whose keys match a regex pattern.
-     * @param str The regular expression string to match against object keys.
-     * @param force If true, skip lease and replication task checks
-     * @return An expected object containing the number of removed objects on
-     * success, or an ErrorCode on failure.
-     */
     virtual tl::expected<long, ErrorCode> RemoveByRegex(const ObjectKey& str,
                                                         bool force = false) = 0;
-
-    /**
-     * @brief Removes all objects and all its replicas
-     * @param force If true, skip lease and replication task checks
-     * @return tl::expected<long, ErrorCode> number of removed objects or error
-     */
     virtual tl::expected<long, ErrorCode> RemoveAll(bool force = false) = 0;
+    virtual tl::expected<long, ErrorCode> RemoveAllLocal() = 0;
+    virtual tl::expected<void, ErrorCode> RemoveLocal(const ObjectKey& key) = 0;
 
-    /**
-     * @brief Removes all objects from this Client's LOCAL tiered storage.
-     * @return Number of removed objects, or ErrorCode on failure.
-     */
-    virtual tl::expected<long, ErrorCode> RemoveAllLocal() {
-        return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
-    }
-
-    /**
-     * @brief Removes a single object from this Client's LOCAL tiered storage.
-     * @param key Key to remove
-     * @return ErrorCode indicating success/failure.
-     */
-    virtual tl::expected<void, ErrorCode> RemoveLocal(const ObjectKey& key) {
-        (void)key;
-        return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
-    }
-
-    /**
-     * @brief Registers a memory segment to master for allocation
-     * @param buffer Memory buffer to register
-     * @param size Size of the buffer in bytes
-     * @return ErrorCode indicating success/failure
-     */
     virtual tl::expected<void, ErrorCode> MountSegment(
         const void* buffer, size_t size,
         const std::string& protocol = "tcp") = 0;
-
-    /**
-     * @brief Unregisters a memory segment from master
-     * @param buffer Memory buffer to unregister
-     * @param size Size of the buffer in bytes
-     * @return ErrorCode indicating success/failure
-     */
     virtual tl::expected<void, ErrorCode> UnmountSegment(const void* buffer,
                                                          size_t size) = 0;
 
-    /**
-     * @brief Registers memory buffer with TransferEngine for data transfer
-     * @param addr Memory address to register
-     * @param length Size of the memory region
-     * @param location Device location (e.g. "cpu:0")
-     * @param remote_accessible Whether the memory can be accessed remotely
-     * @param update_metadata Whether to update metadata service
-     * @return ErrorCode indicating success/failure
-     */
-    tl::expected<void, ErrorCode> RegisterLocalMemory(
+    virtual tl::expected<void, ErrorCode> RegisterLocalMemory(
         void* addr, size_t length, const std::string& location,
-        bool remote_accessible = true, bool update_metadata = true);
+        bool remote_accessible = true, bool update_metadata = true) = 0;
+    virtual tl::expected<void, ErrorCode> unregisterLocalMemory(
+        void* addr, bool update_metadata = true) = 0;
 
-    /**
-     * @brief Unregisters memory buffer from TransferEngine
-     * @param addr Memory address to unregister
-     * @param update_metadata Whether to update metadata service
-     * @return ErrorCode indicating success/failure
-     */
-    tl::expected<void, ErrorCode> unregisterLocalMemory(
-        void* addr, bool update_metadata = true);
-
-    /**
-     * @brief Checks if an object exists
-     * @param key Key to check
-     * @return True if exists, false if not, or ErrorCode for unexpected errors.
-     */
     virtual tl::expected<bool, ErrorCode> IsExist(const std::string& key) = 0;
-
-    /**
-     * @brief Checks if multiple objects exist
-     * @param keys Vector of keys to check
-     * @return Vector of existence results for each key
-     */
     virtual std::vector<tl::expected<bool, ErrorCode>> BatchIsExist(
         const std::vector<std::string>& keys) = 0;
 
-    /**
-     * @brief Create a copy task to copy an object's replicas to target segments
-     * @param key Object key
-     * @param targets Target segments
-     * @return tl::expected<UUID, ErrorCode> Task ID on success, ErrorCode on
-     * failure
-     */
     virtual tl::expected<UUID, ErrorCode> CreateCopyTask(
-        const std::string& key, const std::vector<std::string>& targets);
-
-    /**
-     * @brief Create a move task to move an object's replica from source segment
-     * to target segment
-     * @param key Object key
-     * @param source Source segment
-     * @param target Target segment
-     * @return tl::expected<UUID, ErrorCode> Task ID on success, ErrorCode on
-     * failure
-     */
+        const std::string& key, const std::vector<std::string>& targets) = 0;
     virtual tl::expected<UUID, ErrorCode> CreateMoveTask(
         const std::string& key, const std::string& source,
-        const std::string& target);
-
-    /**
-     * @brief Query a task by task id
-     * @param task_id Task ID to query
-     * @return tl::expected<QueryTaskResponse, ErrorCode> Task basic info
-     * on success, ErrorCode on failure
-     */
+        const std::string& target) = 0;
     virtual tl::expected<QueryTaskResponse, ErrorCode> QueryTask(
-        const UUID& task_id);
-
-    /**
-     * @brief Fetch tasks assigned to a client
-     * @param batch_size Number of tasks to fetch
-     * @return tl::expected<std::vector<TaskAssignment>, ErrorCode> list of
-     * tasks on success, ErrorCode on failure
-     */
+        const UUID& task_id) = 0;
     virtual tl::expected<std::vector<TaskAssignment>, ErrorCode> FetchTasks(
-        size_t batch_size);
-
-    /**
-     * @brief Mark the task as complete
-     * @param task_complete Task complete request
-     * @return tl::expected<void, ErrorCode> indicating success/failure
-     */
+        size_t batch_size) = 0;
     virtual tl::expected<void, ErrorCode> MarkTaskToComplete(
-        const TaskCompleteRequest& task_complete);
+        const TaskCompleteRequest& task_complete) = 0;
 
-    // For human-readable metrics
-    tl::expected<std::string, ErrorCode> GetSummaryMetrics() {
-        ClientMetric* metrics = GetMetrics();
-        if (metrics == nullptr) {
-            return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-        }
-        return metrics->summary_metrics();
-    }
-
+    virtual tl::expected<std::string, ErrorCode> GetSummaryMetrics() = 0;
     virtual tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
-    CalcCacheStats() {
-        auto guard = AcquireInflightGuard();
-        if (!guard.is_valid()) {
-            LOG(ERROR) << "client is shutting down";
-            return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-        }
-        return GetMasterClient().CalcCacheStats();
-    }
+    CalcCacheStats() = 0;
+    virtual tl::expected<std::string, ErrorCode> SerializeMetrics() = 0;
 
-    // For Prometheus-style metrics
-    tl::expected<std::string, ErrorCode> SerializeMetrics() {
-        ClientMetric* metrics = GetMetrics();
-        if (metrics == nullptr) {
-            return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-        }
-        std::string str;
-        metrics->serialize(str);
-        return str;
-    }
+    virtual uint16_t GetHttpPort() const = 0;
+    virtual bool IsHttpServerEnabled() const = 0;
+    virtual std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const = 0;
+    virtual std::string GetHealthStatus() const = 0;
 
-    /**
-     * @brief Gets the HTTP server port.
-     * @return The port number, or 0 if HTTP server is disabled.
-     */
-    uint16_t GetHttpPort() const { return http_port_; }
+    virtual RuntimeConfigStore& getRuntimeConfigStore() = 0;
+    virtual const RuntimeConfigStore& getRuntimeConfigStore() const = 0;
+    virtual RuntimeConfigStore::WriteConfig getDefaultWriteConfig() const = 0;
+    virtual ReadRouteConfig getDefaultReadConfig() const = 0;
 
-    /**
-     * @brief Checks if HTTP server is enabled.
-     * @return True if enabled, false otherwise.
-     */
-    bool IsHttpServerEnabled() const { return http_server_ != nullptr; }
+    virtual std::string local_endpoint() const = 0;
+    virtual std::string GetTransportEndpoint() = 0;
+    virtual UUID GetClientID() const = 0;
+    virtual ViewVersionId GetViewVersion() const = 0;
 
-    /**
-     * @brief Returns the shared buffer allocator (TE-registered pool).
-     *        May be nullptr if local_buffer_size was 0.
-     */
-    std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const {
-        return local_buffer_allocator_;
-    }
-
-    /**
-     * @brief Gets the health status for the /health endpoint.
-     * @return A string representing the health status.
-     */
-    virtual std::string GetHealthStatus() const { return "OK"; }
-
-    RuntimeConfigStore& getRuntimeConfigStore() {
-        return *runtime_config_store_;
-    }
-    const RuntimeConfigStore& getRuntimeConfigStore() const {
-        return *runtime_config_store_;
-    }
-
-    RuntimeConfigStore::WriteConfig getDefaultWriteConfig() const {
-        return runtime_config_store_->getDefaultWriteConfig();
-    }
-    ReadRouteConfig getDefaultReadConfig() const {
-        return runtime_config_store_->getDefaultReadConfig();
-    }
-
-   public:
-    std::string local_endpoint() const {
-        return local_ip_ + ":" + std::to_string(te_port_);
-    }
-    /**
-     * @brief Gets the local transport endpoint (IP and port).
-     * @return The transport endpoint string.
-     */
-    [[nodiscard]] std::string GetTransportEndpoint() {
-        return transfer_engine_->getLocalIpAndPort();
-    }
-    UUID GetClientID() const { return client_id_; }
-    ViewVersionId GetViewVersion() const { return view_version_.load(); }
-
-   public:
-    /**
-     * @brief Checks if memory registration parameters are valid
-     * @param addr Memory address to check
-     * @param length Size of the memory region
-     * @return ErrorCode indicating success or failure
-     */
     static tl::expected<void, ErrorCode> CheckRegisterMemoryParams(
         const void* addr, size_t length);
-
-    /**
-     * @brief Calculate the total size of a list of slices.
-     * @param slices Vector of slices.
-     * @return Total size in bytes.
-     */
     [[nodiscard]] static size_t CalculateSliceSize(
         const std::vector<Slice>& slices);
-
-    /**
-     * @brief Calculate the total size of a list of slices.
-     * @param slices Span of slices.
-     * @return Total size in bytes.
-     */
     [[nodiscard]] static size_t CalculateSliceSize(
         std::span<const Slice> slices);
-
-   protected:
-    /**
-     * @brief Private constructor to enforce creation through Create() method
-     */
-    ClientService(const std::string& metadata_connstring,
-                  uint16_t http_port = 9003, bool enable_http_server = true,
-                  const std::map<std::string, std::string>& labels = {});
-
-    /**
-     * @brief Get the RPC Client for Master service calls
-     * @return Reference to MasterClient
-     */
-    virtual MasterClient& GetMasterClient() = 0;
-
-    /**
-     * @brief Get the metrics object for this client.
-     * @return Pointer to ClientMetric, or nullptr if metrics are disabled.
-     */
-    virtual ClientMetric* GetMetrics() = 0;
-
-    /**
-     * @brief Connects to the master server.
-     * @param master_server_entry Entry point of the master server.
-     * @return ErrorCode indicating success or failure.
-     */
-    ErrorCode ConnectToMaster(const std::string& master_server_entry);
-
-    /**
-     * @brief Initializes the Transfer Engine.
-     * @param te_port Transfer engine port (0 means auto-bind).
-     * @param metadata_connstring Connection string for metadata service.
-     * @param protocol Transport protocol (e.g., "tcp", "rdma").
-     * @param device_names Optional RDMA device names.
-     * @return ErrorCode indicating success or failure.
-     */
-    ErrorCode InitTransferEngine(
-        uint16_t te_port, const std::string& metadata_connstring,
-        const std::string& protocol,
-        const std::optional<std::string>& device_names);
-
-   protected:
-    ErrorCode InnerInitTransferEngine(
-        bool auto_discover, const std::string& protocol,
-        const std::optional<std::string>& device_names);
-    // Heartbeat-related function
-
-    /**
-     * @brief Starts the heartbeat thread.
-     * @param master_server_entry Entry point of the master server.
-     */
-    void StartHeartbeat(const std::string& master_server_entry);
-
-    void HeartbeatThreadMain(bool is_ha_mode,
-                             std::string current_master_address,
-                             const std::string& master_server_entry);
-
-    /**
-     * @brief Handles a successful heartbeat response.
-     * Triggers async RegisterClient if master reports UNDEFINED status.
-     * Fires MASTER_RECONNECTED if connection_interrupted_ was set.
-     */
-    void HandleHeartbeatResponse(const HeartbeatResponse& response,
-                                 const std::string& current_master_address,
-                                 const std::function<void()>& register_client,
-                                 std::future<void>& register_client_future);
-
-    /**
-     * @brief Handles the result of a task received in a heartbeat response.
-     * @param task_result The result of the task.
-     */
-    void HandleHeartbeatTaskResult(const HeartbeatTaskResult& task_result);
-
-    /**
-     * @brief Attempts to reconnect to master after heartbeat failures.
-     * For HA mode, fetches the latest master address from etcd.
-     * For non-HA mode, reconnects to the current_master_address.
-     * @param is_ha_mode Whether HA mode is enabled.
-     * @param current_master_address Current master address, may be updated
-     * after successful reconnection in HA mode.
-     * @return true if reconnect succeeded, false otherwise.
-     */
-    bool ReconnectToMaster(bool is_ha_mode,
-                           std::string& current_master_address);
-
-    /**
-     * @brief Waits for the next heartbeat interval using condition variable.
-     * @param interval_ms Milliseconds to wait.
-     */
-    void WaitForNextHeartbeat(int interval_ms);
-    virtual HeartbeatRequest build_heartbeat_request() = 0;
-
-    void HeartbeatTryRegister();
-
-    /**
-     * @brief Stops the heartbeat with registration_mutex_ held.
-     */
-    void InnerStopHeartbeat() REQUIRES(registration_mutex_);
-
-    /**
-     * @brief Registers HTTP handlers on the http_server_ instance.
-     * No-op when the HTTP server is disabled.
-     */
-    virtual void RegisterHttpMethods();
-
-    void RegisterRuntimeConfigHttpMethods();
-
-    /**
-     * @brief Starts the HTTP server.
-     */
-    void StartHttpServer();
-
-    /**
-     * @brief Stops the HTTP server.
-     */
-    void StopHttpServer();
-
-    /**
-     * @brief Creates and TE-registers a shared buffer pool.
-     * @param pool_size Size in bytes (0 = skip, local_buffer_allocator_ stays
-     * null).
-     * @param protocol Transport protocol for memory allocation.
-     * @param use_hugepage Whether to allocate with huge pages.
-     */
-    void InitLocalBufferAllocator(size_t pool_size, const std::string& protocol,
-                                  bool use_hugepage = false);
-
-    /**
-     * @brief Register (or re-register) this client with the master
-     */
-    tl::expected<RegisterClientResponse, ErrorCode> RegisterClient()
-        EXCLUDES(registration_mutex_);
-
-    virtual tl::expected<RegisterClientResponse, ErrorCode>
-    InnerRegisterClient() REQUIRES(registration_mutex_) = 0;
-
-    /**
-     * @brief Hook invoked when a local (client-initiated) request enters
-     * (entering=true) or leaves (entering=false) the in-flight set. Subclasses
-     * override to update an in-flight gauge. Base default is a no-op.
-     */
-    virtual void RecordLocalInflight(bool entering) { (void)entering; }
-
-    /**
-     * @brief Single hook for all HA-related events from the heartbeat loop.
-     * Subclasses override to handle state transitions.
-     */
-    virtual void OnHAEvent(HAEvent event) { (void)event; }
-
-    bool IsHAMode(const std::string& master_server_entry) const;
-    ErrorCode ResolveMasterAddress(const std::string& master_server_entry,
-                                   std::string& master_address);
-    void SetMasterDiscoveryConfig(const RealClientConfigBase& config);
-
-   protected:
-    /**
-     * @brief Acquires an in-flight request guard. If the service has not been
-     * started yet or is shutting down, the returned guard's is_valid() is false
-     * and the caller must reject the request.
-     */
-    InflightTracker::Guard AcquireInflightGuard() {
-        return local_inflight_tracker_.Enter();
-    }
-
-    /**
-     * @brief Marks the service as shutting down: rejects new local requests and
-     * waits (unbounded) for all in-flight ones to finish before the DataManager
-     * is torn down.
-     * @return true if successfully marked, false if already shutting down.
-     */
-    bool MarkShuttingDown() {
-        bool initiated = local_inflight_tracker_.Close();
-        local_inflight_tracker_.Wait();
-        return initiated;
-    }
-
-   protected:
-    // Client identification
-    const UUID client_id_;
-
-    // Core components
-    std::shared_ptr<TransferEngine> transfer_engine_;
-
-    // Configuration
-    std::string local_ip_;
-    uint16_t te_port_ = 0;
-    std::unique_ptr<RuntimeConfigStore> runtime_config_store_;
-
-    // The segment endpoint that the transfer engine registered with the
-    // metadata backend.
-    std::string te_endpoint_;
-    std::unique_ptr<AutoPortBinder> port_binder_;
-    void initTeEndpoint();
-    const std::string& get_te_endpoint() const { return te_endpoint_; }
-
-    const std::string metadata_connstring_;
-    // For high availability. Created lazily in ResolveMasterAddress().
-    std::unique_ptr<MasterViewHelper> master_view_helper_;
-    std::string master_view_helper_entry_;
-    ClientMasterDiscoveryConfig master_discovery_config_;
-    std::thread heartbeat_thread_;
-    std::atomic<bool> heartbeat_running_{false};
-    std::condition_variable heartbeat_cv_;
-    std::mutex heartbeat_mtx_;
-    /// View version from master. Updated by async registration thread,
-    /// read by heartbeat thread.
-    std::atomic<ViewVersionId> view_version_{0};
-    /// True after MASTER_UNREACHABLE fires; cleared when MASTER_RECONNECTED
-    /// fires. Only accessed from the heartbeat thread — no locking required.
-    bool connection_interrupted_ = false;
-
-    /// Master server entry saved at Init() (e.g. "etcd://..." or a direct
-    /// address), so a re-registration can restart the heartbeat.
-    std::string master_server_entry_;
-    /// Set inside RegisterClient(); cleared by UnregisterClient().
-    /// Read by Stop() to decide whether to unregister before shutting down.
-    std::atomic<bool> registered_{false};
-
-    // Serializes register / unregister / stop-heartbeat.
-    // Lock order: registration_mutex_ before draining local_inflight_tracker_
-    // (and registration_mutex_ -> heartbeat_mtx_). Stop() holds
-    // registration_mutex_ before Wait() so this order is never inverted.
-    Mutex registration_mutex_;
-
-    InflightTracker local_inflight_tracker_{
-        "local requests", [this] { RecordLocalInflight(true); },
-        [this] { RecordLocalInflight(false); }};
-
-    std::unique_ptr<coro_http::coro_http_server> http_server_;
-    uint16_t http_port_ = 0;  // 0 means disabled
-
-    std::shared_ptr<ClientBufferAllocator> local_buffer_allocator_;
 };
 
 }  // namespace mooncake

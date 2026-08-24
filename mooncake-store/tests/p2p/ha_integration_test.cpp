@@ -182,7 +182,7 @@ class HAIntegrationTest : public ::testing::Test {
     static void SendManualHeartbeat(std::shared_ptr<P2PClientService>& client) {
         HeartbeatRequest req;
         req.client_id = client->GetClientID();
-        auto result = client->GetMasterClient().Heartbeat(req);
+        auto result = client->SendHeartbeat(req);
         ASSERT_TRUE(result.has_value()) << "Manual heartbeat failed";
     }
 
@@ -562,13 +562,13 @@ TEST_F(HAIntegrationTest, MasterRestartRecovery) {
     // connections independently.
     for (int attempt = 0; attempt < 10; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        auto err = client1_->GetMasterClient().Connect(master_address_);
+        auto err = client1_->ConnectMaster(master_address_);
         if (err == ErrorCode::OK) break;
         if (attempt == 9) FAIL() << "Reconnect client1 failed after retries";
     }
     for (int attempt = 0; attempt < 10; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        auto err = client2_->GetMasterClient().Connect(master_address_);
+        auto err = client2_->ConnectMaster(master_address_);
         if (err == ErrorCode::OK) break;
         if (attempt == 9) FAIL() << "Reconnect client2 failed after retries";
     }
@@ -660,7 +660,7 @@ TEST_F(HAIntegrationTest, ClientDisconnectAndRecover) {
     {
         HeartbeatRequest req;
         req.client_id = tmp1->GetClientID();
-        auto hb_res = tmp1->GetMasterClient().Heartbeat(req);
+        auto hb_res = tmp1->SendHeartbeat(req);
         ASSERT_TRUE(hb_res.has_value()) << "Recovery heartbeat failed";
         EXPECT_EQ(hb_res.value().status, ClientStatus::HEALTH)
             << "Client should recover to HEALTH after heartbeat";

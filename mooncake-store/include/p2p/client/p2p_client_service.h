@@ -16,7 +16,7 @@
 #include <async_simple/coro/Lazy.h>
 
 #include "p2p/client/async_metadata_notifier.h"
-#include "client_service.h"
+#include "client_service_base.h"
 #include "p2p/client/data_manager.h"
 #include "p2p/client/client_rpc_service.h"
 #include "p2p/ha/ha_recovery_manager.h"
@@ -28,7 +28,7 @@
 
 namespace mooncake {
 
-class P2PClientService final : public ClientService {
+class P2PClientService final : public ClientServiceBase {
    public:
     /**
      * @brief Constructor for P2PClientService.
@@ -198,14 +198,25 @@ class P2PClientService final : public ClientService {
      */
     tl::expected<void, ErrorCode> RemoveLocal(const ObjectKey& key) override;
 
-    MasterClient& GetMasterClient() override { return master_client_; }
-
     ClientMetric* GetMetrics() override { return metrics_.get(); }
 
     tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
     CalcCacheStats() override;
 
     std::string GetHealthStatus() const override;
+
+   protected:
+    ErrorCode ConnectMaster(const std::string& master_address) override;
+    tl::expected<HeartbeatResponse, ErrorCode> SendHeartbeat(
+        const HeartbeatRequest& request) override;
+    tl::expected<
+        std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+        ErrorCode>
+    BatchQueryIpFromMaster(const std::vector<UUID>& client_ids) override;
+    tl::expected<
+        std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+        ErrorCode>
+    QueryByRegexFromMaster(const std::string& regex) override;
 
    private:
     /**

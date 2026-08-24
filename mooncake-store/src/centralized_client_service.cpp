@@ -27,7 +27,8 @@ CentralizedClientService::CentralizedClientService(
     uint16_t http_port, bool enable_http_server,
     const std::map<std::string, std::string>& labels,
     bool enable_metric_collection)
-    : ClientService(metadata_connstring, http_port, enable_http_server, labels),
+    : ClientServiceBase(metadata_connstring, http_port, enable_http_server,
+                        labels),
       metrics_(enable_metric_collection ? ClientMetric::Create(labels)
                                         : nullptr),
       protocol_(protocol),
@@ -56,7 +57,7 @@ void CentralizedClientService::Stop() {
         }
     }
 
-    ClientService::Stop();
+    ClientServiceBase::Stop();
 }
 
 void CentralizedClientService::Destroy() {
@@ -95,7 +96,7 @@ void CentralizedClientService::Destroy() {
     segment_ptrs_.clear();
     ascend_segment_ptrs_.clear();
 
-    ClientService::Destroy();
+    ClientServiceBase::Destroy();
 }
 
 ErrorCode CentralizedClientService::Init(
@@ -2049,6 +2050,40 @@ ErrorCode CentralizedClientService::TransferRead(
     }
 
     return TransferData(replica_descriptor, slices, TransferRequest::READ);
+}
+
+ErrorCode CentralizedClientService::ConnectMaster(
+    const std::string& master_address) {
+    return master_client_.Connect(master_address);
+}
+
+tl::expected<HeartbeatResponse, ErrorCode>
+CentralizedClientService::SendHeartbeat(const HeartbeatRequest& request) {
+    return master_client_.Heartbeat(request);
+}
+
+tl::expected<
+    std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+    ErrorCode>
+CentralizedClientService::BatchQueryIpFromMaster(
+    const std::vector<UUID>& client_ids) {
+    return master_client_.BatchQueryIp(client_ids);
+}
+
+tl::expected<
+    std::unordered_map<std::string, std::vector<Replica::Descriptor>>, ErrorCode>
+CentralizedClientService::QueryByRegexFromMaster(const std::string& regex) {
+    return master_client_.GetReplicaListByRegex(regex);
+}
+
+tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
+CentralizedClientService::CalcCacheStats() {
+    auto guard = AcquireInflightGuard();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
+    return master_client_.CalcCacheStats();
 }
 
 HeartbeatRequest CentralizedClientService::build_heartbeat_request() {

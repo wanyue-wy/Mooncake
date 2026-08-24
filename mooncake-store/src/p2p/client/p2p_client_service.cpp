@@ -35,11 +35,28 @@ constexpr int kRevokeRetryMaxCnt = 3;
 // Construction / Destruction
 // ============================================================================
 
+std::optional<std::shared_ptr<ClientService>> ClientService::Create(
+    const P2PClientConfig& config) {
+    auto client = std::make_shared<P2PClientService>(
+        config.metadata_connstring, config.http_port, config.enable_http_server,
+        config.labels, config.enable_metric_collection);
+
+    auto err = client->Init(config);
+    if (err != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to initialize P2P client service"
+                   << ", ret = " << err;
+        return std::nullopt;
+    }
+
+    return client;
+}
+
 P2PClientService::P2PClientService(
     const std::string& metadata_connstring, uint16_t http_port,
     bool enable_http_server, const std::map<std::string, std::string>& labels,
     bool enable_metric_collection)
-    : ClientService(metadata_connstring, http_port, enable_http_server, labels),
+    : ClientServiceBase(metadata_connstring, http_port, enable_http_server,
+                        labels),
       metrics_(enable_metric_collection ? P2PClientMetric::Create(labels)
                                         : nullptr),
       master_client_(client_id_,
@@ -114,9 +131,9 @@ void P2PClientService::Stop() {
 
     // 8. Stop heartbeat + base teardown.
     try {
-        ClientService::Stop();
+        ClientServiceBase::Stop();
     } catch (const std::exception& e) {
-        LOG(ERROR) << "Stop(): ClientService::Stop threw: " << e.what();
+        LOG(ERROR) << "Stop(): ClientServiceBase::Stop threw: " << e.what();
     }
 
     LOG(INFO) << "P2PClientService::Stop() — complete";
@@ -138,7 +155,7 @@ void P2PClientService::Destroy() {
     }
     data_manager_.reset();
 
-    ClientService::Destroy();
+    ClientServiceBase::Destroy();
 
     LOG(INFO) << "P2PClientService::Destroy() — complete";
 }
@@ -675,6 +692,30 @@ std::string P2PClientService::GetHealthStatus() const {
         return toString(ha_manager_->GetState());
     }
     return "OK";
+}
+
+ErrorCode P2PClientService::ConnectMaster(
+    const std::string& master_address) {
+    return master_client_.Connect(master_address);
+}
+
+tl::expected<HeartbeatResponse, ErrorCode> P2PClientService::SendHeartbeat(
+    const HeartbeatRequest& request) {
+    return master_client_.Heartbeat(request);
+}
+
+tl::expected<
+    std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+    ErrorCode>
+P2PClientService::BatchQueryIpFromMaster(
+    const std::vector<UUID>& client_ids) {
+    return master_client_.BatchQueryIp(client_ids);
+}
+
+tl::expected<
+    std::unordered_map<std::string, std::vector<Replica::Descriptor>>, ErrorCode>
+P2PClientService::QueryByRegexFromMaster(const std::string& regex) {
+    return master_client_.GetReplicaListByRegex(regex);
 }
 
 tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
@@ -2630,7 +2671,7 @@ coro_http::status_type ErrorToHttpStatus(ErrorCode err) {
 
 void P2PClientService::RegisterHttpMethods() {
     if (!http_server_) return;
-    ClientService::RegisterHttpMethods();
+    ClientServiceBase::RegisterHttpMethods();
 
     using namespace coro_http;
 

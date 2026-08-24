@@ -1,6 +1,6 @@
 #pragma once
 
-#include "client_service.h"
+#include "client_service_base.h"
 #include "centralized_master_client.h"
 #include "storage_backend.h"
 #include "file_storage.h"
@@ -102,7 +102,7 @@ class CentralizedQueryResult final : public QueryResult {
 };
 
 class CentralizedClientService
-    : public ClientService,
+    : public ClientServiceBase,
       public std::enable_shared_from_this<CentralizedClientService> {
    public:
     CentralizedClientService(
@@ -290,10 +290,23 @@ class CentralizedClientService
     tl::expected<void, ErrorCode> MarkTaskToComplete(
         const TaskCompleteRequest& task_complete) override;
 
+    tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
+    CalcCacheStats() override;
+
    protected:
     HeartbeatRequest build_heartbeat_request() override;
 
-    MasterClient& GetMasterClient() override { return master_client_; }
+    ErrorCode ConnectMaster(const std::string& master_address) override;
+    tl::expected<HeartbeatResponse, ErrorCode> SendHeartbeat(
+        const HeartbeatRequest& request) override;
+    tl::expected<
+        std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+        ErrorCode>
+    BatchQueryIpFromMaster(const std::vector<UUID>& client_ids) override;
+    tl::expected<
+        std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+        ErrorCode>
+    QueryByRegexFromMaster(const std::string& regex) override;
 
     ClientMetric* GetMetrics() override { return metrics_.get(); }
 

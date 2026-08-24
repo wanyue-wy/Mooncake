@@ -38,6 +38,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <variant>
@@ -121,13 +122,46 @@ class HeartbeatTestMaster {
     int heartbeat_rpc_port_ = 0;
 };
 
-// Build the master client matching the deployment mode. Both clients inherit
-// SetHeartbeatRpcPort/Connect/Heartbeat from MasterClient.
-std::unique_ptr<MasterClient> MakeClient(TestMode mode, const UUID& client_id) {
-    if (mode == TestMode::CENTRALIZED) {
-        return std::make_unique<CentralizedMasterClient>(client_id);
+class HeartbeatTestClient {
+   public:
+    HeartbeatTestClient(TestMode mode, const UUID& client_id) {
+        if (mode == TestMode::CENTRALIZED) {
+            client_ = std::make_unique<CentralizedMasterClient>(client_id);
+        } else {
+            client_ = std::make_unique<P2PMasterClient>(client_id);
+        }
     }
-    return std::make_unique<P2PMasterClient>(client_id);
+
+    void SetHeartbeatRpcPort(uint16_t port) {
+        std::visit([&](auto& client) { client->SetHeartbeatRpcPort(port); },
+                   client_);
+    }
+
+    ErrorCode Connect(const std::string& address) {
+        return std::visit([&](auto& client) { return client->Connect(address); },
+                          client_);
+    }
+
+    tl::expected<HeartbeatResponse, ErrorCode> Heartbeat(
+        const HeartbeatRequest& request) {
+        return std::visit(
+            [&](auto& client) { return client->Heartbeat(request); }, client_);
+    }
+
+    tl::expected<bool, ErrorCode> ExistKey(std::string_view key) {
+        return std::visit([&](auto& client) { return client->ExistKey(key); },
+                          client_);
+    }
+
+   private:
+    std::variant<std::unique_ptr<CentralizedMasterClient>,
+                 std::unique_ptr<P2PMasterClient>>
+        client_;
+};
+
+std::unique_ptr<HeartbeatTestClient> MakeClient(TestMode mode,
+                                                const UUID& client_id) {
+    return std::make_unique<HeartbeatTestClient>(mode, client_id);
 }
 
 constexpr uint16_t PortOf(int port) { return static_cast<uint16_t>(port); }

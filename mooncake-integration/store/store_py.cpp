@@ -3,6 +3,7 @@
 #include <numa.h>
 
 #include "pyclient.h"
+#include "transfer_engine.h"
 #include "dummy_client.h"
 #include "real_client.h"
 #include "types.h"

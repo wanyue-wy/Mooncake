@@ -95,6 +95,24 @@ CAT_A = [
     "mooncake-store/conf/tiered_backend_config_example.md",
 ]
 
+# §4.K — stable client entry/common implementation kept in fork form. The
+# public ClientService interface remains shared, while protocol-specific master
+# clients are split in Phase 3 route A.
+CAT_K_CLIENT = [
+    "mooncake-store/include/client_service.h",
+    "mooncake-store/src/client_service.cpp",
+    "mooncake-store/include/client_service_base.h",
+    "mooncake-store/src/client_service_base.cpp",
+    "mooncake-store/include/centralized_client_service.h",
+    "mooncake-store/src/centralized_client_service.cpp",
+    "mooncake-store/include/centralized_master_rpc_adapter.*",
+    "mooncake-store/src/centralized_master_rpc_adapter.*",
+    "mooncake-store/include/client_metric.h",
+    "mooncake-store/src/client_metric.cpp",
+    "mooncake-store/include/ha_helper.h",
+    "mooncake-store/src/ha_helper.cpp",
+]
+
 # §4.B — base classes: centralized side restored to a00f757 (M files);
 # P2P side merges base logic in Phase 2.
 CAT_B_BASE = [
@@ -258,6 +276,9 @@ CAT_G_KEEP = [
     "mooncake-store/tests/shm_helper_test.cpp",
     "mooncake-store/tests/client_config_builder_test.cpp",
     "mooncake-store/tests/utils/common.h",  # additive InitTieredBackendForTest
+    # Entry/e2e tests with direct includes after ClientService header narrowing.
+    "mooncake-store/tests/e2e/chaos_test.cpp",
+    "mooncake-store/tests/e2e/chaos_rand_test.cpp",
 ]
 
 # Pending Phase 2 decisions (tracked, not violations).
@@ -287,6 +308,7 @@ ALLOWED_D = {
 
 CATEGORIES = [
     ("A (move to p2p/)", CAT_A),
+    ("K (stable client entry/common base)", CAT_K_CLIENT),
     ("restore-pending (segment trio, back in Phase 3)", CAT_RESTORE_PENDING),
     ("B-base (restore a00f757 + merge into P2P)", CAT_B_BASE),
     ("B-sub/E (fork subclasses, delete in Phase 3)", CAT_B_SUBCLASS_DELETE),
@@ -350,6 +372,7 @@ def main():
     # CAT_G_P2P paths are relocated by Phase 1, so they are excluded here and
     # only used for classification.
     STABLE_CATEGORIES = {
+        "K (stable client entry/common base)",
         "B-base (restore a00f757 + merge into P2P)",
         "C (entry adaptation)",
         "D (leaf convergence)",

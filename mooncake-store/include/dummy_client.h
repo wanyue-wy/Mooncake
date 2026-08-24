@@ -3,6 +3,7 @@
 #include "client_config_builder.h"
 #include <csignal>
 #include <ylt/coro_rpc/coro_rpc_client.hpp>
+#include <ylt/coro_io/client_pool.hpp>
 
 #include "pyclient.h"
 #include <atomic>

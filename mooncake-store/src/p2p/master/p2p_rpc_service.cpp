@@ -21,53 +21,48 @@
 #include "utils/scoped_vlog_timer.h"
 #include "version.h"
 
-// Transitional (Phase 2): included only to verify the frozen wire keys below
-// against the live WrappedMasterService route keys while the base class still
-// exists. Removed in Phase 3 when centralized is restored to a00f757.
-#include "rpc_service.h"
-
 namespace mooncake {
 
-// Transitional wire-key verification: the frozen literals in p2p_rpc_wire
-// must equal the route keys that clients derive from the current
-// WrappedMasterService member functions (coro_rpc routes by MD5-32 of the
+// Client wire-key verification: the explicit func_id specializations in
+// p2p_rpc_service.h must keep deriving the frozen historical route keys from
+// WrappedP2PMasterService member functions (coro_rpc routes by MD5-32 of the
 // fully-qualified function name).
 static_assert(p2p_rpc_wire::kExistKey ==
-              coro_rpc::func_id<&WrappedMasterService::ExistKey>());
+              coro_rpc::func_id<&WrappedP2PMasterService::ExistKey>());
 static_assert(p2p_rpc_wire::kBatchExistKey ==
-              coro_rpc::func_id<&WrappedMasterService::BatchExistKey>());
+              coro_rpc::func_id<&WrappedP2PMasterService::BatchExistKey>());
 static_assert(p2p_rpc_wire::kBatchQueryIp ==
-              coro_rpc::func_id<&WrappedMasterService::BatchQueryIp>());
+              coro_rpc::func_id<&WrappedP2PMasterService::BatchQueryIp>());
 static_assert(
     p2p_rpc_wire::kGetReplicaListByRegex ==
-    coro_rpc::func_id<&WrappedMasterService::GetReplicaListByRegex>());
+    coro_rpc::func_id<&WrappedP2PMasterService::GetReplicaListByRegex>());
 static_assert(p2p_rpc_wire::kGetReplicaList ==
-              coro_rpc::func_id<&WrappedMasterService::GetReplicaList>());
+              coro_rpc::func_id<&WrappedP2PMasterService::GetReplicaList>());
 static_assert(p2p_rpc_wire::kBatchGetReplicaList ==
-              coro_rpc::func_id<&WrappedMasterService::BatchGetReplicaList>());
+              coro_rpc::func_id<&WrappedP2PMasterService::BatchGetReplicaList>());
 static_assert(p2p_rpc_wire::kRemove ==
-              coro_rpc::func_id<&WrappedMasterService::Remove>());
+              coro_rpc::func_id<&WrappedP2PMasterService::Remove>());
 static_assert(p2p_rpc_wire::kRemoveByRegex ==
-              coro_rpc::func_id<&WrappedMasterService::RemoveByRegex>());
+              coro_rpc::func_id<&WrappedP2PMasterService::RemoveByRegex>());
 static_assert(p2p_rpc_wire::kRemoveAll ==
-              coro_rpc::func_id<&WrappedMasterService::RemoveAll>());
+              coro_rpc::func_id<&WrappedP2PMasterService::RemoveAll>());
 static_assert(p2p_rpc_wire::kMountSegment ==
-              coro_rpc::func_id<&WrappedMasterService::MountSegment>());
+              coro_rpc::func_id<&WrappedP2PMasterService::MountSegment>());
 static_assert(p2p_rpc_wire::kUnmountSegment ==
-              coro_rpc::func_id<&WrappedMasterService::UnmountSegment>());
+              coro_rpc::func_id<&WrappedP2PMasterService::UnmountSegment>());
 static_assert(p2p_rpc_wire::kHeartbeat ==
-              coro_rpc::func_id<&WrappedMasterService::Heartbeat>());
+              coro_rpc::func_id<&WrappedP2PMasterService::Heartbeat>());
 static_assert(p2p_rpc_wire::kQueryClientStatus ==
-              coro_rpc::func_id<&WrappedMasterService::QueryClientStatus>());
+              coro_rpc::func_id<&WrappedP2PMasterService::QueryClientStatus>());
 static_assert(p2p_rpc_wire::kRegisterClient ==
-              coro_rpc::func_id<&WrappedMasterService::RegisterClient>());
+              coro_rpc::func_id<&WrappedP2PMasterService::RegisterClient>());
 static_assert(p2p_rpc_wire::kUnregisterClient ==
-              coro_rpc::func_id<&WrappedMasterService::UnregisterClient>());
+              coro_rpc::func_id<&WrappedP2PMasterService::UnregisterClient>());
 static_assert(p2p_rpc_wire::kServiceReady ==
-              coro_rpc::func_id<&WrappedMasterService::ServiceReady>());
+              coro_rpc::func_id<&WrappedP2PMasterService::ServiceReady>());
 static_assert(
     p2p_rpc_wire::kHeartbeatServiceReady ==
-    coro_rpc::func_id<&WrappedMasterService::HeartbeatServiceReady>());
+    coro_rpc::func_id<&WrappedP2PMasterService::HeartbeatServiceReady>());
 
 WrappedP2PMasterService::WrappedP2PMasterService(
     const WrappedMasterServiceConfig& config)
