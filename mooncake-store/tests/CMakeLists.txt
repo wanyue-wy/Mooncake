@@ -1,7 +1,7 @@
-function(add_store_test name)
+function(add_store_test_with_library name store_library)
     add_executable(${name} ${ARGN})
     target_link_libraries(${name} PUBLIC
-        ${MOONCAKE_STORE_LIBS}
+        ${store_library}
         transfer_engine
         cachelib_memory_allocator
         ${ETCD_WRAPPER_LIB}
@@ -12,6 +12,14 @@ function(add_store_test name)
         pthread
     )
     add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+function(add_store_test name)
+    add_store_test_with_library(${name} mooncake_store ${ARGN})
+endfunction()
+
+function(add_dual_mode_store_test name)
+    add_store_test_with_library(${name} mooncake_store_client_entry ${ARGN})
 endfunction()
 
 add_store_test(buffer_allocator_test buffer_allocator_test.cpp)
@@ -30,12 +38,12 @@ add_store_test(utils_test utils_test.cpp)
 add_store_test(client_buffer_test client_buffer_test.cpp)
 add_store_test(inflight_tracker_test inflight_tracker_test.cpp)
 add_store_test(client_config_builder_test client_config_builder_test.cpp)
-add_store_test(pybind_client_test pybind_client_test.cpp)
-add_store_test(ipv6_client_test ipv6_client_test.cpp)
-add_store_test(client_metrics_test client_metrics_test.cpp)
+add_dual_mode_store_test(pybind_client_test pybind_client_test.cpp)
+add_dual_mode_store_test(ipv6_client_test ipv6_client_test.cpp)
+add_dual_mode_store_test(client_metrics_test client_metrics_test.cpp)
 add_store_test(serializer_test serializer_test.cpp)
 add_store_test(non_ha_reconnect_test non_ha_reconnect_test.cpp)
-add_store_test(real_client_remount_test real_client_remount_test.cpp)
+add_dual_mode_store_test(real_client_remount_test real_client_remount_test.cpp)
 add_store_test(shm_helper_test shm_helper_test.cpp)
 add_store_test(storage_backend_test storage_backend_test.cpp)
 add_store_test(mutex_test mutex_test.cpp)

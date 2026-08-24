@@ -80,9 +80,8 @@ DEFINE_uint32(
     "PinKey). 0 uses the built-in default (1000).");
 DEFINE_string(runtime_config, "",
               "Runtime read/write config: a JSON string or a path to a JSON "
-              "file. Can also be set via env MC_RUNTIME_CONFIG. For example,"
-              "Centralization mode: conf/centralized_runtime_config.json, "
-              "P2P mode: conf/p2p_runtime_config.json. Ï");
+              "file. Can also be set via env MC_RUNTIME_CONFIG. P2P example: "
+              "conf/p2p_runtime_config.json.");
 DEFINE_bool(enable_client_metric_collection, true,
             "Enable client metric collection. When false, no metrics are "
             "collected and the /metrics endpoint is unavailable.");

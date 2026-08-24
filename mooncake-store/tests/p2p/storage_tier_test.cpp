@@ -20,6 +20,11 @@
 namespace fs = std::filesystem;
 namespace mooncake::test {
 
+constexpr char kBasicStoragePath[] =
+    "/tmp/mooncake_storage_tier_test_storage";
+constexpr char kBucketStoragePath[] =
+    "/tmp/mooncake_storage_tier_test_bucket";
+
 class StorageTierTest : public ::testing::Test {
    protected:
     static void SetUpTestSuite() {
@@ -91,12 +96,11 @@ TEST_F(StorageTierTest, StorageTierBasic) {
     // Setup environment for Storage Backend (FilePerKey)
     setenv("MOONCAKE_OFFLOAD_STORAGE_BACKEND_DESCRIPTOR",
            "bucket_storage_backend", 1);
-    setenv("MOONCAKE_OFFLOAD_FILE_STORAGE_PATH", "/tmp/mooncake_test_storage",
-           1);
+    setenv("MOONCAKE_OFFLOAD_FILE_STORAGE_PATH", kBasicStoragePath, 1);
 
     // Ensure clean state
-    fs::remove_all("/tmp/mooncake_test_storage");
-    fs::create_directories("/tmp/mooncake_test_storage");
+    fs::remove_all(kBasicStoragePath);
+    fs::create_directories(kBasicStoragePath);
 
     std::string json_config_str = R"({
         "tiers": [
@@ -155,7 +159,7 @@ TEST_F(StorageTierTest, StorageTierBasic) {
         bool bucket_found = false;
         bool meta_found = false;
         for (const auto& entry :
-             fs::recursive_directory_iterator("/tmp/mooncake_test_storage")) {
+             fs::recursive_directory_iterator(kBasicStoragePath)) {
             if (entry.path().extension() == ".bucket") bucket_found = true;
             if (entry.path().extension() == ".meta") meta_found = true;
         }
@@ -164,7 +168,7 @@ TEST_F(StorageTierTest, StorageTierBasic) {
     }
 
     // Cleanup
-    fs::remove_all("/tmp/mooncake_test_storage");
+    fs::remove_all(kBasicStoragePath);
 }
 
 TEST_F(StorageTierTest, StorageTierUsesConfiguredLocalBufferPool) {
@@ -366,12 +370,11 @@ TEST_F(StorageTierTest, StorageTierBucket) {
     // Setup environment for Bucket Backend
     setenv("MOONCAKE_OFFLOAD_STORAGE_BACKEND_DESCRIPTOR",
            "bucket_storage_backend", 1);
-    setenv("MOONCAKE_OFFLOAD_FILE_STORAGE_PATH", "/tmp/mooncake_test_bucket",
-           1);
+    setenv("MOONCAKE_OFFLOAD_FILE_STORAGE_PATH", kBucketStoragePath, 1);
 
     // Ensure clean state
-    fs::remove_all("/tmp/mooncake_test_bucket");
-    fs::create_directories("/tmp/mooncake_test_bucket");
+    fs::remove_all(kBucketStoragePath);
+    fs::create_directories(kBucketStoragePath);
 
     std::string json_config_str = R"({
         "tiers": [
@@ -422,7 +425,7 @@ TEST_F(StorageTierTest, StorageTierBucket) {
     bool bucket_found = false;
     bool meta_found = false;
     for (const auto& entry :
-         fs::recursive_directory_iterator("/tmp/mooncake_test_bucket")) {
+         fs::recursive_directory_iterator(kBucketStoragePath)) {
         if (entry.path().extension() == ".bucket") bucket_found = true;
         if (entry.path().extension() == ".meta") meta_found = true;
     }
@@ -434,7 +437,7 @@ TEST_F(StorageTierTest, StorageTierBucket) {
     ASSERT_TRUE(get_result.has_value());
 
     // Cleanup
-    fs::remove_all("/tmp/mooncake_test_bucket");
+    fs::remove_all(kBucketStoragePath);
 }
 
 // The P2P tiered cache treats SSD as a purely ephemeral tier: it wipes the

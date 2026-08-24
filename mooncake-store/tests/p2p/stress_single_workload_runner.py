@@ -4,12 +4,12 @@ This script integrates single-run performance comparison and multi-dimensional m
 
 !!! IMPORTANT: DEPENDENCIES REQUIRED !!!
 This script is a WRAPPER that orchestrates the following C++ binaries:
-1. mooncake_master (The master node service)
-2. stress_workload_test (The benchmark client)
+1. mooncake_master or mooncake_master_p2p (the selected master service)
+2. stress_workload_test (the benchmark client)
 
-The locations of these two binaries MUST be correctly provided via the MASTER_BIN and TEST_BIN
-variables before running this script. Moreover, bad rounds (non-100% PUT/GET success) are excluded from averages and
-surfaced in the CSV as bad_round_count.
+The binaries are resolved from the repository build directory. Bad rounds
+(non-100% PUT/GET success) are excluded from averages and surfaced in the CSV
+as bad_round_count.
 
 Usage:
 ------
@@ -58,9 +58,14 @@ import urllib.request
 import urllib.error
 
 # --- Configuration ---
-# PROJECT_ROOT points to the repository root directory (two levels up from mooncake-store/tests/)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-MASTER_BIN = os.path.join(PROJECT_ROOT, "build/mooncake-store/src/mooncake_master")
+# Resolve the repository root after this script moved to mooncake-store/tests/p2p/.
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+CENTRALIZED_MASTER_BIN = os.path.join(
+    PROJECT_ROOT, "build/mooncake-store/src/mooncake_master"
+)
+P2P_MASTER_BIN = os.path.join(
+    PROJECT_ROOT, "build/mooncake-store/src/mooncake_master_p2p"
+)
 TEST_BIN = os.path.join(PROJECT_ROOT, "build/mooncake-store/tests/stress_workload_test")
 RPC_PORT = 50051
 METRICS_PORT = 9003
@@ -79,7 +84,18 @@ def run_command(cmd):
 
 def kill_existing_processes():
     """Clean up any existing master or test processes."""
-    subprocess.run("killall -9 mooncake_master stress_workload_test 2>/dev/null", shell=True)
+    subprocess.run(
+        [
+            "killall",
+            "-9",
+            "mooncake_master",
+            "mooncake_master_p2p",
+            "stress_workload_test",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
     time.sleep(1)
 
 def wait_master_ready(http_port, timeout_s=30):
@@ -170,13 +186,18 @@ def run_benchmark_config(mode, rounds, threads, value_size, ops, rpc_threads, ra
 
     # Enable master's HttpMetadataServer so we can poll /health deterministically
     # instead of sleeping a fixed 2s and hoping startup is fast enough.
-    master_cmd = (
-        f"{MASTER_BIN} --rpc_port={RPC_PORT} --metrics_port={METRICS_PORT} "
-        f"--deployment_mode={mode} --rpc_thread_num={rpc_threads} "
-        f"--enable_http_metadata_server=true "
-        f"--http_metadata_server_port={http_metadata_port}"
+    master_bin = P2P_MASTER_BIN if mode == "P2P" else CENTRALIZED_MASTER_BIN
+    master_cmd = [
+        master_bin,
+        f"--port={RPC_PORT}",
+        f"--metrics_port={METRICS_PORT}",
+        f"--rpc_thread_num={rpc_threads}",
+        "--enable_http_metadata_server=true",
+        f"--http_metadata_server_port={http_metadata_port}",
+    ]
+    master_proc = subprocess.Popen(
+        master_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
-    master_proc = subprocess.Popen(master_cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         wait_master_ready(http_metadata_port)
     except RuntimeError as e:

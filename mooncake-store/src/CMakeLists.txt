@@ -111,8 +111,7 @@ target_link_libraries(mooncake_store
         transfer_engine
 )
 
-# P2P architecture library. It depends on the common/centralized library, while
-# the latter does not reference P2P implementation symbols.
+# P2P architecture library
 list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/common/p2p_replica.cpp
     p2p/master/p2p_master_service.cpp
@@ -172,8 +171,6 @@ add_library(mooncake_store_p2p
     $<TARGET_OBJECTS:mooncake_store_p2p_objects>)
 target_link_libraries(mooncake_store_p2p PUBLIC mooncake_store)
 
-# Dual-mode public client entry. Keeping it above the two implementation
-# libraries prevents common/centralized objects from referencing P2P symbols.
 add_library(mooncake_store_client_entry real_client.cpp)
 target_link_libraries(mooncake_store_client_entry PUBLIC mooncake_store_p2p)
 

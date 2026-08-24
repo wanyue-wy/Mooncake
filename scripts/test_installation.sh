@@ -51,6 +51,9 @@ echo "Success: mooncake_master entry point found"
 echo "Verifying mooncake_master_p2p entry point..."
 which mooncake_master_p2p || { echo "ERROR: mooncake_master_p2p entry point not found!"; exit 1; }
 echo "Success: mooncake_master_p2p entry point found"
+echo "Verifying mooncake_master_p2p can load bundled libraries..."
+mooncake_master_p2p --help >/dev/null || { echo "ERROR: mooncake_master_p2p failed to execute!"; exit 1; }
+echo "Success: mooncake_master_p2p executed successfully"
 
 # Check if the mooncake_client entry point is installed and executable
 which mooncake_client || { echo "ERROR: mooncake_client entry point not found!"; exit 1; }

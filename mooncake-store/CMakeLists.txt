@@ -24,8 +24,6 @@ include_directories(
     ${ETCD_WRAPPER_INCLUDE}
 )
 
-# Aggregate target for callers that support both deployment modes. The entry
-# archive depends on P2P, which in turn depends on common/centralized code.
 set(MOONCAKE_STORE_LIBS mooncake_store_client_entry)
 
 # Add subdirectories

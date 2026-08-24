@@ -37,8 +37,10 @@ if [ -f build/mooncake-integration/store.*.so ]; then
     echo "Copying store.so..."
     cp build/mooncake-integration/store.*.so mooncake-wheel/mooncake/store.so
     echo "Copying master binaries..."
+    # Copy master binary
     cp build/mooncake-store/src/mooncake_master mooncake-wheel/mooncake/
     cp build/mooncake-store/src/mooncake_master_p2p mooncake-wheel/mooncake/
+    # Copy client binary
     cp build/mooncake-store/src/mooncake_client mooncake-wheel/mooncake/
     # Copy async_store.py
     cp mooncake-integration/store/async_store.py mooncake-wheel/mooncake/async_store.py
