@@ -1,7 +1,7 @@
 #pragma once
 
 #include "client_service_base.h"
-#include "centralized_master_client.h"
+#include "centralized_master_rpc_adapter.h"
 #include "storage_backend.h"
 #include "file_storage.h"
 #include "transfer_task.h"
@@ -115,6 +115,7 @@ class CentralizedClientService
 
     ErrorCode Init(const CentralizedClientConfig& config);
     void Stop() override;
+    void StopHeartbeat() override EXCLUDES(registration_mutex_);
     void Destroy() override;
 
     tl::expected<std::unique_ptr<QueryResult>, ErrorCode> Query(
@@ -295,6 +296,8 @@ class CentralizedClientService
 
    protected:
     HeartbeatRequest build_heartbeat_request() override;
+    void StartPing(const std::string& master_server_entry);
+    void PingThreadMain(bool is_ha_mode, std::string current_master_address);
 
     ErrorCode ConnectMaster(const std::string& master_address) override;
     tl::expected<HeartbeatResponse, ErrorCode> SendHeartbeat(
@@ -400,7 +403,7 @@ class CentralizedClientService
     std::vector<std::unique_ptr<void, HugepageSegmentDeleter>>
         hugepage_segment_ptrs_;
 
-    CentralizedMasterClient master_client_;
+    CentralizedMasterRpcAdapter master_client_;
     std::unique_ptr<TransferSubmitter> transfer_submitter_;
 
     // Mutex to protect mounted_segments_

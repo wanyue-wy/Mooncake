@@ -10,6 +10,19 @@
 namespace mooncake {
 
 /**
+ * @brief Centralized a00f757 ping response.
+ */
+struct PingResponse {
+    ViewVersionId view_version_id = 0;
+    ClientStatus client_status = ClientStatus::UNDEFINED;
+
+    PingResponse() = default;
+    PingResponse(ViewVersionId view_version, ClientStatus status)
+        : view_version_id(view_version), client_status(status) {}
+};
+YLT_REFL(PingResponse, view_version_id, client_status);
+
+/**
  * @brief P2P specific configuration for read route
  */
 struct P2PGetReplicaListConfigExtra {

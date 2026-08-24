@@ -5,32 +5,24 @@ set(MOONCAKE_STORE_SOURCES
     replica.cpp
     allocator.cpp
     master_service.cpp
-    centralized_master_service.cpp
+    segment.cpp
     client_service.cpp
     client_service_base.cpp
     centralized_client_service.cpp
+    centralized_master_rpc_adapter.cpp
     client_metric.cpp
     types.cpp
     master_client.cpp
-    centralized_master_client.cpp
     utils.cpp
     master_metric_manager.cpp
-    centralized_master_metric_manager.cpp
     storage_backend.cpp
     thread_pool.cpp
     etcd_helper.cpp
     ha_helper.cpp
-    centralized_segment_manager.cpp
-    segment_manager.cpp
-    client_meta.cpp
-    client_manager.cpp
-    centralized_client_manager.cpp
-    centralized_client_meta.cpp
     transfer_task.cpp
     etcd_helper.cpp
     ha_helper.cpp
     rpc_service.cpp
-    centralized_rpc_service.cpp
     offset_allocator.cpp
     posix_file.cpp
     client_buffer.cpp
@@ -265,6 +257,7 @@ endif()
 
 # Master binary
 add_executable(mooncake_master master.cpp)
+add_executable(mooncake_master_p2p p2p/master/p2p_master_main.cpp)
 
 set(MASTER_EXTRA_INCS)
 set(MASTER_EXTRA_LIBS)
@@ -277,7 +270,18 @@ if (STORE_USE_JEMALLOC)
 endif()
 
 target_include_directories(mooncake_master PRIVATE ${MASTER_EXTRA_INCS})
+target_include_directories(mooncake_master_p2p PRIVATE ${MASTER_EXTRA_INCS})
 target_link_libraries(mooncake_master PRIVATE
+    ${MOONCAKE_STORE_LIBS}
+    cachelib_memory_allocator
+    pthread
+    ibverbs
+    mooncake_common
+    ${ETCD_WRAPPER_LIB}
+    ${MASTER_EXTRA_LIBS}
+    asio_shared
+)
+target_link_libraries(mooncake_master_p2p PRIVATE
     ${MOONCAKE_STORE_LIBS}
     cachelib_memory_allocator
     pthread
@@ -290,10 +294,13 @@ target_link_libraries(mooncake_master PRIVATE
 
 if (STORE_USE_ETCD)
     add_dependencies(mooncake_master build_etcd_wrapper)
+    add_dependencies(mooncake_master_p2p build_etcd_wrapper)
 endif()
 
 target_compile_options(mooncake_master PRIVATE -Os)
 target_link_options(mooncake_master PRIVATE -Os -s)
+target_compile_options(mooncake_master_p2p PRIVATE -Os)
+target_link_options(mooncake_master_p2p PRIVATE -Os -s)
 
 # Client server binary
 add_executable(mooncake_client real_client_main.cpp)
@@ -302,4 +309,5 @@ target_link_libraries(mooncake_client PRIVATE ${MOONCAKE_STORE_LIBS} transfer_en
 target_compile_options(mooncake_client PRIVATE -Os)
 target_link_options(mooncake_client PRIVATE -Os -s)
 
-install(TARGETS mooncake_master mooncake_client DESTINATION bin)
+install(TARGETS mooncake_master mooncake_master_p2p mooncake_client
+        DESTINATION bin)

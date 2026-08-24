@@ -4,7 +4,7 @@ target_link_libraries(allocator_bench PRIVATE cachelib_memory_allocator ${MOONCA
 
 # Add master benchmark executable
 add_executable(master_bench master_bench.cpp)
-target_link_libraries(master_bench PRIVATE cachelib_memory_allocator ${MOONCAKE_STORE_LIBS})
+target_link_libraries(master_bench PRIVATE cachelib_memory_allocator mooncake_store)
 
 # Add storage backend benchmark executable
 # This benchmark tests all storage backends (OffsetAllocator, Bucket, FilePerKey)

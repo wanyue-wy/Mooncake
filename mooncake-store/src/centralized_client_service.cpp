@@ -101,9 +101,14 @@ void CentralizedClientService::Destroy() {
 
 ErrorCode CentralizedClientService::Init(
     const CentralizedClientConfig& config) {
+    if (config.heartbeat_rpc_port != 0) {
+        LOG(ERROR) << "Dedicated heartbeat RPC is not supported by the "
+                      "a00f757 centralized protocol"
+                   << ", heartbeat_rpc_port=" << config.heartbeat_rpc_port;
+        return ErrorCode::INVALID_PARAMS;
+    }
     auto master_server_entry = config.master_server_entry;
     master_server_entry_ = master_server_entry;
-    master_client_.SetHeartbeatRpcPort(config.heartbeat_rpc_port);
     SetMasterDiscoveryConfig(config);
 
     ErrorCode err = ConnectToMaster(master_server_entry);
@@ -284,7 +289,7 @@ ErrorCode CentralizedClientService::Init(
     client_requester_ = std::make_shared<ClientRequester>();
 
     // Start heartbeat AFTER all initialization is complete
-    StartHeartbeat(master_server_entry);
+    StartPing(master_server_entry);
 
     StartHttpServer();
 
@@ -423,8 +428,7 @@ CentralizedClientService::BatchIsExist(const std::vector<std::string>& keys) {
         return std::vector<tl::expected<bool, ErrorCode>>(
             keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
     }
-    std::vector<std::string_view> key_views(keys.begin(), keys.end());
-    auto results = master_client_.BatchExistKey(key_views);
+    auto results = master_client_.BatchExistKey(keys);
     for (size_t i = 0; i < results.size(); ++i) {
         if (!results[i]) {
             LOG(ERROR) << "Failed to query key"
@@ -2059,7 +2063,9 @@ ErrorCode CentralizedClientService::ConnectMaster(
 
 tl::expected<HeartbeatResponse, ErrorCode>
 CentralizedClientService::SendHeartbeat(const HeartbeatRequest& request) {
-    return master_client_.Heartbeat(request);
+    (void)request;
+    LOG(ERROR) << "Heartbeat RPC is not part of the centralized protocol";
+    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
 }
 
 tl::expected<
@@ -2092,6 +2098,79 @@ HeartbeatRequest CentralizedClientService::build_heartbeat_request() {
     return req;
 }
 
+void CentralizedClientService::StopHeartbeat() {
+    MutexLocker lock(&registration_mutex_);
+    InnerStopHeartbeat();
+}
+
+void CentralizedClientService::StartPing(
+    const std::string& master_server_entry) {
+    if (heartbeat_running_) {
+        LOG(WARNING) << "Ping thread already running, skip starting";
+        return;
+    }
+
+    const bool is_ha_mode = IsHAMode(master_server_entry);
+    std::string current_master_address = master_server_entry;
+    if (is_ha_mode) {
+        auto err =
+            ResolveMasterAddress(master_server_entry, current_master_address);
+        if (err != ErrorCode::OK) {
+            LOG(WARNING) << "Failed to resolve master before starting ping; "
+                            "the ping loop will retry"
+                         << ", error=" << err;
+        }
+    }
+
+    heartbeat_running_ = true;
+    heartbeat_thread_ = std::thread(
+        [this, is_ha_mode, current_master_address]() mutable {
+            PingThreadMain(is_ha_mode, std::move(current_master_address));
+        });
+}
+
+void CentralizedClientService::PingThreadMain(
+    bool is_ha_mode, std::string current_master_address) {
+    constexpr int kMaxPingFailCount = 3;
+    constexpr int kPingIntervalMs = 1000;
+    int ping_fail_count = 0;
+    std::future<void> remount_future;
+
+    auto remount = [this]() { HeartbeatTryRegister(); };
+
+    while (heartbeat_running_) {
+        if (remount_future.valid() &&
+            remount_future.wait_for(std::chrono::seconds(0)) ==
+                std::future_status::ready) {
+            remount_future = std::future<void>();
+        }
+
+        auto ping = master_client_.Ping();
+        if (ping) {
+            ping_fail_count = 0;
+            view_version_.store(ping->view_version_id);
+            if (ping->client_status != ClientStatus::HEALTH &&
+                !remount_future.valid()) {
+                remount_future = std::async(std::launch::async, remount);
+            }
+            WaitForNextHeartbeat(kPingIntervalMs);
+            continue;
+        }
+
+        ++ping_fail_count;
+        LOG(ERROR) << "Failed to ping centralized master"
+                   << ", consecutive_failures=" << ping_fail_count;
+        if (ping_fail_count >= kMaxPingFailCount &&
+            ReconnectToMaster(is_ha_mode, current_master_address)) {
+            ping_fail_count = 0;
+            continue;
+        }
+        WaitForNextHeartbeat(kPingIntervalMs);
+    }
+
+    if (remount_future.valid()) remount_future.wait();
+}
+
 tl::expected<RegisterClientResponse, ErrorCode>
 CentralizedClientService::InnerRegisterClient() {
     // Runs under registration_mutex_; mounted_segments_mutex_ nests inside it.
@@ -2106,18 +2185,24 @@ CentralizedClientService::InnerRegisterClient() {
         segments.emplace_back(segment);
     }
 
-    RegisterClientRequest req;
-    req.client_id = client_id_;
-    req.segments = std::move(segments);
-    req.deployment_mode = DeploymentMode::CENTRALIZATION;
-
-    auto register_result = master_client_.RegisterClient(req);
-    if (!register_result) {
-        LOG(ERROR) << "Failed to register client: " << register_result.error();
-    } else {
-        view_version_ = register_result.value().view_version;
+    auto remount_result = master_client_.ReMountSegment(segments);
+    if (!remount_result) {
+        LOG(ERROR) << "Failed to remount centralized client segments"
+                   << ", error=" << remount_result.error();
+        return tl::make_unexpected(remount_result.error());
     }
-    return register_result;
+
+    auto ping_result = master_client_.Ping();
+    if (!ping_result) {
+        LOG(ERROR) << "Failed to read centralized master view after remount"
+                   << ", error=" << ping_result.error();
+        return tl::make_unexpected(ping_result.error());
+    }
+
+    RegisterClientResponse response;
+    response.view_version = ping_result->view_version_id;
+    view_version_.store(response.view_version);
+    return response;
 }
 
 ErrorCode CentralizedClientService::GetPreferredReplica(
