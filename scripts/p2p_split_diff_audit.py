@@ -148,7 +148,6 @@ CAT_B_SUBCLASS_DELETE = [
 
 # §4.C — entry adaptation (diff allowed, external interfaces unchanged).
 CAT_C = [
-    "mooncake-store/src/master.cpp",
     "mooncake-store/src/real_client_main.cpp",
     "mooncake-store/include/real_client.h",
     "mooncake-store/src/real_client.cpp",
@@ -286,9 +285,6 @@ CAT_PENDING = [
     # Belongs to B-9 client_metric rework; placement decided when metrics are
     # made self-contained.
     "mooncake-store/tests/client_metrics_test.cpp",
-    # Tests the shared dedicated-heartbeat feature via centralized_master_client;
-    # follows wherever the heartbeat server code lands in Phase 2/3.
-    "mooncake-store/tests/heartbeat_dedicated_port_test.cpp",
 ]
 
 # §4.B-7 — deleted by the fork, restored to a00f757 in Phase 3; appears as D
@@ -366,22 +362,16 @@ def main():
         if old is not None:
             renames.append((status, old, path))
 
-    # Missing check: explicit single-file expectations that must appear.
-    # Only categories whose paths are stable across phases qualify: files that
-    # existed at a00f757 (or fork-added files that never move). CAT_A and
-    # CAT_G_P2P paths are relocated by Phase 1, so they are excluded here and
-    # only used for classification.
+    # Missing check: explicit additive/kept files that must remain in the final
+    # diff. Restored/deleted categories are intentionally absent from the diff
+    # after Phase 3 and therefore are not missing expectations.
     STABLE_CATEGORIES = {
         "K (stable client entry/common base)",
-        "B-base (restore a00f757 + merge into P2P)",
         "C (entry adaptation)",
         "D (leaf convergence)",
-        "E (delete)",
         "conf additive",
-        "G-restore (tests back to a00f757)",
         "G-keep (entry-layer tests whitelist)",
         "PENDING (Phase 2 decision)",
-        "restore-pending (segment trio, back in Phase 3)",
     }
     expected_changed = set()
     for name, patterns in CATEGORIES:
