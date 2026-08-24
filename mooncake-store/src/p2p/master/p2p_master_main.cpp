@@ -10,7 +10,7 @@
 #include <ylt/easylog/record.hpp>
 
 #include "default_config.h"
-#include "ha_helper.h"
+#include "p2p/ha/p2p_master_service_supervisor.h"
 #include "http_metadata_server.h"
 #include "p2p/master/p2p_rpc_service.h"
 #include "types.h"
@@ -109,9 +109,6 @@ DEFINE_bool(enable_disk_eviction, true,
 DEFINE_uint64(
     quota_bytes, 0,
     "Quota for storage backend in bytes (0 = use default 90% of capacity)");
-DEFINE_string(deployment_mode, "Centralization",
-              "the deployment mode of mooncake-store, master and client must "
-              "run in same mode. Options: Centralization, P2P");
 DEFINE_uint64(
     max_client_per_key, 1,
     "Maximum number of client owners per key in P2P mode (0 = no limit)");
@@ -305,9 +302,6 @@ void InitMasterConf(const mooncake::DefaultConfig& default_config,
     default_config.GetUInt64("max_client_per_key",
                              &master_config.max_client_per_key,
                              FLAGS_max_client_per_key);
-    default_config.GetString("deployment_mode", &master_config.deployment_mode,
-                             FLAGS_deployment_mode);
-
     // Redis election backend configuration
     default_config.GetString("election_backend",
                              &master_config.election_backend,
@@ -628,11 +622,6 @@ void LoadConfigFromCmdline(mooncake::MasterConfig& master_config,
         master_config.processing_task_timeout_sec =
             FLAGS_processing_task_timeout_sec;
     }
-    if ((google::GetCommandLineFlagInfo("deployment_mode", &info) &&
-         !info.is_default) ||
-        !conf_set) {
-        master_config.deployment_mode = FLAGS_deployment_mode;
-    }
     if ((google::GetCommandLineFlagInfo("max_client_per_key", &info) &&
          !info.is_default) ||
         !conf_set) {
@@ -897,7 +886,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (master_config.enable_ha) {
-        mooncake::MasterServiceSupervisor supervisor(
+        mooncake::P2PMasterServiceSupervisor supervisor(
             mooncake::MasterServiceSupervisorConfig{master_config});
         return supervisor.Start();
     } else {

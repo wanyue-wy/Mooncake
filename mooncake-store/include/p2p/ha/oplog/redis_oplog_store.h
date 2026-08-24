@@ -18,7 +18,7 @@
 #include "p2p/ha/oplog/oplog_store.h"
 #include "p2p/ha/oplog/p2p_oplog_types.h"
 #include "mutex.h"
-#include "p2p/ha/redis_util.h"
+#include "ha/redis_util.h"
 
 namespace mooncake {
 

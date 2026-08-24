@@ -12,7 +12,7 @@
 
 #include "p2p/ha/oplog/p2p_hot_standby_service.h"
 #ifdef STORE_USE_REDIS
-#include "p2p/ha/redis_util.h"
+#include "ha/redis_util.h"
 #endif
 
 namespace mooncake {

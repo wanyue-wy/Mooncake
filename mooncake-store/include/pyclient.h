@@ -22,7 +22,7 @@ struct ShmRegisterRequest {
 // Python-specific wrapper class for client interface
 class PyClient {
    public:
-    virtual ~PyClient() = 0;
+    virtual ~PyClient() = default;
 
     virtual int initAll(const std::string& protocol,
                         const std::string& device_name,

@@ -186,6 +186,7 @@ class StorageTier : public CacheTier {
     std::vector<std::string> tags_;
 
     std::shared_ptr<StorageBackendInterface> storage_backend_;
+    std::string storage_path_;
 
     // Pending Write Buffer for aggregation
     std::mutex batch_mutex_;

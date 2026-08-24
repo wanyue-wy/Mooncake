@@ -1,6 +1,6 @@
 #ifdef STORE_USE_REDIS
 
-#include "p2p/ha/redis_util.h"
+#include "ha/redis_util.h"
 
 #include <glog/logging.h>
 

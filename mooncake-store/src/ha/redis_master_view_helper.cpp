@@ -1,6 +1,6 @@
 #ifdef STORE_USE_REDIS
 
-#include "p2p/ha/redis_master_view_helper.h"
+#include "ha/redis_master_view_helper.h"
 
 namespace mooncake {
 
@@ -9,9 +9,11 @@ RedisMasterViewHelper::RedisMasterViewHelper(const std::string& cluster_id,
                                              const std::string& password,
                                              int db_index, int ttl_sec,
                                              int heartbeat_interval_sec,
-                                             const std::string& username)
+                                             const std::string& username,
+                                             RedisElectionMetricSink* metric_sink)
     : redis_election_helper_(cluster_id, redis_endpoint, password, db_index,
-                             ttl_sec, heartbeat_interval_sec, username),
+                             ttl_sec, heartbeat_interval_sec, username,
+                             metric_sink),
       ttl_sec_(ttl_sec) {}
 
 ErrorCode RedisMasterViewHelper::Connect() {

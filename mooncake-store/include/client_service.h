@@ -19,7 +19,7 @@
 #include "client_buffer.hpp"
 #include "client_config_builder.h"
 #include "master_metric_manager.h"
-#include "p2p/client/runtime_config_store.h"
+#include "runtime_config_store.h"
 #include "p2p/master/p2p_rpc_types.h"
 #include "replica.h"
 #include "rpc_types.h"

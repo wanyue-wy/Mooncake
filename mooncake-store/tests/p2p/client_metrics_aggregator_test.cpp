@@ -12,7 +12,7 @@
 #include <thread>
 #include <vector>
 
-#include "p2p/client/heartbeat_type.h"
+#include "heartbeat_type.h"
 #include "p2p/client/p2p_client_metric.h"
 #include "p2p/master/p2p_master_metric_manager.h"
 

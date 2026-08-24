@@ -14,7 +14,7 @@
 #include <ylt/util/tl/expected.hpp>
 
 #include "mutex.h"
-#include "p2p/client/heartbeat_type.h"
+#include "heartbeat_type.h"
 #include "p2p/master/p2p_rpc_types.h"
 #include "p2p/master/p2p_segment_manager.h"
 #include "types.h"

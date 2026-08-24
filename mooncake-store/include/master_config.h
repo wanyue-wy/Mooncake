@@ -77,7 +77,7 @@ struct MasterConfig {
     bool enable_cxl = false;
     uint64_t max_client_per_key;
 
-    std::string deployment_mode;
+    std::string deployment_mode = "Centralization";
 
     // Redis election backend configuration (used when election_backend ==
     // "redis")
@@ -236,10 +236,13 @@ class MasterServiceSupervisorConfig {
         pending_task_timeout_sec = config.pending_task_timeout_sec;
         processing_task_timeout_sec = config.processing_task_timeout_sec;
         max_client_per_key = config.max_client_per_key;
-        if (config.deployment_mode == "Centralization") {
+        if (config.deployment_mode == "P2P") {
+            deployment_mode = DeploymentMode::P2P;
+        } else if (config.deployment_mode == "Centralization") {
             deployment_mode = DeploymentMode::CENTRALIZATION;
         } else {
-            deployment_mode = DeploymentMode::P2P;
+            throw std::runtime_error("Unknown deployment_mode: " +
+                                     config.deployment_mode);
         }
 
         cxl_path = config.cxl_path;

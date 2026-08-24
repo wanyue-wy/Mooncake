@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 
 #include "p2p/client/tiered_cache/tiers/storage_tier.h"
 #include "p2p/client/tiered_cache/tiered_backend.h"
@@ -9,6 +10,69 @@
 #include "utils.h"
 
 namespace mooncake {
+namespace {
+
+void CleanEphemeralStoragePath(const std::string& path) noexcept {
+    namespace fs = std::filesystem;
+    try {
+        if (path.empty()) {
+            LOG(WARNING) << "Ephemeral storage path is empty, skipping cleanup";
+            return;
+        }
+
+        const fs::path normalized = fs::path(path).lexically_normal();
+        if (!normalized.is_absolute() || normalized == normalized.root_path()) {
+            LOG(ERROR) << "Refusing to clean unsafe ephemeral storage path "
+                          "(must be an absolute, non-root directory): "
+                       << path;
+            return;
+        }
+
+        std::error_code ec;
+        if (!fs::exists(normalized, ec) || ec) {
+            return;
+        }
+        if (!fs::is_directory(normalized, ec) || ec) {
+            LOG(WARNING) << "Ephemeral storage path is not a directory: "
+                         << path;
+            return;
+        }
+
+        std::vector<fs::path> entries;
+        for (fs::directory_iterator it(normalized, ec), end; it != end;
+             it.increment(ec)) {
+            if (ec) {
+                LOG(ERROR) << "Failed to iterate ephemeral storage path "
+                           << path << ", error: " << ec.message();
+                break;
+            }
+            entries.push_back(it->path());
+        }
+
+        size_t removed = 0;
+        for (const auto& entry : entries) {
+            std::error_code remove_error;
+            fs::remove_all(entry, remove_error);
+            if (remove_error) {
+                LOG(ERROR) << "Failed to remove ephemeral storage entry "
+                           << entry << ", error: "
+                           << remove_error.message();
+            } else {
+                ++removed;
+            }
+        }
+        LOG(INFO) << "Cleaned ephemeral storage path " << path << ", removed "
+                  << removed << " top-level entries";
+    } catch (const std::exception& error) {
+        LOG(ERROR) << "Unexpected exception while cleaning ephemeral storage: "
+                   << error.what();
+    } catch (...) {
+        LOG(ERROR) << "Unexpected non-standard exception while cleaning "
+                      "ephemeral storage";
+    }
+}
+
+}  // namespace
 
 StorageTier::StorageTier(UUID tier_id, const std::vector<std::string>& tags,
                          size_t capacity)
@@ -69,11 +133,11 @@ StorageTier::~StorageTier() {
 
     // P2P tiered cache treats SSD as ephemeral: wipe the storage path on exit
     // so nothing is left behind for the next run. Wipe while the backend is
-    // still alive (CleanStoragePath unlinks the files), then destroy it so its
+    // still alive (cleanup unlinks the files), then destroy it so its
     // worker threads stop and file handles close, releasing the inodes. Scoped
     // to the P2P path only (centralized FileStorage is unaffected).
     if (storage_backend_) {
-        storage_backend_->CleanStoragePath();
+        CleanEphemeralStoragePath(storage_path_);
         storage_backend_.reset();
     }
 }
@@ -89,20 +153,17 @@ tl::expected<void, ErrorCode> StorageTier::Init(
     static_cast<void>(engine);
     backend_ = backend;
     try {
-        {
-            auto fs_config = FileStorageConfig::FromEnvironment();
-            if (!tier_config.isNull()) {
-                fs_config.MergeFromJson(tier_config);
-            }
-            // StorageTier only supports bucket backend
-            if (fs_config.storage_backend_type != StorageBackendType::kBucket) {
-                LOG(ERROR)
-                    << "StorageTier only supports bucket storage backend. "
-                       "Check MOONCAKE_OFFLOAD_STORAGE_BACKEND_DESCRIPTOR "
-                       "or the storage_backend_type field in tier config.";
-                return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-            }
+        auto fs_config = FileStorageConfig::FromEnvironment();
+        if (!tier_config.isNull()) {
+            fs_config.MergeFromJson(tier_config);
         }
+        if (fs_config.storage_backend_type != StorageBackendType::kBucket) {
+            LOG(ERROR) << "StorageTier only supports bucket storage backend. "
+                          "Check MOONCAKE_OFFLOAD_STORAGE_BACKEND_DESCRIPTOR "
+                          "or the storage_backend_type field in tier config.";
+            return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
+        }
+        storage_path_ = fs_config.storage_filepath;
 
         if (!tier_config.isNull()) {
             if (tier_config.isMember("staging_buffer_capacity")) {
@@ -153,7 +214,7 @@ tl::expected<void, ErrorCode> StorageTier::Init(
         // leftover contents from a previous run on startup, before the backend
         // scans the path. This is scoped to the P2P path only; the centralized
         // FileStorage path keeps its persist/recover-across-restart behavior.
-        storage_backend_->CleanStoragePath();
+        CleanEphemeralStoragePath(storage_path_);
 
         auto init_res = storage_backend_->Init();
         if (!init_res) {

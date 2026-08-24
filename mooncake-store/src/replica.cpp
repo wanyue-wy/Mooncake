@@ -1,16 +1,6 @@
 #include "replica.h"
 
-#include "p2p/master/p2p_client_meta.h"
-
 namespace mooncake {
-
-std::optional<UUID> Replica::get_p2p_client_id() const {
-    auto client = get_p2p_client();
-    if (client) {
-        return client->get_client_id();
-    }
-    return std::nullopt;
-}
 
 Replica::Descriptor Replica::get_descriptor() const {
     Replica::Descriptor desc;
@@ -44,21 +34,7 @@ Replica::Descriptor Replica::get_descriptor() const {
         desc.descriptor_variant = std::move(local_disk_desc);
     } else if (is_p2p_proxy_replica()) {
         const auto& proxy_data = std::get<P2PProxyReplicaData>(data_);
-        P2PProxyDescriptor proxy_desc;
-        if (!proxy_data.client) {
-            LOG(ERROR) << "Trying to get invalid p2p replica descriptor";
-        } else {
-            proxy_desc.client_id = proxy_data.client->get_client_id();
-            proxy_desc.ip_address = proxy_data.client->get_ip_address();
-            proxy_desc.rpc_port = proxy_data.client->get_rpc_port();
-        }
-        if (!proxy_data.segment) {
-            LOG(ERROR) << "Trying to get invalid p2p replica descriptor";
-        } else {
-            proxy_desc.segment_id = proxy_data.segment->id;
-        }
-        proxy_desc.object_size = proxy_data.object_size;
-        desc.descriptor_variant = std::move(proxy_desc);
+        desc.descriptor_variant = proxy_data.descriptor;
     }
 
     return desc;
@@ -115,12 +91,10 @@ std::ostream& operator<<(std::ostream& os, const Replica& replica) {
            << ", object_size: " << disk_data.object_size;
     } else if (replica.is_p2p_proxy_replica()) {
         const auto& proxy_data = std::get<P2PProxyReplicaData>(replica.data_);
-        os << "type: P2P_PROXY";
-        if (proxy_data.client) {
-            os << ", client_id: " << proxy_data.client->get_client_id()
-               << ", ip: " << proxy_data.client->get_ip_address() << ":"
-               << proxy_data.client->get_rpc_port();
-        }
+        os << "type: P2P_PROXY, client_id: "
+           << proxy_data.descriptor.client_id << ", ip: "
+           << proxy_data.descriptor.ip_address << ":"
+           << proxy_data.descriptor.rpc_port;
         if (proxy_data.segment) {
             os << ", segment_id: " << proxy_data.segment->id;
             if (proxy_data.segment->IsP2PSegment()) {
@@ -129,7 +103,7 @@ std::ostream& operator<<(std::ostream& os, const Replica& replica) {
                           proxy_data.segment->GetP2PExtra().memory_type);
             }
         }
-        os << ", object_size: " << proxy_data.object_size;
+        os << ", object_size: " << proxy_data.descriptor.object_size;
     }
 
     os << ", refcnt: " << replica.refcnt_.load() << " }";

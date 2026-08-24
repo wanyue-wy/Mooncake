@@ -1,6 +1,6 @@
 #ifdef STORE_USE_REDIS
 
-#include "p2p/ha/redis_election_helper.h"
+#include "ha/redis_election_helper.h"
 
 #include <glog/logging.h>
 
@@ -13,8 +13,6 @@
 #include <poll.h>
 #include <random>
 #include <sstream>
-
-#include "p2p/ha/ha_metric_manager.h"
 
 namespace mooncake {
 
@@ -85,13 +83,15 @@ RedisElectionHelper::RedisElectionHelper(const std::string& cluster_id,
                                          const std::string& password,
                                          int db_index, int ttl_sec,
                                          int heartbeat_interval_sec,
-                                         const std::string& username)
+                                         const std::string& username,
+                                         RedisElectionMetricSink* metric_sink)
     : redis_endpoint_(redis_endpoint),
       username_(username),
       password_(password),
       db_index_(db_index),
       ttl_sec_(ttl_sec),
       heartbeat_interval_sec_(heartbeat_interval_sec),
+      metric_sink_(metric_sink),
       cluster_id_(cluster_id) {
     std::string cid = cluster_id;
     if (!cid.empty() && cid.back() != '/') {
@@ -196,14 +196,14 @@ void RedisElectionHelper::ElectLeader(const std::string& master_address,
     ScopeGuard operation([this] { EndBlockingOperation(); });
     const auto election_start = std::chrono::steady_clock::now();
     while (!cancel_election_) {
-        HAMetricManager::instance().inc_election_attempts();
+        if (metric_sink_) metric_sink_->IncElectionAttempts();
         bool connected = false;
         {
             std::lock_guard<std::mutex> lock(election_mutex_);
             if (!election_ctx_) {
                 election_ctx_ = CreateConnection();
                 if (!election_ctx_) {
-                    HAMetricManager::instance().inc_election_failures();
+                    if (metric_sink_) metric_sink_->IncElectionFailures();
                     LOG(ERROR) << "ElectLeader: connect failed, retry in 1s";
                 }
             }
@@ -229,11 +229,13 @@ void RedisElectionHelper::ElectLeader(const std::string& master_address,
                 std::lock_guard<std::mutex> lock(election_mutex_);
                 PublishLeaderEvent(master_address, version);
             }
-            HAMetricManager::instance().set_election_is_leader(true);
-            HAMetricManager::instance().observe_election_duration_ms(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - election_start)
-                    .count());
+            if (metric_sink_) {
+                metric_sink_->SetElectionIsLeader(true);
+                metric_sink_->ObserveElectionDurationMs(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - election_start)
+                        .count());
+            }
             lease_id = next_lease_id_++;
             LOG(INFO) << "ElectLeader: elected as leader, epoch=" << version
                       << " lease_id=" << lease_id;
@@ -281,7 +283,7 @@ RedisElectionHelper::ElectionAttemptResult RedisElectionHelper::TryElectOnce(
         candidate_id.size()));
 
     if (!reply) {
-        HAMetricManager::instance().inc_election_failures();
+        if (metric_sink_) metric_sink_->IncElectionFailures();
 
         // The script may have completed before the response was lost. After
         // reconnecting, identify our write by its per-attempt candidate ID.
@@ -326,7 +328,7 @@ RedisElectionHelper::ElectionAttemptResult RedisElectionHelper::TryElectOnce(
 
     if (reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ||
         element_type(0) != REDIS_REPLY_INTEGER) {
-        HAMetricManager::instance().inc_election_failures();
+        if (metric_sink_) metric_sink_->IncElectionFailures();
         LOG(WARNING) << "TryElectOnce: unexpected election script reply"
                      << ", type=" << reply->type
                      << ", elements=" << reply->elements
@@ -378,8 +380,10 @@ void RedisElectionHelper::WatchLeader() {
     }
 
     // Slow path (fallback): pure polling — use a separate connection
-    HAMetricManager::instance().inc_election_watch_failures();
-    HAMetricManager::instance().inc_election_polling_fallbacks();
+    if (metric_sink_) {
+        metric_sink_->IncElectionWatchFailures();
+        metric_sink_->IncElectionPollingFallbacks();
+    }
     WatchLeaderPolling();
 }
 
@@ -609,7 +613,7 @@ void RedisElectionHelper::KeepLeader(int lease_id) {
         }
 
         if (!renewed) {
-            HAMetricManager::instance().inc_election_leadership_lost();
+            if (metric_sink_) metric_sink_->IncElectionLeadershipLost();
             break;  // Lost leadership
         }
 
@@ -618,7 +622,7 @@ void RedisElectionHelper::KeepLeader(int lease_id) {
     }
 
     keep_alive_running_ = false;
-    HAMetricManager::instance().set_election_is_leader(false);
+    if (metric_sink_) metric_sink_->SetElectionIsLeader(false);
     LOG(INFO) << "KeepLeader: exited renewal loop";
 }
 
@@ -721,7 +725,7 @@ bool RedisElectionHelper::Reconnect(redisContext*& ctx) {
     }
 
     LOG(INFO) << "Reconnect: successfully reconnected to Redis";
-    HAMetricManager::instance().inc_election_reconnects();
+    if (metric_sink_) metric_sink_->IncElectionReconnects();
     return true;
 }
 
@@ -737,7 +741,7 @@ bool RedisElectionHelper::ReconnectSubscribeLocked(bool record_metric) {
     }
     LOG(INFO) << "ReconnectSubscribe: subscribe connection ready";
     if (record_metric) {
-        HAMetricManager::instance().inc_election_reconnects();
+        if (metric_sink_) metric_sink_->IncElectionReconnects();
     }
     return true;
 }

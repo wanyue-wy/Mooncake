@@ -17,7 +17,7 @@
 #include "p2p/ha/oplog/redis_oplog_store.h"
 #include "p2p/ha/oplog/p2p_standby_snapshot_service.h"
 #include "p2p/master/p2p_master_service.h"
-#include "p2p/ha/redis_util.h"
+#include "ha/redis_util.h"
 #include "../../redis_test_utils.h"
 
 namespace mooncake {

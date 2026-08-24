@@ -4,7 +4,7 @@
 #include "ha_helper.h"
 
 #ifdef STORE_USE_REDIS
-#include "p2p/ha/redis_election_helper.h"
+#include "ha/redis_election_helper.h"
 #endif
 
 namespace mooncake {
@@ -25,7 +25,8 @@ class RedisMasterViewHelper : public MasterViewHelper {
                           const std::string& redis_endpoint,
                           const std::string& password, int db_index,
                           int ttl_sec, int heartbeat_interval_sec,
-                          const std::string& username = "");
+                          const std::string& username = "",
+                          RedisElectionMetricSink* metric_sink = nullptr);
 
     ErrorCode Connect();
 

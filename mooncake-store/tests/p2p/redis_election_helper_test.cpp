@@ -11,8 +11,8 @@
 #include "types.h"
 
 #ifdef STORE_USE_REDIS
-#include "p2p/ha/redis_election_helper.h"
-#include "p2p/ha/redis_master_view_helper.h"
+#include "ha/redis_election_helper.h"
+#include "ha/redis_master_view_helper.h"
 #include "redis_test_utils.h"
 #include <hiredis/hiredis.h>
 

@@ -129,17 +129,25 @@ struct LocalDiskReplicaData {
     std::string transport_endpoint;
 };
 
+struct P2PProxyDescriptor {
+    UUID client_id{};
+    UUID segment_id{};
+    std::string ip_address;
+    uint16_t rpc_port = 0;
+    uint64_t object_size = 0;
+    YLT_REFL(P2PProxyDescriptor, client_id, segment_id, ip_address, rpc_port,
+             object_size);
+};
+
 struct P2PProxyReplicaData {
     P2PProxyReplicaData() = default;
     P2PProxyReplicaData(std::shared_ptr<P2PClientMeta> client,
-                        std::shared_ptr<Segment> segment, uint64_t object_size)
-        : client(std::move(client)),
-          segment(std::move(segment)),
-          object_size(object_size) {}
+                        std::shared_ptr<Segment> segment,
+                        uint64_t object_size);
 
     std::shared_ptr<const P2PClientMeta> client;
     std::shared_ptr<const Segment> segment;
-    uint64_t object_size = 0;
+    P2PProxyDescriptor descriptor;
 };
 
 struct MemoryDescriptor {
@@ -158,16 +166,6 @@ struct LocalDiskDescriptor {
     uint64_t object_size = 0;
     std::string transport_endpoint;
     YLT_REFL(LocalDiskDescriptor, client_id, object_size, transport_endpoint);
-};
-
-struct P2PProxyDescriptor {
-    UUID client_id;
-    UUID segment_id;
-    std::string ip_address;
-    uint16_t rpc_port = 0;
-    uint64_t object_size = 0;
-    YLT_REFL(P2PProxyDescriptor, client_id, segment_id, ip_address, rpc_port,
-             object_size);
 };
 
 class Replica {
@@ -193,12 +191,15 @@ class Replica {
 
     Replica(UUID client_id, uint64_t object_size,
             std::string transport_endpoint, ReplicaStatus status)
-        : data_(LocalDiskReplicaData{client_id, object_size,
+        : id_(next_id_.fetch_add(1)),
+          data_(LocalDiskReplicaData{client_id, object_size,
                                      std::move(transport_endpoint)}),
           status_(status) {}
 
     Replica(P2PProxyReplicaData proxy_data, ReplicaStatus status)
-        : data_(std::move(proxy_data)), status_(status) {}
+        : id_(next_id_.fetch_add(1)),
+          data_(std::move(proxy_data)),
+          status_(status) {}
 
     ~Replica() {
         if (status_ != ReplicaStatus::UNDEFINED && is_disk_replica()) {
@@ -365,7 +366,12 @@ class Replica {
         return std::nullopt;
     }
 
-    std::optional<UUID> get_p2p_client_id() const;
+    std::optional<UUID> get_p2p_client_id() const {
+        if (!is_p2p_proxy_replica()) return std::nullopt;
+        const auto& proxy_data = std::get<P2PProxyReplicaData>(data_);
+        if (!proxy_data.client) return std::nullopt;
+        return proxy_data.descriptor.client_id;
+    }
 
     std::shared_ptr<const Segment> get_p2p_segment() const {
         if (!is_p2p_proxy_replica()) return nullptr;
@@ -556,7 +562,7 @@ inline std::optional<UUID> Replica::get_segment_id() const {
     } else if (is_p2p_proxy_replica()) {
         const auto& proxy_data = std::get<P2PProxyReplicaData>(data_);
         if (proxy_data.segment) {
-            return proxy_data.segment->id;
+            return proxy_data.descriptor.segment_id;
         }
     }
     return std::nullopt;

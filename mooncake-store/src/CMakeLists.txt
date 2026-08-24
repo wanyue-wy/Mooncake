@@ -8,6 +8,7 @@ set(MOONCAKE_STORE_SOURCES
     segment.cpp
     client_service.cpp
     client_service_base.cpp
+    runtime_config_store.cpp
     centralized_client_service.cpp
     centralized_master_rpc_adapter.cpp
     client_metric.cpp
@@ -20,13 +21,10 @@ set(MOONCAKE_STORE_SOURCES
     etcd_helper.cpp
     ha_helper.cpp
     transfer_task.cpp
-    etcd_helper.cpp
-    ha_helper.cpp
     rpc_service.cpp
     offset_allocator.cpp
     posix_file.cpp
     client_buffer.cpp
-    real_client.cpp
     dummy_client.cpp
     http_metadata_server.cpp
     file_storage.cpp
@@ -40,9 +38,9 @@ if(STORE_USE_REDIS)
     find_path(HIREDIS_INCLUDE_DIR NAMES hiredis/hiredis.h REQUIRED)
     find_library(HIREDIS_LIB NAMES hiredis REQUIRED)
     message(STATUS "Found hiredis: include=${HIREDIS_INCLUDE_DIR} lib=${HIREDIS_LIB}")
-    list(APPEND MOONCAKE_STORE_P2P_SOURCES p2p/ha/redis_util.cpp)
-    list(APPEND MOONCAKE_STORE_P2P_SOURCES p2p/ha/redis_election_helper.cpp)
-    list(APPEND MOONCAKE_STORE_P2P_SOURCES p2p/ha/redis_master_view_helper.cpp)
+    list(APPEND MOONCAKE_STORE_SOURCES ha/redis_util.cpp)
+    list(APPEND MOONCAKE_STORE_SOURCES ha/redis_election_helper.cpp)
+    list(APPEND MOONCAKE_STORE_SOURCES ha/redis_master_view_helper.cpp)
     list(APPEND MOONCAKE_STORE_P2P_SOURCES p2p/ha/oplog/redis_oplog_store.cpp)
     list(APPEND EXTRA_LIBS ${HIREDIS_LIB})
 endif()
@@ -113,10 +111,10 @@ target_link_libraries(mooncake_store
         transfer_engine
 )
 
-# P2P architecture library (P2P split, Phase 1). Transitional state: it still
-# links the whole mooncake_store because base-class inheritance is severed only
-# in Phase 2; the leaf-only layering constraint (§3.2) is enforced in Phase 3.
+# P2P architecture library. It depends on the common/centralized library, while
+# the latter does not reference P2P implementation symbols.
 list(APPEND MOONCAKE_STORE_P2P_SOURCES
+    p2p/common/p2p_replica.cpp
     p2p/master/p2p_master_service.cpp
     p2p/master/p2p_common_master_client.cpp
     p2p/master/p2p_master_client.cpp
@@ -134,7 +132,6 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/client/async_memcpy_executor.cpp
     p2p/client/async_metadata_notifier.cpp
     p2p/client/client_metrics_aggregator.cpp
-    p2p/client/runtime_config_store.cpp
     p2p/client/tiered_cache/copier_registry.cpp
     p2p/client/tiered_cache/data_copier.cpp
     p2p/client/tiered_cache/tiered_backend.cpp
@@ -160,6 +157,7 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/ha/oplog/p2p_hot_standby_service.cpp
     p2p/ha/oplog/p2p_standby_snapshot_service.cpp
     p2p/ha/standby_state_machine.cpp
+    p2p/ha/p2p_master_service_supervisor.cpp
     p2p/ha/ha_metric_manager.cpp
     p2p/ha/ha_recovery_manager.cpp
 )
@@ -173,6 +171,11 @@ target_link_libraries(mooncake_store_p2p_objects PUBLIC mooncake_store)
 add_library(mooncake_store_p2p
     $<TARGET_OBJECTS:mooncake_store_p2p_objects>)
 target_link_libraries(mooncake_store_p2p PUBLIC mooncake_store)
+
+# Dual-mode public client entry. Keeping it above the two implementation
+# libraries prevents common/centralized objects from referencing P2P symbols.
+add_library(mooncake_store_client_entry real_client.cpp)
+target_link_libraries(mooncake_store_client_entry PUBLIC mooncake_store_p2p)
 
 # Link Ascend ACL library if USE_ASCEND_CACHE_TIER is enabled
 if(USE_ASCEND_CACHE_TIER)
@@ -252,7 +255,8 @@ if (USE_ASCEND_DIRECT)
 endif()
 
 if (BUILD_SHARED_LIBS)
-  install(TARGETS mooncake_store mooncake_store_p2p DESTINATION lib)
+  install(TARGETS mooncake_store mooncake_store_p2p mooncake_store_client_entry
+          DESTINATION lib)
 endif()
 
 # Master binary
@@ -272,7 +276,7 @@ endif()
 target_include_directories(mooncake_master PRIVATE ${MASTER_EXTRA_INCS})
 target_include_directories(mooncake_master_p2p PRIVATE ${MASTER_EXTRA_INCS})
 target_link_libraries(mooncake_master PRIVATE
-    ${MOONCAKE_STORE_LIBS}
+    mooncake_store
     cachelib_memory_allocator
     pthread
     ibverbs
@@ -282,7 +286,7 @@ target_link_libraries(mooncake_master PRIVATE
     asio_shared
 )
 target_link_libraries(mooncake_master_p2p PRIVATE
-    ${MOONCAKE_STORE_LIBS}
+    mooncake_store_p2p
     cachelib_memory_allocator
     pthread
     ibverbs

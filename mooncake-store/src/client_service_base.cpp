@@ -11,11 +11,11 @@
 #include <thread>
 
 #include "config.h"
-#include "p2p/client/runtime_config_store.h"
+#include "runtime_config_store.h"
 #include "transfer_engine.h"
 #include "types.h"
 #ifdef STORE_USE_REDIS
-#include "p2p/ha/redis_master_view_helper.h"
+#include "ha/redis_master_view_helper.h"
 #endif
 #include <ylt/coro_http/coro_http_client.hpp>
 

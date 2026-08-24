@@ -14,6 +14,8 @@
 
 namespace mooncake {
 
+class RedisElectionMetricSink;
+
 /*
  * @brief A helper class for maintain and monitor the master view change.
  *        The cluster is assumed to have multiple master servers, but only
@@ -89,10 +91,11 @@ class MasterViewHelper {
  * @return: A unique_ptr to the created helper, or nullptr on error.
  */
 std::unique_ptr<MasterViewHelper> CreateMasterViewHelper(
-    const MasterServiceSupervisorConfig& config);
+    const MasterServiceSupervisorConfig& config,
+    RedisElectionMetricSink* metric_sink = nullptr);
 
 /*
- * @brief A supervisor class for the master service, only used in HA mode.
+ * @brief Supervisor for the centralized master service in HA mode.
  *        This class will continuously do the following procedures after start:
  *        1. Elect local master to be the leader.
  *        2. Start the master service when it is elected as leader.

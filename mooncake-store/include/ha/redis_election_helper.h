@@ -11,10 +11,30 @@
 #include <thread>
 
 #include <hiredis/hiredis.h>
-#include "p2p/ha/redis_util.h"
+#include "ha/redis_util.h"
 #include "types.h"
 
 namespace mooncake {
+
+/**
+ * Optional metrics sink for Redis election. The Redis transport stays in the
+ * shared HA layer; deployment-specific metrics are supplied by the caller.
+ */
+class RedisElectionMetricSink {
+   public:
+    virtual ~RedisElectionMetricSink() = default;
+
+    virtual void IncElectionAttempts() {}
+    virtual void IncElectionFailures() {}
+    virtual void IncElectionLeadershipLost() {}
+    virtual void IncElectionReconnects() {}
+    virtual void IncElectionWatchFailures() {}
+    virtual void IncElectionPollingFallbacks() {}
+    virtual void SetElectionIsLeader(bool value) { (void)value; }
+    virtual void ObserveElectionDurationMs(int64_t duration_ms) {
+        (void)duration_ms;
+    }
+};
 
 /**
  * @brief Redis helper for leader election, mirroring EtcdHelper's election
@@ -36,7 +56,8 @@ class RedisElectionHelper {
                         const std::string& redis_endpoint,
                         const std::string& password = "", int db_index = 0,
                         int ttl_sec = 4, int heartbeat_interval_sec = 1,
-                        const std::string& username = "");
+                        const std::string& username = "",
+                        RedisElectionMetricSink* metric_sink = nullptr);
     ~RedisElectionHelper();
 
     RedisElectionHelper(const RedisElectionHelper&) = delete;
@@ -197,6 +218,7 @@ class RedisElectionHelper {
     int heartbeat_interval_sec_ = 1;  // KeepLeader renewal interval
     int connect_timeout_ms_ = 5000;
     int command_timeout_ms_ = 3000;
+    RedisElectionMetricSink* metric_sink_ = nullptr;
 
     // === Runtime state ===
 
