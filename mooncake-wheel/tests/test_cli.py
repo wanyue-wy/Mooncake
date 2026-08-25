@@ -25,28 +25,17 @@ def test_entry_point_installed():
 
         print(f"✅ mooncake_master entry point found at: {result.stdout.strip()}")
         result = subprocess.run(
-            ["which", "mooncake_master_p2p"],
+            ["mooncake_master", "--help"],
             capture_output=True,
             text=True
         )
 
         if result.returncode != 0:
-            print("❌ mooncake_master_p2p entry point not found in PATH")
-            return False
-
-        print(f"✅ mooncake_master_p2p entry point found at: {result.stdout.strip()}")
-        result = subprocess.run(
-            ["mooncake_master_p2p", "--help"],
-            capture_output=True,
-            text=True
-        )
-
-        if result.returncode != 0:
-            print("❌ mooncake_master_p2p entry point failed to execute")
+            print("❌ mooncake_master entry point failed to execute")
             print(f"stderr: {result.stderr}")
             return False
 
-        print("✅ mooncake_master_p2p entry point executed successfully")
+        print("✅ mooncake_master entry point executed successfully")
         result = subprocess.run(
             ["which", "mooncake_client"],
             capture_output=True,

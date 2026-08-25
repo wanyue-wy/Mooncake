@@ -3,7 +3,7 @@
 function(add_p2p_store_test name)
     add_executable(${name} ${ARGN})
     target_link_libraries(${name} PUBLIC
-        ${MOONCAKE_STORE_LIBS}
+        mooncake_store_p2p
         transfer_engine
         cachelib_memory_allocator
         ${ETCD_WRAPPER_LIB}
@@ -75,7 +75,7 @@ add_p2p_store_test(p2p_oplog_test
 
 # redis-dependent entries (registered only when STORE_USE_REDIS, as before)
 add_executable(redis_election_helper_test redis_election_helper_test.cpp)
-target_link_libraries(redis_election_helper_test PUBLIC ${MOONCAKE_STORE_LIBS} transfer_engine cachelib_memory_allocator ${ETCD_WRAPPER_LIB} glog gtest gtest_main pthread)
+target_link_libraries(redis_election_helper_test PUBLIC mooncake_store_p2p transfer_engine cachelib_memory_allocator ${ETCD_WRAPPER_LIB} glog gtest gtest_main pthread)
 if(STORE_USE_REDIS)
     add_test(NAME redis_election_helper_test COMMAND redis_election_helper_test)
     add_p2p_store_test(redis_oplog_store_test ha/oplog/redis_oplog_store_test.cpp)

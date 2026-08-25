@@ -11,6 +11,15 @@ pip install mooncake-transfer-engine
 
 📦 **Package Details**: [https://pypi.org/project/mooncake-transfer-engine/](https://pypi.org/project/mooncake-transfer-engine/)
 
+For the P2P Store architecture, install the mutually exclusive P2P wheel:
+
+```bash
+pip install mooncake-transfer-engine-p2p
+```
+
+Both wheels expose the same `mooncake.store` Python module and the same
+`mooncake_master`/`mooncake_client` command names.
+
 ### Required Service
 Only one service is required now:
 

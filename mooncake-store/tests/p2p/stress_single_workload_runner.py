@@ -66,7 +66,12 @@ CENTRALIZED_MASTER_BIN = os.path.join(
 P2P_MASTER_BIN = os.path.join(
     PROJECT_ROOT, "build/mooncake-store/src/mooncake_master_p2p"
 )
-TEST_BIN = os.path.join(PROJECT_ROOT, "build/mooncake-store/tests/stress_workload_test")
+CENTRALIZED_TEST_BIN = os.path.join(
+    PROJECT_ROOT, "build/mooncake-store/tests/stress_workload_test"
+)
+P2P_TEST_BIN = os.path.join(
+    PROJECT_ROOT, "build/mooncake-store/tests/stress_workload_test_p2p"
+)
 RPC_PORT = 50051
 METRICS_PORT = 9003
 HTTP_METADATA_PORT = 8080  # master's HttpMetadataServer /health endpoint
@@ -91,6 +96,7 @@ def kill_existing_processes():
             "mooncake_master",
             "mooncake_master_p2p",
             "stress_workload_test",
+            "stress_workload_test_p2p",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -208,7 +214,8 @@ def run_benchmark_config(mode, rounds, threads, value_size, ops, rpc_threads, ra
     good_rounds = []
     bad_rounds = []
     for r in range(1, rounds + 1):
-        test_cmd = (f"{TEST_BIN} --client_type={mode} --num_threads={threads} --value_size={value_size} "
+        test_bin = P2P_TEST_BIN if mode == "P2P" else CENTRALIZED_TEST_BIN
+        test_cmd = (f"{test_bin} --client_type={mode} --num_threads={threads} --value_size={value_size} "
                     f"--test_operation_nums={ops} --ram_buffer_size_gb={ram_buffer_size_gb} --batch_size={batch}")
 
         if mode == "P2P":

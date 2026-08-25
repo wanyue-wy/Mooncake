@@ -27,7 +27,6 @@ Issues = "https://github.com/kvcache-ai/Mooncake/issues"
 
 [project.scripts]
 mooncake_master = "mooncake.cli:main"
-mooncake_master_p2p = "mooncake.cli_master_p2p:main"
 mooncake_client = "mooncake.cli_client:main"
 transfer_engine_bench = "mooncake.cli_bench:main"
 mooncake_http_metadata_server = "mooncake.http_metadata_server:main"
@@ -43,4 +42,4 @@ where = ["."]
 include = ["mooncake*"]
 
 [tool.setuptools.package-data]
-mooncake = ["*.so", "mooncake_master", "mooncake_master_p2p", "mooncake_client", "transfer_engine_bench"]
+mooncake = ["*.so", "mooncake_master", "mooncake_client", "transfer_engine_bench"]

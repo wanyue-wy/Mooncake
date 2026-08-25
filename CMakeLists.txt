@@ -49,6 +49,24 @@ option(STORE_USE_JEMALLOC "Use jemalloc in mooncake store master" OFF)
 option(USE_ASCEND_CACHE_TIER "Enable Ascend NPU cache tier support" OFF)
 option(USE_ASCEND_DRAM_TIER "Enable Ascend ACL Host memory for DRAM tier (aclrtMallocHost)" OFF)
 
+set(MOONCAKE_STORE_BACKEND "centralized" CACHE STRING
+    "Store backend used by Python bindings and packaged client binaries")
+set_property(CACHE MOONCAKE_STORE_BACKEND PROPERTY STRINGS centralized p2p)
+if(NOT MOONCAKE_STORE_BACKEND STREQUAL "centralized" AND
+   NOT MOONCAKE_STORE_BACKEND STREQUAL "p2p")
+  message(FATAL_ERROR
+      "MOONCAKE_STORE_BACKEND must be 'centralized' or 'p2p', got '${MOONCAKE_STORE_BACKEND}'")
+endif()
+
+if(MOONCAKE_STORE_BACKEND STREQUAL "centralized")
+  set(MOONCAKE_STORE_LIBS mooncake_store)
+else()
+  set(MOONCAKE_STORE_LIBS mooncake_store_p2p)
+endif()
+
+option(MOONCAKE_STORE_STATIC_LIBS
+       "Build Store libraries as position-independent static archives" OFF)
+
 # Define ASIO macros before adding mooncake-asio subdirectory
 add_compile_definitions(ASIO_SEPARATE_COMPILATION ASIO_DYN_LINK)
 add_subdirectory(mooncake-asio)

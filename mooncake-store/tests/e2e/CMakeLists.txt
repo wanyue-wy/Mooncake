@@ -13,6 +13,16 @@ target_link_libraries(clientctl PUBLIC
     ${ETCD_WRAPPER_LIB}
 )
 
+add_executable(clientctl_p2p clientctl.cpp ${MOONCAKE_E2E_TEST_SOURCES})
+target_link_libraries(clientctl_p2p PUBLIC
+    mooncake_store_p2p
+    transfer_engine
+    cachelib_memory_allocator
+    glog
+    pthread
+    ${ETCD_WRAPPER_LIB}
+)
+
 add_executable(e2e_rand_test e2e_rand_test.cpp ${MOONCAKE_E2E_TEST_SOURCES})
 target_link_libraries(e2e_rand_test PUBLIC
     ${MOONCAKE_STORE_LIBS}
@@ -69,7 +79,7 @@ target_link_libraries(chaos_rand_test PUBLIC
 if(STORE_USE_REDIS)
     add_executable(redis_chaos_test redis_chaos_test.cpp ${MOONCAKE_E2E_TEST_SOURCES})
     target_link_libraries(redis_chaos_test PUBLIC
-        ${MOONCAKE_STORE_LIBS}
+        mooncake_store_p2p
         transfer_engine
         cachelib_memory_allocator
         glog
@@ -81,7 +91,7 @@ if(STORE_USE_REDIS)
         NAME redis_chaos_test
         COMMAND redis_chaos_test
             --master_path=${CMAKE_BINARY_DIR}/mooncake-store/src/mooncake_master_p2p
-            --clientctl_path=${CMAKE_BINARY_DIR}/mooncake-store/tests/e2e/clientctl
+            --clientctl_path=${CMAKE_BINARY_DIR}/mooncake-store/tests/e2e/clientctl_p2p
             --out_dir=${CMAKE_BINARY_DIR}/redis_chaos_output
     )
     set_tests_properties(redis_chaos_test PROPERTIES

@@ -37,10 +37,12 @@ SCOPE = [
     "scripts/p2p_split_diff_audit.py",
     "docs/source/deployment/mooncake-store-deployment-guide.md",
     "docs/source/design/mooncake-store.md",
+    "docs/source/python-api-reference/mooncake-store.md",
     "docs/source/troubleshooting/error-code.md",
     "mooncake-wheel/pyproject.toml",
-    "mooncake-wheel/mooncake/cli_master_p2p.py",
+    "mooncake-wheel/mooncake/mooncake_store_service.py",
     "mooncake-wheel/tests/test_cli.py",
+    "mooncake-wheel/tests/test_import_structure.py",
     "mooncake-store/tests/e2e/readme.md",
 ]
 
@@ -130,6 +132,7 @@ CAT_K_CLIENT = [
     "mooncake-store/src/client_metric.cpp",
     "mooncake-store/include/ha_helper.h",
     "mooncake-store/src/ha_helper.cpp",
+    "mooncake-store/src/master_view_helper.cpp",
     "mooncake-store/include/inflight_tracker.h",
     "mooncake-store/include/runtime_config_store.h",
     "mooncake-store/src/runtime_config_store.cpp",
@@ -243,10 +246,12 @@ CAT_F = [
     "scripts/p2p_split_diff_audit.py",
     "docs/source/deployment/mooncake-store-deployment-guide.md",
     "docs/source/design/mooncake-store.md",
+    "docs/source/python-api-reference/mooncake-store.md",
     "docs/source/troubleshooting/error-code.md",
     "mooncake-wheel/pyproject.toml",
-    "mooncake-wheel/mooncake/cli_master_p2p.py",
+    "mooncake-wheel/mooncake/mooncake_store_service.py",
     "mooncake-wheel/tests/test_cli.py",
+    "mooncake-wheel/tests/test_import_structure.py",
     "mooncake-store/tests/e2e/readme.md",
 ]
 
@@ -335,6 +340,12 @@ ALLOWED_D = {
     "mooncake-store/tests/eviction_strategy_test.cpp",
 }
 
+# These support files may legitimately converge back to the base revision.
+OPTIONAL_UNCHANGED = {
+    "mooncake-store/benchmarks/CMakeLists.txt",
+    "mooncake-wheel/pyproject.toml",
+}
+
 CATEGORIES = [
     ("A (move to p2p/)", CAT_A),
     ("K (stable client entry/common base)", CAT_K_CLIENT),
@@ -370,6 +381,14 @@ def main():
     else:
         cmd = ["git", "diff", "--name-status", args.base, args.head, "--"] + SCOPE
     out = subprocess.check_output(cmd, text=True)
+
+    if args.head == "WORKTREE":
+        untracked_cmd = [
+            "git", "ls-files", "--others", "--exclude-standard", "--"
+        ] + SCOPE
+        untracked = subprocess.check_output(untracked_cmd, text=True)
+        if untracked:
+            out += "".join(f"A\t{path}\n" for path in untracked.splitlines())
 
     entries = []  # (status, path, old_path_or_None)
     for line in out.splitlines():
@@ -416,7 +435,10 @@ def main():
             if "*" not in pat and "?" not in pat:
                 expected_changed.add(pat)
     changed_paths = {p for _, p, _ in entries} | {o for _, _, o in entries if o}
-    missing = sorted(p for p in expected_changed if p not in changed_paths)
+    missing = sorted(
+        p for p in expected_changed
+        if p not in changed_paths and p not in OPTIONAL_UNCHANGED
+    )
 
     # A deletion of an old path that matches an A-category pattern is the
     # residue of a move whose rename detection fell below the similarity

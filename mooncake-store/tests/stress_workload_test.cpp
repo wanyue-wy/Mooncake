@@ -141,6 +141,7 @@ bool initialize_client() {
     std::optional<std::shared_ptr<ClientService>> client_opt;
 
     if (FLAGS_client_type == "P2P") {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
         // Build tiered_backend_config from ram_buffer_size_gb so the P2P
         // storage capacity is consistent with the Centralization segment size.
         // FLAGS_tiered_backend_config can still override this if explicitly
@@ -166,11 +167,20 @@ bool initialize_client() {
             /*route_cache_ttl_ms=*/FLAGS_route_cache_ttl_ms,
             FLAGS_p2p_local_transfer_mode, FLAGS_local_memcpy_async_worker_num);
         client_opt = ClientService::Create(config);
+#else
+        LOG(ERROR) << "P2P client requested from a centralized benchmark";
+        return false;
+#endif
     } else {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
+        LOG(ERROR) << "Centralized client requested from a P2P benchmark";
+        return false;
+#else
         auto config = ClientConfigBuilder::build_centralized_real_client(
             FLAGS_local_hostname, FLAGS_metadata_connection_string,
             FLAGS_protocol, device_names, FLAGS_master_address);
         client_opt = ClientService::Create(config);
+#endif
     }
 
     if (!client_opt.has_value()) {

@@ -4,6 +4,13 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
+STORE_BACKEND=${STORE_BACKEND:-centralized}
+if [ "$STORE_BACKEND" != "centralized" ] && [ "$STORE_BACKEND" != "p2p" ]; then
+    echo "ERROR: STORE_BACKEND must be centralized or p2p" >&2
+    exit 1
+fi
+export STORE_BACKEND
+
 # Ensure LD_LIBRARY_PATH includes /usr/local/lib
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
@@ -47,17 +54,14 @@ echo "Verifying mooncake_master entry point..."
 # Check if the mooncake_master entry point is installed and executable
 which mooncake_master || { echo "ERROR: mooncake_master entry point not found!"; exit 1; }
 echo "Success: mooncake_master entry point found"
-
-echo "Verifying mooncake_master_p2p entry point..."
-which mooncake_master_p2p || { echo "ERROR: mooncake_master_p2p entry point not found!"; exit 1; }
-echo "Success: mooncake_master_p2p entry point found"
-echo "Verifying mooncake_master_p2p can load bundled libraries..."
-mooncake_master_p2p --help >/dev/null || { echo "ERROR: mooncake_master_p2p failed to execute!"; exit 1; }
-echo "Success: mooncake_master_p2p executed successfully"
+echo "Verifying mooncake_master can load bundled libraries..."
+mooncake_master --help >/dev/null || { echo "ERROR: mooncake_master failed to execute!"; exit 1; }
+echo "Success: mooncake_master executed successfully"
 
 # Check if the mooncake_client entry point is installed and executable
 which mooncake_client || { echo "ERROR: mooncake_client entry point not found!"; exit 1; }
 echo "Success: mooncake_client entry point found"
+mooncake_client --help >/dev/null || { echo "ERROR: mooncake_client failed to execute!"; exit 1; }
 
 echo "Verifying transfer_engine_bench entry point..."
 # Check if the transfer_engine_bench entry point is installed and executable

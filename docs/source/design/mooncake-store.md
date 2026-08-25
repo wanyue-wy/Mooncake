@@ -679,7 +679,7 @@ sudo make install # Install Python interface support package
 Mooncake Store uses the Transfer Engine as its core transfer engine, so it is necessary to start the metadata service (etcd/redis/http). The startup and configuration of the `metadata` service can be referred to in the relevant sections of [Transfer Engine](./transfer-engine/index.md). **Special Note**: For the etcd service, by default, it only provides services for local processes. You need to modify the listening options (IP to 0.0.0.0 instead of the default 127.0.0.1). You can use commands like curl to verify correctness.
 
 ### Starting the Master Service
-The Master Service runs as an independent process, provides gRPC interfaces externally, and is responsible for the metadata management of Mooncake Store (note that the Master Service does not reuse the metadata service of the Transfer Engine). The default listening port is `50051`. After compilation, run `mooncake_master` for the centralized architecture or `mooncake_master_p2p` for the P2P architecture; both are located in `build/mooncake-store/src/`. Clients continue to use the shared `mooncake_client` executable and select their deployment mode in client configuration. After starting, the centralized Master Service will output the following content in the log:
+The Master Service runs as an independent process, provides gRPC interfaces externally, and is responsible for the metadata management of Mooncake Store (note that the Master Service does not reuse the metadata service of the Transfer Engine). The default listening port is `50051`. Source builds produce `mooncake_master`/`mooncake_client` for the centralized architecture and `mooncake_master_p2p`/`mooncake_client_p2p` for P2P. Architecture-specific wheels expose the selected pair under the stable `mooncake_master` and `mooncake_client` command names. After starting, the centralized Master Service will output the following content in the log:
 ```
 Starting Mooncake Master Service
 Port: 50051
@@ -783,6 +783,10 @@ To start a RPC type **real** `Client` as a standalone process, you can use the f
     --master_server_address="localhost:50051" \
     --metadata_server="http://localhost:8080/metadata"
 ```
+
+For a source-built P2P client, use
+`./build/mooncake-store/src/mooncake_client_p2p` with the P2P client flags.
+The P2P wheel exposes that executable as `mooncake_client`.
 
 Next, a **real** `Client` instance is created and connected to the Master Service. The **real** `Client` instance is listening on port 50052 as default.
 If you want to send requests to it, a **dummy** `Client` should be used in the application process (e.g., vLLM, SGLang). You can start a **dummy** `Client`

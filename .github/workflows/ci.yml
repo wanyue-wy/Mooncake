@@ -96,7 +96,7 @@ jobs:
         sudo bash -x dependencies.sh -y
         mkdir build
         cd build
-        cmake -G Ninja .. -DUSE_HTTP=ON -DUSE_CXL=ON -DUSE_ETCD=ON -DSTORE_USE_ETCD=ON -DSTORE_USE_REDIS=ON -DENABLE_ASAN=ON -DENABLE_SCCACHE=ON -DCMAKE_BUILD_TYPE=Debug -DPARALLEL_LINK_JOBS=2
+        cmake -G Ninja .. -DUSE_HTTP=ON -DUSE_CXL=ON -DUSE_ETCD=ON -DSTORE_USE_ETCD=ON -DSTORE_USE_REDIS=ON -DENABLE_ASAN=ON -DENABLE_SCCACHE=ON -DCMAKE_BUILD_TYPE=Debug -DPARALLEL_LINK_JOBS=2 -DMOONCAKE_STORE_STATIC_LIBS=ON
       shell: bash
 
     - name: Build project
@@ -106,6 +106,7 @@ jobs:
         test -x mooncake-store/src/mooncake_master
         test -x mooncake-store/src/mooncake_master_p2p
         test -x mooncake-store/src/mooncake_client
+        test -x mooncake-store/src/mooncake_client_p2p
         sudo cmake --install .
       shell: bash
 
@@ -244,6 +245,7 @@ jobs:
       matrix:
         ubuntu-version: [ubuntu-22.04, ubuntu-24.04]
         python-version: ['3.10', '3.12']
+        store-backend: [centralized, p2p]
     runs-on: ${{ matrix.ubuntu-version }}
     steps:
     - uses: actions/checkout@v4
@@ -262,7 +264,7 @@ jobs:
     - name: Download wheel artifact
       uses: actions/download-artifact@v4
       with:
-        name: mooncake-wheel-ubuntu-py${{ steps.generate_tag_test.outputs.python_version_tag }}
+        name: mooncake-wheel-${{ matrix.store-backend }}-ubuntu-py${{ steps.generate_tag_test.outputs.python_version_tag }}
         path: mooncake-wheel/dist
 
     - name: Verify wheel file exists
@@ -291,16 +293,18 @@ jobs:
 
     - name: Run installation test script
       run: |
-        bash scripts/test_installation.sh
+        STORE_BACKEND=${{ matrix.store-backend }} bash scripts/test_installation.sh
       shell: bash
 
     - name: Start metadata server
+      if: matrix.store-backend == 'centralized'
       run: |
         source test_env/bin/activate
         mooncake_http_metadata_server --port 8080 &
       shell: bash
 
     - name: Run tests with ssd
+      if: matrix.store-backend == 'centralized'
       run: |
         source test_env/bin/activate
         MC_STORE_MEMCPY=false TEST_SSD_OFFLOAD_IN_EVICT=true ./scripts/run_tests.sh
@@ -309,6 +313,7 @@ jobs:
       shell: bash
 
     - name: Start Mooncake Master
+      if: matrix.store-backend == 'centralized'
       run: |
         source test_env/bin/activate
         mkdir -p /tmp/mooncake_storage
@@ -320,6 +325,7 @@ jobs:
       shell: bash
 
     - name: Run Python Tensor API Performance Test (CI check)
+      if: matrix.store-backend == 'centralized'
       env:
         MOONCAKE_MASTER: "127.0.0.1:50051"
         MOONCAKE_TE_META_DATA_SERVER: "http://127.0.0.1:8080/metadata"
@@ -331,6 +337,7 @@ jobs:
       shell: bash
 
     - name: Run Python Async API Test (CI check)
+      if: matrix.store-backend == 'centralized'
       env:
         MOONCAKE_MASTER: "127.0.0.1:50051"
         MOONCAKE_TE_META_DATA_SERVER: "http://127.0.0.1:8080/metadata"
@@ -371,6 +378,7 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.10', '3.12']
+        store-backend: [centralized, p2p]
     env:
       BUILD_WITH_EP: "1"
       EP_TORCH_VERSIONS: "2.9.0;2.9.1;2.10.0"
@@ -441,7 +449,7 @@ jobs:
       run: |
         mkdir build
         cd build
-        cmake -G Ninja .. -DUSE_ETCD=ON -DUSE_CXL=ON -DUSE_REDIS=ON -DUSE_HTTP=ON -DWITH_STORE=ON -DWITH_P2P_STORE=ON -DWITH_EP=ON -DWITH_METRICS=ON -DBUILD_UNIT_TESTS=ON -DBUILD_EXAMPLES=ON -DENABLE_SCCACHE=ON -DUSE_CUDA=ON -DUSE_MNNVL=OFF -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs"
+        cmake -G Ninja .. -DUSE_ETCD=ON -DUSE_CXL=ON -DUSE_REDIS=ON -DUSE_HTTP=ON -DWITH_STORE=ON -DWITH_P2P_STORE=ON -DWITH_EP=ON -DWITH_METRICS=ON -DBUILD_UNIT_TESTS=ON -DBUILD_EXAMPLES=ON -DENABLE_SCCACHE=ON -DUSE_CUDA=ON -DUSE_MNNVL=OFF -DMOONCAKE_STORE_BACKEND=${{ matrix.store-backend }} -DMOONCAKE_STORE_STATIC_LIBS=ON -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs"
       shell: bash
       # TODO: lack USE_NVMEOF,USE_MNNVL
 
@@ -506,13 +514,13 @@ jobs:
     - name: Build Python wheel
       run: |
         # Build wheel with specific Python version
-        PYTHON_VERSION=${{ matrix.python-version }} OUTPUT_DIR=dist-py${{ steps.generate_tag_flags.outputs.python_version_tag }} ./scripts/build_wheel.sh
+        PYTHON_VERSION=${{ matrix.python-version }} STORE_BACKEND=${{ matrix.store-backend }} BUILD_DIR=build OUTPUT_DIR=dist-py${{ steps.generate_tag_flags.outputs.python_version_tag }} ./scripts/build_wheel.sh
       shell: bash
 
     - name: Upload Python wheel artifact
       uses: actions/upload-artifact@v4
       with:
-        name: mooncake-wheel-ubuntu-py${{ steps.generate_tag_flags.outputs.python_version_tag }}
+        name: mooncake-wheel-${{ matrix.store-backend }}-ubuntu-py${{ steps.generate_tag_flags.outputs.python_version_tag }}
         path: mooncake-wheel/dist-py${{ steps.generate_tag_flags.outputs.python_version_tag }}/*.whl
 
   build-docker:

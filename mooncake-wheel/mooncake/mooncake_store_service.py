@@ -8,7 +8,7 @@ import logging
 import time
 
 from aiohttp import web
-from mooncake.store import MooncakeDistributedStore
+from mooncake.store import MooncakeDistributedStore, STORE_BACKEND
 from mooncake.mooncake_config import MooncakeConfig
 
 
@@ -106,21 +106,44 @@ class MooncakeStoreService:
                 )
 
                 self.store = MooncakeDistributedStore()
-                ret = self.store.setup(
-                    self.config.local_hostname,
-                    self.config.metadata_server,
-                    self.config.global_segment_size,
-                    self.config.local_buffer_size,
-                    self.config.protocol,
-                    self.config.device_name,
-                    self.config.master_server_address,
-                    heartbeat_rpc_port=self.config.heartbeat_rpc_port,
-                )
+                if STORE_BACKEND == "p2p":
+                    tiered_backend_config = json.dumps({
+                        "tiers": [{
+                            "type": "DRAM",
+                            "capacity": self.config.local_buffer_size,
+                            "priority": 100,
+                        }]
+                    })
+                    ret = self.store.setup_p2p_real_client(
+                        self.config.local_hostname,
+                        self.config.metadata_server,
+                        tiered_backend_config,
+                        self.config.local_buffer_size,
+                        self.config.protocol,
+                        self.config.device_name or "",
+                        self.config.master_server_address,
+                        heartbeat_rpc_port=self.config.heartbeat_rpc_port,
+                    )
+                else:
+                    ret = self.store.setup(
+                        self.config.local_hostname,
+                        self.config.metadata_server,
+                        self.config.global_segment_size,
+                        self.config.local_buffer_size,
+                        self.config.protocol,
+                        self.config.device_name,
+                        self.config.master_server_address,
+                        heartbeat_rpc_port=self.config.heartbeat_rpc_port,
+                    )
 
                 if ret != 0:
                     raise RuntimeError("Store initialization failed")
 
-                logging.info(f"Store service started successfully on {self.config.local_hostname}")
+                logging.info(
+                    "Store service (%s) started successfully on %s",
+                    STORE_BACKEND,
+                    self.config.local_hostname,
+                )
                 return True
 
             except Exception as e:

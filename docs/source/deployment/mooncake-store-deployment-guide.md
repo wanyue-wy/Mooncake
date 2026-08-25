@@ -2,10 +2,16 @@
 
 This page summarizes useful flags, environment variables, and HTTP endpoints to help advanced users tune Mooncake Master and observe metrics.
 
-Mooncake Store installs three executables: `mooncake_master` for centralized
-deployments, `mooncake_master_p2p` for P2P deployments, and the shared
-`mooncake_client`. The master deployment mode is selected by the executable;
-`--deployment_mode` is a client-only option.
+The source build produces architecture-specific master and client binaries.
+The centralized wheel (`mooncake-transfer-engine`) and P2P wheel
+(`mooncake-transfer-engine-p2p`) each install their selected binaries as
+`mooncake_master` and `mooncake_client`, so deployment commands stay stable.
+The two wheels are mutually exclusive.
+
+```bash
+pip install mooncake-transfer-engine  # centralized
+pip install mooncake-transfer-engine-p2p  # P2P
+```
 
 ## Master Startup Flags (with defaults)
 
@@ -74,9 +80,9 @@ mooncake_master \
 
 ## Redis-based P2P Master HA
 
-The centralized `mooncake_master` keeps the community etcd HA protocol. Redis
-election and Redis-backed OpLog are available on `mooncake_master_p2p`. They are
-independent from the Transfer Engine metadata backend.
+The centralized master keeps the community etcd HA protocol. Redis election
+and Redis-backed OpLog are available on the P2P master. They are independent
+from the Transfer Engine metadata backend.
 
 Build the P2P master with Redis support:
 
@@ -86,11 +92,13 @@ cmake --build build --target mooncake_master_p2p
 ```
 
 Run multiple P2P masters with the same Redis endpoint, cluster ID, and OpLog
-configuration. Each master must advertise a reachable RPC address; do not use
-`0.0.0.0` as the advertised address in a multi-node deployment.
+configuration. A source build uses `mooncake_master_p2p`; the installed P2P
+wheel exposes the same binary as `mooncake_master`. Each master must advertise
+a reachable RPC address; do not use `0.0.0.0` as the advertised address in a
+multi-node deployment.
 
 ```bash
-mooncake_master_p2p \
+mooncake_master \
   --enable_ha=true \
   --election_backend=redis \
   --redis_endpoint=10.0.0.10:6379 \
@@ -122,14 +130,12 @@ master_server_entry = "redis://10.0.0.10:6379"
 redis_cluster_id = "p2p_mooncake_cluster"
 redis_username = "<redis_user>"
 redis_password = "<redis_password>"
-deployment_mode = "P2P"
 ```
 
 For `mooncake_client` in P2P mode:
 
 ```bash
 mooncake_client \
-  --deployment_mode=P2P \
   --metadata_server=P2PHANDSHAKE \
   --master_server_address=redis://10.0.0.10:6379 \
   --redis_cluster_id=p2p_mooncake_cluster \
@@ -142,7 +148,7 @@ mooncake_client \
 In addition to command-line flags, the Master also supports configuration via JSON and YAML files. For example:
 
 ```bash
-mooncake_master_p2p \
+mooncake_master \
   --config_path=mooncake-store/conf/master.yaml 
 ```
 

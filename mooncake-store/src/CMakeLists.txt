@@ -1,32 +1,36 @@
 # Find Python package
 add_subdirectory(cachelib_memory_allocator)
 
-set(MOONCAKE_STORE_SOURCES
+set(MOONCAKE_STORE_COMMON_SOURCES
     replica.cpp
     allocator.cpp
-    master_service.cpp
-    segment.cpp
-    client_service.cpp
     client_service_base.cpp
     runtime_config_store.cpp
-    centralized_client_service.cpp
-    centralized_master_rpc_adapter.cpp
     client_metric.cpp
     types.cpp
-    master_client.cpp
     utils.cpp
-    master_metric_manager.cpp
     storage_backend.cpp
     thread_pool.cpp
     etcd_helper.cpp
-    ha_helper.cpp
-    transfer_task.cpp
-    rpc_service.cpp
+    master_view_helper.cpp
     offset_allocator.cpp
     posix_file.cpp
     client_buffer.cpp
     dummy_client.cpp
     http_metadata_server.cpp
+)
+
+set(MOONCAKE_STORE_CENTRALIZED_SOURCES
+    master_service.cpp
+    segment.cpp
+    client_service.cpp
+    centralized_client_service.cpp
+    centralized_master_rpc_adapter.cpp
+    master_client.cpp
+    master_metric_manager.cpp
+    ha_helper.cpp
+    transfer_task.cpp
+    rpc_service.cpp
     file_storage.cpp
     task_manager.cpp
 )
@@ -38,9 +42,9 @@ if(STORE_USE_REDIS)
     find_path(HIREDIS_INCLUDE_DIR NAMES hiredis/hiredis.h REQUIRED)
     find_library(HIREDIS_LIB NAMES hiredis REQUIRED)
     message(STATUS "Found hiredis: include=${HIREDIS_INCLUDE_DIR} lib=${HIREDIS_LIB}")
-    list(APPEND MOONCAKE_STORE_SOURCES ha/redis_util.cpp)
-    list(APPEND MOONCAKE_STORE_SOURCES ha/redis_election_helper.cpp)
-    list(APPEND MOONCAKE_STORE_SOURCES ha/redis_master_view_helper.cpp)
+    list(APPEND MOONCAKE_STORE_COMMON_SOURCES ha/redis_util.cpp)
+    list(APPEND MOONCAKE_STORE_COMMON_SOURCES ha/redis_election_helper.cpp)
+    list(APPEND MOONCAKE_STORE_COMMON_SOURCES ha/redis_master_view_helper.cpp)
     list(APPEND MOONCAKE_STORE_P2P_SOURCES p2p/ha/oplog/redis_oplog_store.cpp)
     list(APPEND EXTRA_LIBS ${HIREDIS_LIB})
 endif()
@@ -67,7 +71,7 @@ endif()
 
 if(USE_3FS)
   add_subdirectory(hf3fs)
-  list(APPEND MOONCAKE_STORE_SOURCES  ${HF3FS_SOURCES})
+  list(APPEND MOONCAKE_STORE_COMMON_SOURCES ${HF3FS_SOURCES})
   find_library(HF3FS_API_LIB hf3fs_api_shared PATHS /usr/lib NO_DEFAULT_PATH)
   if(NOT HF3FS_API_LIB)
     message(FATAL_ERROR "hf3fs_api_shared library not found in /usr/lib")
@@ -88,28 +92,18 @@ endif()
 
 # The cache_allocator library
 include_directories(${Python3_INCLUDE_DIRS})
-add_library(mooncake_store ${MOONCAKE_STORE_SOURCES})
-# Note: transfer_engine is PRIVATE to avoid propagating its dependencies (e.g., vendor-specific hardware)
-# to targets that don't need it (e.g., mooncake_master).
-# Targets that need transfer_engine should link it explicitly.
-target_include_directories(mooncake_store PUBLIC ${XXHASH_INCLUDE_DIR})
-if(STORE_USE_REDIS)
-    target_include_directories(mooncake_store PUBLIC ${HIREDIS_INCLUDE_DIR})
-    target_compile_definitions(mooncake_store PUBLIC STORE_USE_REDIS)
+set(MOONCAKE_STORE_LIBRARY_TYPE "")
+if(MOONCAKE_STORE_STATIC_LIBS)
+    set(MOONCAKE_STORE_LIBRARY_TYPE STATIC)
 endif()
-target_link_libraries(mooncake_store
-    PUBLIC
-        cachelib_memory_allocator
-        ${ETCD_WRAPPER_LIB}
-        glog::glog
-        gflags::gflags
-        JsonCpp::JsonCpp
-        ${XXHASH_LIBRARY}
-        ${EXTRA_LIBS}
-        asio_shared
-    PRIVATE
-        transfer_engine
+
+add_library(mooncake_store ${MOONCAKE_STORE_LIBRARY_TYPE}
+    ${MOONCAKE_STORE_COMMON_SOURCES}
+    ${MOONCAKE_STORE_CENTRALIZED_SOURCES}
+    real_client.cpp
 )
+target_compile_definitions(mooncake_store PUBLIC
+    MOONCAKE_STORE_BACKEND_CENTRALIZED)
 
 # P2P architecture library
 list(APPEND MOONCAKE_STORE_P2P_SOURCES
@@ -161,18 +155,43 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/ha/ha_recovery_manager.cpp
 )
 
-add_library(mooncake_store_p2p_objects OBJECT ${MOONCAKE_STORE_P2P_SOURCES})
-target_link_libraries(mooncake_store_p2p_objects PUBLIC mooncake_store)
+add_library(mooncake_store_p2p ${MOONCAKE_STORE_LIBRARY_TYPE}
+    ${MOONCAKE_STORE_COMMON_SOURCES}
+    ${MOONCAKE_STORE_P2P_SOURCES}
+    real_client.cpp
+)
+target_compile_definitions(mooncake_store_p2p PUBLIC
+    MOONCAKE_STORE_BACKEND_P2P)
 
-# Keep the standalone P2P library artifact for installation. Internal
-# consumers use the object target above to avoid circular static-library
-# ordering constraints during the transitional split phases.
-add_library(mooncake_store_p2p
-    $<TARGET_OBJECTS:mooncake_store_p2p_objects>)
-target_link_libraries(mooncake_store_p2p PUBLIC mooncake_store)
+set(MOONCAKE_STORE_TARGETS mooncake_store mooncake_store_p2p)
+foreach(store_target IN LISTS MOONCAKE_STORE_TARGETS)
+    if(MOONCAKE_STORE_STATIC_LIBS)
+        set_target_properties(${store_target} PROPERTIES
+            POSITION_INDEPENDENT_CODE ON)
+    endif()
 
-add_library(mooncake_store_client_entry real_client.cpp)
-target_link_libraries(mooncake_store_client_entry PUBLIC mooncake_store_p2p)
+    # transfer_engine stays private so master-only consumers do not inherit
+    # transport-specific dependencies. Client targets link it explicitly.
+    target_include_directories(${store_target} PUBLIC ${XXHASH_INCLUDE_DIR})
+    if(STORE_USE_REDIS)
+        target_include_directories(${store_target} PUBLIC
+            ${HIREDIS_INCLUDE_DIR})
+        target_compile_definitions(${store_target} PUBLIC STORE_USE_REDIS)
+    endif()
+    target_link_libraries(${store_target}
+        PUBLIC
+            cachelib_memory_allocator
+            ${ETCD_WRAPPER_LIB}
+            glog::glog
+            gflags::gflags
+            JsonCpp::JsonCpp
+            ${XXHASH_LIBRARY}
+            ${EXTRA_LIBS}
+            asio_shared
+        PRIVATE
+            transfer_engine
+    )
+endforeach()
 
 # Link Ascend ACL library if USE_ASCEND_CACHE_TIER is enabled
 if(USE_ASCEND_CACHE_TIER)
@@ -188,7 +207,6 @@ if(USE_ASCEND_CACHE_TIER)
     message(WARNING "ascendcl library not found. Ascend cache tier will use fallback mode (no ACL).")
   else()
     message(STATUS "Found ascendcl library: ${ASCENDCL_LIB}")
-    target_link_libraries(mooncake_store PUBLIC ${ASCENDCL_LIB})
 
     # Add include paths for Ascend headers
     set(ASCEND_INCLUDE_PATHS
@@ -196,10 +214,13 @@ if(USE_ASCEND_CACHE_TIER)
         /usr/local/Ascend/ascend-toolkit/latest/include
         /usr/local/Ascend/nnrt/latest/include
     )
-    target_include_directories(mooncake_store PUBLIC ${ASCEND_INCLUDE_PATHS})
-
-    # Only define USE_ASCEND_CACHE_TIER when library is found
-    target_compile_definitions(mooncake_store PUBLIC USE_ASCEND_CACHE_TIER)
+    foreach(store_target IN LISTS MOONCAKE_STORE_TARGETS)
+      target_link_libraries(${store_target} PUBLIC ${ASCENDCL_LIB})
+      target_include_directories(${store_target} PUBLIC
+          ${ASCEND_INCLUDE_PATHS})
+      target_compile_definitions(${store_target} PUBLIC
+          USE_ASCEND_CACHE_TIER)
+    endforeach()
   endif()
 endif()
 
@@ -221,19 +242,26 @@ if(USE_ASCEND_DRAM_TIER)
   else()
     message(STATUS "Found ascendcl library for DRAM tier: ${ASCENDCL_LIB}")
     if(NEED_LINK_ASCEND)
-      target_link_libraries(mooncake_store PUBLIC ${ASCENDCL_LIB})
       set(ASCEND_INCLUDE_PATHS
           $ENV{ASCEND_HOME}/include
           /usr/local/Ascend/ascend-toolkit/latest/include
           /usr/local/Ascend/nnrt/latest/include
       )
-      target_include_directories(mooncake_store PUBLIC ${ASCEND_INCLUDE_PATHS})
+      foreach(store_target IN LISTS MOONCAKE_STORE_TARGETS)
+        target_link_libraries(${store_target} PUBLIC ${ASCENDCL_LIB})
+        target_include_directories(${store_target} PUBLIC
+            ${ASCEND_INCLUDE_PATHS})
+      endforeach()
     endif()
-    target_compile_definitions(mooncake_store PUBLIC USE_ASCEND_DRAM_TIER)
+    foreach(store_target IN LISTS MOONCAKE_STORE_TARGETS)
+      target_compile_definitions(${store_target} PUBLIC
+          USE_ASCEND_DRAM_TIER)
+    endforeach()
   endif()
 endif()
 if (STORE_USE_ETCD)
     add_dependencies(mooncake_store build_etcd_wrapper)
+    add_dependencies(mooncake_store_p2p build_etcd_wrapper)
 endif()
 
 if (USE_ASCEND_DIRECT)
@@ -251,9 +279,8 @@ if (USE_ASCEND_DIRECT)
     endif()
 endif()
 
-if (BUILD_SHARED_LIBS)
-  install(TARGETS mooncake_store mooncake_store_p2p mooncake_store_client_entry
-          DESTINATION lib)
+if (BUILD_SHARED_LIBS AND NOT MOONCAKE_STORE_STATIC_LIBS)
+  install(TARGETS mooncake_store mooncake_store_p2p DESTINATION lib)
 endif()
 
 # Master binary
@@ -303,12 +330,29 @@ target_link_options(mooncake_master PRIVATE -Os -s)
 target_compile_options(mooncake_master_p2p PRIVATE -Os)
 target_link_options(mooncake_master_p2p PRIVATE -Os -s)
 
-# Client server binary
+# Architecture-specific client server binaries
 add_executable(mooncake_client real_client_main.cpp)
-# Client needs transfer_engine for data transfer operations
-target_link_libraries(mooncake_client PRIVATE ${MOONCAKE_STORE_LIBS} transfer_engine asio_shared)
+target_link_libraries(mooncake_client PRIVATE
+    mooncake_store transfer_engine asio_shared)
 target_compile_options(mooncake_client PRIVATE -Os)
 target_link_options(mooncake_client PRIVATE -Os -s)
 
-install(TARGETS mooncake_master mooncake_master_p2p mooncake_client
-        DESTINATION bin)
+add_executable(mooncake_client_p2p
+    p2p/client/p2p_real_client_main.cpp)
+target_link_libraries(mooncake_client_p2p PRIVATE
+    mooncake_store_p2p transfer_engine asio_shared)
+target_compile_options(mooncake_client_p2p PRIVATE -Os)
+target_link_options(mooncake_client_p2p PRIVATE -Os -s)
+
+if(MOONCAKE_STORE_BACKEND STREQUAL "centralized")
+    install(TARGETS mooncake_master mooncake_client DESTINATION bin)
+else()
+    install(PROGRAMS
+        $<TARGET_FILE:mooncake_master_p2p>
+        DESTINATION bin
+        RENAME mooncake_master)
+    install(PROGRAMS
+        $<TARGET_FILE:mooncake_client_p2p>
+        DESTINATION bin
+        RENAME mooncake_client)
+endif()

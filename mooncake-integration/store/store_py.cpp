@@ -979,6 +979,12 @@ class MooncakeHostMemAllocatorPyWrapper {
 };
 
 PYBIND11_MODULE(store, m) {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
+    m.attr("STORE_BACKEND") = "p2p";
+#else
+    m.attr("STORE_BACKEND") = "centralized";
+#endif
+
     // Define the ReplicateConfig class
     py::class_<ReplicateConfig>(m, "ReplicateConfig")
         .def(py::init<>())
@@ -1201,6 +1207,7 @@ PYBIND11_MODULE(store, m) {
                bool enable_metric_collection = true,
                uint64_t metric_report_interval_seconds = 60,
                uint16_t heartbeat_rpc_port = 0) {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
                 auto real_client = self.init_real_client();
                 std::shared_ptr<mooncake::TransferEngine> transfer_engine =
                     nullptr;
@@ -1229,6 +1236,12 @@ PYBIND11_MODULE(store, m) {
 
                 auto ret = real_client->setup(config);
                 return ret;
+#else
+                (void)self;
+                LOG(ERROR) << "P2P setup is unavailable in the centralized "
+                              "Mooncake Store wheel";
+                return to_py_ret(ErrorCode::INVALID_PARAMS);
+#endif
             },
             py::arg("local_hostname"), py::arg("metadata_server"),
             py::arg("tiered_backend_config_json"), py::arg("local_buffer_size"),
@@ -1269,6 +1282,12 @@ PYBIND11_MODULE(store, m) {
                bool enable_metric_collection = true,
                uint64_t metric_report_interval_seconds = 60,
                uint16_t heartbeat_rpc_port = 0) {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
+                (void)self;
+                LOG(ERROR) << "Centralized setup is unavailable in the P2P "
+                              "Mooncake Store wheel";
+                return to_py_ret(ErrorCode::INVALID_PARAMS);
+#else
                 auto real_client = self.init_real_client();
                 std::shared_ptr<mooncake::TransferEngine> transfer_engine =
                     nullptr;
@@ -1291,6 +1310,7 @@ PYBIND11_MODULE(store, m) {
 
                 auto ret = real_client->setup(config);
                 return ret;
+#endif
             },
             py::arg("local_hostname"), py::arg("metadata_server"),
             py::arg("global_segment_size"), py::arg("local_buffer_size"),
@@ -1305,6 +1325,13 @@ PYBIND11_MODULE(store, m) {
         .def(
             "setup",
             [](MooncakeStorePyWrapper& self, const py::dict& config_dict) {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
+                (void)self;
+                (void)config_dict;
+                LOG(ERROR) << "Centralized setup is unavailable in the P2P "
+                              "Mooncake Store wheel";
+                return to_py_ret(ErrorCode::INVALID_PARAMS);
+#else
                 auto real_client = self.init_real_client();
 
                 // Convert py::dict to ConfigDict (all values as strings)
@@ -1319,6 +1346,7 @@ PYBIND11_MODULE(store, m) {
                     ClientConfigBuilder::build_centralized_real_client(config);
                 auto ret = real_client->setup(centralized_config);
                 return ret;
+#endif
             },
             py::arg("config"),
             "Setup the store with a configuration dictionary.\n"
@@ -1336,6 +1364,7 @@ PYBIND11_MODULE(store, m) {
         .def(
             "setup_p2p_real_client",
             [](MooncakeStorePyWrapper& self, const py::dict& config_dict) {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
                 auto real_client = self.init_real_client();
 
                 ConfigDict config;
@@ -1349,6 +1378,13 @@ PYBIND11_MODULE(store, m) {
                     ClientConfigBuilder::build_p2p_real_client(config);
                 auto ret = real_client->setup(p2p_config);
                 return ret;
+#else
+                (void)self;
+                (void)config_dict;
+                LOG(ERROR) << "P2P setup is unavailable in the centralized "
+                              "Mooncake Store wheel";
+                return to_py_ret(ErrorCode::INVALID_PARAMS);
+#endif
             },
             py::arg("config"),
             "Setup the store in P2P mode with a configuration dictionary.\n"

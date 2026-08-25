@@ -15,7 +15,9 @@
 #include <vector>
 
 #include "real_client.h"
+#if !defined(MOONCAKE_STORE_BACKEND_P2P)
 #include "centralized_client_service.h"
+#endif
 #include "client_buffer.hpp"
 #include "mutex.h"
 #include "types.h"
@@ -168,13 +170,16 @@ int RealClient::setup(ConfigT& config) {
     return to_py_ret(setup_internal(config));
 }
 
-// Explicit template instantiations
-template tl::expected<void, ErrorCode> RealClient::setup_internal(
-    CentralizedClientConfig&);
+// Each architecture-specific entry archive contains only its own setup path.
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
 template tl::expected<void, ErrorCode> RealClient::setup_internal(
     P2PClientConfig&);
-template int RealClient::setup(CentralizedClientConfig&);
 template int RealClient::setup(P2PClientConfig&);
+#else
+template tl::expected<void, ErrorCode> RealClient::setup_internal(
+    CentralizedClientConfig&);
+template int RealClient::setup(CentralizedClientConfig&);
+#endif
 
 template <typename ConfigT>
 tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT& config) {
@@ -210,6 +215,13 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT& config) {
 tl::expected<void, ErrorCode> RealClient::initAll_internal(
     const std::string& protocol, const std::string& device_name,
     size_t mount_segment_size) {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
+    (void)protocol;
+    (void)device_name;
+    (void)mount_segment_size;
+    LOG(ERROR) << "initAll is only supported by the centralized Store wheel";
+    return tl::unexpected(ErrorCode::INVALID_PARAMS);
+#else
     if (client_service_) {
         LOG(ERROR) << "Client is already initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -221,6 +233,7 @@ tl::expected<void, ErrorCode> RealClient::initAll_internal(
                             : std::optional<std::string>(device_name),
         "127.0.0.1:50051", mount_segment_size, buffer_allocator_size);
     return setup_internal(config);
+#endif
 }
 
 int RealClient::initAll(const std::string& protocol_,
@@ -1802,6 +1815,13 @@ tl::expected<QueryTaskResponse, ErrorCode> RealClient::query_task(
 tl::expected<BatchGetOffloadObjectResponse, ErrorCode>
 RealClient::batch_get_offload_object(const std::vector<std::string>& keys,
                                      const std::vector<int64_t>& sizes) {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
+    (void)keys;
+    (void)sizes;
+    LOG(ERROR) << "batch_get_offload_object is not supported by the P2P "
+                  "Store client";
+    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+#else
     auto* centralized =
         dynamic_cast<CentralizedClientService*>(client_service_.get());
     if (!centralized) {
@@ -1810,5 +1830,6 @@ RealClient::batch_get_offload_object(const std::vector<std::string>& keys,
         return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
     }
     return centralized->BatchGetOffloadObjectFromStorage(keys, sizes);
+#endif
 }
 }  // namespace mooncake

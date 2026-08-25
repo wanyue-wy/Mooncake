@@ -1,5 +1,14 @@
 project(MooncakeStore VERSION 2.0.0)
 
+if(NOT DEFINED MOONCAKE_STORE_LIBS)
+    if(NOT DEFINED MOONCAKE_STORE_BACKEND OR
+       MOONCAKE_STORE_BACKEND STREQUAL "centralized")
+        set(MOONCAKE_STORE_LIBS mooncake_store)
+    else()
+        set(MOONCAKE_STORE_LIBS mooncake_store_p2p)
+    endif()
+endif()
+
 # Extract version components for C++ usage
 set(MOONCAKE_STORE_VERSION ${PROJECT_VERSION})
 
@@ -23,8 +32,6 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/../mooncake-transfer-engine/include
     ${ETCD_WRAPPER_INCLUDE}
 )
-
-set(MOONCAKE_STORE_LIBS mooncake_store_client_entry)
 
 # Add subdirectories
 add_subdirectory(src)

@@ -3,7 +3,9 @@
 #include <cstring>
 #include <stdexcept>
 
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
 #include "p2p/client/p2p_client_service.h"
+#endif
 #include "utils.h"
 
 namespace mooncake {
@@ -31,6 +33,7 @@ ClientTestWrapper::CreateClientWrapper(
     const std::string& redis_username, const std::string& redis_password) {
     std::shared_ptr<ClientService> client;
     if (deployment_mode == "P2P") {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
         static constexpr const char* kP2PTierConfig =
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})";
         auto config = ClientConfigBuilder::build_p2p_real_client(
@@ -56,7 +59,15 @@ ClientTestWrapper::CreateClientWrapper(
             return std::nullopt;
         }
         client = std::move(p2p_client);
+#else
+        LOG(ERROR) << "P2P client requested from a centralized test binary";
+        return std::nullopt;
+#endif
     } else {
+#if defined(MOONCAKE_STORE_BACKEND_P2P)
+        LOG(ERROR) << "Centralized client requested from a P2P test binary";
+        return std::nullopt;
+#else
         auto config = ClientConfigBuilder::build_centralized_real_client(
             hostname, metadata_connstring, protocol, device_name,
             master_server_entry, 0, local_buffer_size, nullptr, "", false, 9003,
@@ -71,6 +82,7 @@ ClientTestWrapper::CreateClientWrapper(
             return std::nullopt;
         }
         client = client_opt.value();
+#endif
     }
 
     std::shared_ptr<SimpleAllocator> allocator =
