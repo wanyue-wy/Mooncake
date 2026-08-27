@@ -878,7 +878,7 @@ void P2PMasterService::OnObjectAccessed(const ObjectMetadata& metadata) {
 // The detailed hit statistic of replica should be synced from
 // client to master.
 void P2PMasterService::OnObjectHit(const ObjectMetadata& metadata) {
-    MasterMetricManager::instance().inc_valid_get_nums();
+    P2PMasterMetricManager::instance().inc_valid_get_nums();
 }
 
 void P2PMasterService::OnReplicaRemoved(const Replica& replica) {
@@ -888,9 +888,9 @@ void P2PMasterService::OnReplicaRemoved(const Replica& replica) {
             LOG(ERROR) << "invalid memory type"
                        << ", replica: " << replica;
         } else if (*type == MemoryType::DRAM) {
-            MasterMetricManager::instance().dec_mem_cache_nums();
+            P2PMasterMetricManager::instance().dec_mem_cache_nums();
         } else if (*type == MemoryType::NVME) {
-            MasterMetricManager::instance().dec_file_cache_nums();
+            P2PMasterMetricManager::instance().dec_file_cache_nums();
         }
     }
 }
@@ -902,9 +902,9 @@ void P2PMasterService::OnReplicaAdded(const Replica& replica) {
             LOG(ERROR) << "invalid memory type"
                        << ", replica: " << replica;
         } else if (*type == MemoryType::DRAM) {
-            MasterMetricManager::instance().inc_mem_cache_nums();
+            P2PMasterMetricManager::instance().inc_mem_cache_nums();
         } else if (*type == MemoryType::NVME) {
-            MasterMetricManager::instance().inc_file_cache_nums();
+            P2PMasterMetricManager::instance().inc_file_cache_nums();
         }
     }
 }

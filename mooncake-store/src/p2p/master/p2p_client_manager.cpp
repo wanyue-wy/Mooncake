@@ -5,7 +5,6 @@
 #include <glog/logging.h>
 #include <random>
 
-#include "master_metric_manager.h"
 #include "p2p/master/p2p_master_metric_manager.h"
 
 namespace mooncake {
@@ -306,7 +305,7 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
     }
     client_metas_[client_id] = std::move(meta);
 
-    MasterMetricManager::instance().inc_active_clients();
+    P2PMasterMetricManager::instance().inc_active_clients();
 
     RegisterClientResponse response;
     response.view_version = view_version_;
@@ -354,7 +353,7 @@ auto P2PClientManager::UnregisterClient(const UnregisterClientRequest& req)
     // Decrement the active gauge only if the client was still HEALTH: the
     // unhealthy path already decremented it in OnDisconnected().
     if (was_health) {
-        MasterMetricManager::instance().dec_active_clients();
+        P2PMasterMetricManager::instance().dec_active_clients();
     }
 
     UnregisterClientResponse response;

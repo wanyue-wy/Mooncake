@@ -4,7 +4,6 @@
 #include <glog/logging.h>
 #include <limits>
 
-#include "master_metric_manager.h"
 #include "p2p/master/p2p_master_metric_manager.h"
 
 namespace mooncake {
@@ -255,8 +254,8 @@ void P2PClientMeta::OnDisconnected() {
     }
     LOG(INFO) << "the client is disconnected"
               << ", client_id=" << client_id_;
-    MasterMetricManager::instance().dec_active_clients();
-    MasterMetricManager::instance().inc_clients_disconnected_total();
+    P2PMasterMetricManager::instance().dec_active_clients();
+    P2PMasterMetricManager::instance().inc_clients_disconnected_total();
 }
 
 void P2PClientMeta::OnRecovered() {
@@ -271,14 +270,14 @@ void P2PClientMeta::OnRecovered() {
     }
     LOG(INFO) << "the client is recovered"
               << ", client_id=" << client_id_;
-    MasterMetricManager::instance().inc_active_clients();
-    MasterMetricManager::instance().inc_clients_recovered_total();
+    P2PMasterMetricManager::instance().inc_active_clients();
+    P2PMasterMetricManager::instance().inc_clients_recovered_total();
 }
 
 void P2PClientMeta::OnCrashed() {
     LOG(INFO) << "the client is crashed"
               << ", client_id=" << client_id_;
-    MasterMetricManager::instance().inc_clients_crashed_total();
+    P2PMasterMetricManager::instance().inc_clients_crashed_total();
     RecycleMeta();
 }
 
