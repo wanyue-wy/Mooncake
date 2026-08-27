@@ -23,18 +23,14 @@ class P2PSegmentManagerTest : public ::testing::Test {
 
     void TearDown() override { google::ShutdownGoogleLogging(); }
 
-    Segment MakeSegment(UUID id, const std::string& name = "seg1",
-                        size_t size = 1024 * 1024, int priority = 1) {
-        Segment seg;
+    P2PSegment MakeSegment(UUID id, const std::string& name = "seg1",
+                           size_t size = 1024 * 1024, int priority = 1) {
+        P2PSegment seg;
         seg.id = id;
         seg.name = name;
         seg.size = size;
-        seg.extra = P2PSegmentExtraData{
-            .priority = priority,
-            .tags = {},
-            .memory_type = MemoryType::DRAM,
-            .usage = 0,
-        };
+        seg.priority = priority;
+        seg.memory_type = MemoryType::DRAM;
         return seg;
     }
 };
@@ -233,7 +229,7 @@ TEST_F(P2PSegmentManagerTest, ForEachSegmentVisitsAll) {
     }
 
     int count = 0;
-    mgr.ForEachSegment([&count](const Segment& seg) -> bool {
+    mgr.ForEachSegment([&count](const P2PSegment& seg) -> bool {
         count++;
         return false;  // continue
     });
@@ -244,7 +240,7 @@ TEST_F(P2PSegmentManagerTest, ForEachSegmentEmpty) {
     P2PSegmentManager mgr;
 
     int count = 0;
-    mgr.ForEachSegment([&count](const Segment& seg) -> bool {
+    mgr.ForEachSegment([&count](const P2PSegment& seg) -> bool {
         count++;
         return false;
     });
@@ -260,7 +256,7 @@ TEST_F(P2PSegmentManagerTest, ForEachSegmentEarlyStop) {
     }
 
     int count = 0;
-    mgr.ForEachSegment([&count](const Segment& seg) -> bool {
+    mgr.ForEachSegment([&count](const P2PSegment& seg) -> bool {
         count++;
         return count >= 3;  // stop after 3
     });
@@ -277,8 +273,8 @@ TEST_F(P2PSegmentManagerTest, SegmentChangeCallbacksTriggered) {
     int add_count = 0;
     int remove_count = 0;
     mgr.SetSegmentChangeCallbacks(
-        [&add_count](const Segment& seg) { add_count++; },
-        [&remove_count](const Segment& seg) { remove_count++; });
+        [&add_count](const P2PSegment& seg) { add_count++; },
+        [&remove_count](const P2PSegment& seg) { remove_count++; });
 
     auto seg = MakeSegment({0, 0});
     ASSERT_TRUE(mgr.MountSegment(seg).has_value());
@@ -318,16 +314,12 @@ TEST_F(P2PSegmentManagerTest, ConcurrentMountAndUnmount) {
 
     for (int i = 0; i < kNumThreads; i++) {
         threads.emplace_back([&mgr, &mount_success_count, i]() {
-            auto seg = Segment();
+            auto seg = P2PSegment();
             seg.id = {static_cast<uint64_t>(i + 100), 0};
             seg.name = "concurrent_seg_" + std::to_string(i);
             seg.size = 1024 * 1024;
-            seg.extra = P2PSegmentExtraData{
-                .priority = 1,
-                .tags = {},
-                .memory_type = MemoryType::DRAM,
-                .usage = 0,
-            };
+            seg.priority = 1;
+            seg.memory_type = MemoryType::DRAM;
 
             auto mount_result = mgr.MountSegment(seg);
             ASSERT_TRUE(mount_result.has_value());
@@ -402,9 +394,9 @@ TEST_F(P2PSegmentManagerTest, MountCapacityClassifiedByMemoryType) {
     EXPECT_EQ(metrics.get_total_file_capacity(), 0);
 
     // NVME -> file capacity family.
-    Segment nvme = MakeSegment({2, 2}, "nvme_seg", 2000);
-    nvme.extra = P2PSegmentExtraData{
-        .priority = 0, .tags = {}, .memory_type = MemoryType::NVME, .usage = 0};
+    P2PSegment nvme = MakeSegment({2, 2}, "nvme_seg", 2000);
+    nvme.priority = 0;
+    nvme.memory_type = MemoryType::NVME;
     ASSERT_TRUE(mgr.MountSegment(nvme).has_value());
     EXPECT_EQ(metrics.get_total_mem_capacity(), 1000);
     EXPECT_EQ(metrics.get_total_file_capacity(), 2000);
@@ -433,9 +425,9 @@ TEST_F(P2PSegmentManagerTest, UpdateSegmentUsageMaintainsGauges) {
     EXPECT_EQ(metrics.get_allocated_mem_size(), 100);
 
     // NVME usage deltas go to the file gauge family only.
-    Segment nvme = MakeSegment({2, 2}, "nvme_seg", 2000);
-    nvme.extra = P2PSegmentExtraData{
-        .priority = 0, .tags = {}, .memory_type = MemoryType::NVME, .usage = 0};
+    P2PSegment nvme = MakeSegment({2, 2}, "nvme_seg", 2000);
+    nvme.priority = 0;
+    nvme.memory_type = MemoryType::NVME;
     ASSERT_TRUE(mgr.MountSegment(nvme).has_value());
     ASSERT_TRUE(mgr.UpdateSegmentUsage({2, 2}, 700).has_value());
     EXPECT_EQ(metrics.get_allocated_file_size(), 700);
