@@ -20,8 +20,6 @@ set(MOONCAKE_STORE_SOURCES
     etcd_helper.cpp
     ha_helper.cpp
     segment.cpp
-    client_manager.cpp
-    centralized_client_manager.cpp
     transfer_task.cpp
     etcd_helper.cpp
     ha_helper.cpp
