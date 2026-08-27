@@ -7,7 +7,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <variant>
 #include "Slab.h"
 #include "ylt/struct_json/json_reader.h"
 #include "ylt/struct_json/json_writer.h"
@@ -275,14 +274,6 @@ const static uint64_t kMinSliceSize = facebook::cachelib::Slab::kMinAllocSize;
 const static uint64_t kMaxSliceSize =
     facebook::cachelib::Slab::kSize - 16;  // should be lower than limit
 
-struct CentralizedSegmentExtraData {
-    uintptr_t base{0};
-    std::string te_endpoint;
-    std::string protocol;
-
-    YLT_REFL(CentralizedSegmentExtraData, base, te_endpoint, protocol);
-};
-
 /**
  * @enum MemoryType
  * @brief Defines the physical storage medium type for a cache tier.
@@ -302,67 +293,19 @@ static inline std::string MemoryTypeToString(MemoryType type) {
     }
 }
 
-struct P2PSegmentExtraData {
-    int priority = 0;
-    std::vector<std::string> tags;
-    MemoryType memory_type = MemoryType::DRAM;
-    size_t usage = 0;
-    YLT_REFL(P2PSegmentExtraData, priority, tags, memory_type, usage);
-};
-
 /**
- * @brief Represents a contiguous storage region
+ * @brief Represents a contiguous memory region
  */
 struct Segment {
     UUID id{0, 0};
     std::string name{};  // Logical segment name used for preferred allocation
+    uintptr_t base{0};
     size_t size{0};
-
-    // Polymorphic extra data
-    std::variant<std::monostate, CentralizedSegmentExtraData,
-                 P2PSegmentExtraData>
-        extra;
-
-    // Helper to check type
-    bool IsP2PSegment() const {
-        return std::holds_alternative<P2PSegmentExtraData>(extra);
-    }
-
-    bool IsCentralizedSegment() const {
-        return std::holds_alternative<CentralizedSegmentExtraData>(extra);
-    }
-
-    bool IsEmpty() const {
-        return std::holds_alternative<std::monostate>(extra);
-    }
-
-    CentralizedSegmentExtraData& GetCentralizedExtra() {
-        if (IsP2PSegment()) {
-            throw std::runtime_error(
-                "Segment already holds P2PSegmentExtraData; cannot assign "
-                "CentralizedSegmentExtraData");
-        }
-        if (IsEmpty()) extra = CentralizedSegmentExtraData{};
-        return std::get<CentralizedSegmentExtraData>(extra);
-    }
-    const CentralizedSegmentExtraData& GetCentralizedExtra() const {
-        return std::get<CentralizedSegmentExtraData>(extra);
-    }
-
-    P2PSegmentExtraData& GetP2PExtra() {
-        if (IsCentralizedSegment()) {
-            throw std::runtime_error(
-                "Segment already holds CentralizedSegmentExtraData; cannot "
-                "assign P2PSegmentExtraData");
-        }
-        if (IsEmpty()) extra = P2PSegmentExtraData{};
-        return std::get<P2PSegmentExtraData>(extra);
-    }
-    const P2PSegmentExtraData& GetP2PExtra() const {
-        return std::get<P2PSegmentExtraData>(extra);
-    }
+    std::string te_endpoint{};
+    std::string protocol;
+    Segment() = default;
 };
-YLT_REFL(Segment, id, name, size, extra);
+YLT_REFL(Segment, id, name, base, size, te_endpoint, protocol);
 
 /**
  * @brief Client status from the master's perspective.
