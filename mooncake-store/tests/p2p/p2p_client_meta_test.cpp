@@ -19,7 +19,7 @@ class P2PClientMetaTest : public ::testing::Test {
         google::InitGoogleLogging("P2PClientMetaTest");
         FLAGS_logtostderr = 1;
         // Set short timeouts for health state testing
-        ClientMeta::SetTimeouts(2, 5);
+        P2PClientMeta::SetTimeouts(2, 5);
     }
 
     void TearDown() override { google::ShutdownGoogleLogging(); }
@@ -30,32 +30,27 @@ class P2PClientMetaTest : public ::testing::Test {
         return std::make_shared<P2PClientMeta>(id, ip, rpc_port);
     }
 
-    mooncake::Segment MakeP2PSegment(mooncake::UUID id = {1, 1},
-                                     const std::string& name = "seg1",
-                                     size_t size = 1024 * 1024,
-                                     int priority = 1, size_t usage = 0) {
-        mooncake::Segment seg;
-        seg.id = id;
-        seg.name = name;
-        seg.size = size;
-        seg.extra = mooncake::P2PSegmentExtraData{
+    mooncake::P2PSegment MakeP2PSegment(
+        mooncake::UUID id = {1, 1}, const std::string& name = "seg1",
+        size_t size = 1024 * 1024, int priority = 1, size_t usage = 0) {
+        return mooncake::P2PSegment{
+            .id = id,
+            .name = name,
+            .size = size,
             .priority = priority,
             .tags = {},
             .memory_type = mooncake::MemoryType::DRAM,
             .usage = usage,
         };
-        return seg;
     }
 
-    void CompareSegment(const mooncake::Segment& actual,
-                        const mooncake::Segment& expected) {
+    void CompareSegment(const mooncake::P2PSegment& actual,
+                        const mooncake::P2PSegment& expected) {
         EXPECT_EQ(actual.id, expected.id);
         EXPECT_EQ(actual.name, expected.name);
         EXPECT_EQ(actual.size, expected.size);
-        EXPECT_EQ(actual.GetP2PExtra().priority,
-                  expected.GetP2PExtra().priority);
-        EXPECT_EQ(actual.GetP2PExtra().memory_type,
-                  expected.GetP2PExtra().memory_type);
+        EXPECT_EQ(actual.priority, expected.priority);
+        EXPECT_EQ(actual.memory_type, expected.memory_type);
     }
 };
 
@@ -69,7 +64,7 @@ class P2PClientMetaExtendedTest : public P2PClientMetaTest {
 };
 
 // ============================================================
-// Mount/Unmount (testing parent ClientMeta interface)
+// Mount/Unmount
 // ============================================================
 
 TEST_F(P2PClientMetaTest, MountSegmentSuccess) {
@@ -92,7 +87,7 @@ TEST_F(P2PClientMetaTest, MountDuplicateSegmentIsIdempotent) {
     meta->Heartbeat();
     ASSERT_TRUE(meta->MountSegment(seg).has_value());
 
-    // ClientMeta absorbs SEGMENT_ALREADY_EXISTS, returns OK (idempotent)
+    // P2PClientMeta absorbs SEGMENT_ALREADY_EXISTS, returns OK (idempotent)
     auto res = meta->MountSegment(seg);
     EXPECT_TRUE(res.has_value());
 
@@ -120,14 +115,14 @@ TEST_F(P2PClientMetaTest, UnmountNonexistentSegmentIsIdempotent) {
     auto meta = CreateMeta();
     meta->Heartbeat();
 
-    // ClientMeta absorbs SEGMENT_NOT_FOUND, returns OK (idempotent)
+    // P2PClientMeta absorbs SEGMENT_NOT_FOUND, returns OK (idempotent)
     UUID nonexistent = {999, 999};
     auto res = meta->UnmountSegment(nonexistent);
     EXPECT_TRUE(res.has_value());
 }
 
 // ============================================================
-// Health state checks (testing parent ClientMeta interface)
+// Health state checks
 // ============================================================
 
 TEST_F(P2PClientMetaTest, HealthyAfterHeartbeat) {
@@ -142,7 +137,7 @@ TEST_F(P2PClientMetaTest, MountFailsWhenUnhealthy) {
     // Explicitly set short timeouts
     constexpr int kDisconnectTimeoutSec = 1;
     constexpr int kCrashTimeoutSec = 2;
-    ClientMeta::SetTimeouts(kDisconnectTimeoutSec, kCrashTimeoutSec);
+    P2PClientMeta::SetTimeouts(kDisconnectTimeoutSec, kCrashTimeoutSec);
 
     meta->Heartbeat();
     auto seg = MakeP2PSegment();
@@ -172,7 +167,7 @@ TEST_F(P2PClientMetaExtendedTest, UnmountSegmentCheckHealth) {
     auto seg = MakeP2PSegment();
     constexpr int kDiscTimeout = 1;
     constexpr int kCrashTimeout = 2;
-    ClientMeta::SetTimeouts(kDiscTimeout, kCrashTimeout);
+    P2PClientMeta::SetTimeouts(kDiscTimeout, kCrashTimeout);
 
     // Case 1: Health -> OK
     meta->Heartbeat();
@@ -280,7 +275,7 @@ TEST_F(P2PClientMetaExtendedTest, HealthStateMachineTransitions) {
     auto meta = CreateExtendedMeta();
     constexpr int64_t kDisconnectSec = 1;
     constexpr int64_t kCrashSec = 2;
-    ClientMeta::SetTimeouts(kDisconnectSec, kCrashSec);
+    P2PClientMeta::SetTimeouts(kDisconnectSec, kCrashSec);
 
     meta->Heartbeat();
     EXPECT_TRUE(meta->is_health());
@@ -474,11 +469,9 @@ TEST_F(P2PClientMetaTest, UpdateSegmentUsagesMaintainFileGauges) {
 
     auto meta = CreateMeta();
     meta->Heartbeat();
-    Segment nvme = MakeP2PSegment({1, 1}, "nvme_seg", 2000, 1, 100);
-    nvme.extra = P2PSegmentExtraData{.priority = 0,
-                                     .tags = {},
-                                     .memory_type = MemoryType::NVME,
-                                     .usage = 100};
+    P2PSegment nvme = MakeP2PSegment({1, 1}, "nvme_seg", 2000, 1, 100);
+    nvme.priority = 0;
+    nvme.memory_type = MemoryType::NVME;
     ASSERT_TRUE(meta->MountSegment(nvme).has_value());
 
     // Mount initializes the file gauge with the mount-time usage (100).
@@ -548,7 +541,7 @@ TEST_F(P2PClientMetaExtendedTest, QueryIpCheckHealth) {
     UUID id = meta->get_client_id();
     constexpr int kDiscTimeout = 1;
     constexpr int kCrashTimeout = 2;
-    ClientMeta::SetTimeouts(kDiscTimeout, kCrashTimeout);
+    P2PClientMeta::SetTimeouts(kDiscTimeout, kCrashTimeout);
 
     meta->Heartbeat();
     auto res_healthy = meta->QueryIp(id);
@@ -666,16 +659,16 @@ TEST_F(P2PClientMetaTest, GetWriteRouteCandidateTagFilter) {
 
     // S1: ssd, fast
     auto s1 = MakeP2PSegment({1, 1}, "s1", 10000);
-    s1.GetP2PExtra().tags = {"ssd", "fast"};
+    s1.tags = {"ssd", "fast"};
     // S2: hdd
     auto s2 = MakeP2PSegment({2, 2}, "s2", 10000);
-    s2.GetP2PExtra().tags = {"hdd"};
+    s2.tags = {"hdd"};
     // S3: ssd, slow
     auto s3 = MakeP2PSegment({3, 3}, "s3", 10000);
-    s3.GetP2PExtra().tags = {"ssd", "slow"};
+    s3.tags = {"ssd", "slow"};
     // S4: fast (no ssd)
     auto s4 = MakeP2PSegment({4, 4}, "s4", 10000);
-    s4.GetP2PExtra().tags = {"fast"};
+    s4.tags = {"fast"};
 
     ASSERT_TRUE(meta->MountSegment(s1).has_value());
     ASSERT_TRUE(meta->MountSegment(s2).has_value());
@@ -756,19 +749,19 @@ TEST_F(P2PClientMetaTest, GetWriteRouteCandidateCompositeFilters) {
 
     // S1: low priority (excluded by priority_limit)
     auto s1 = MakeP2PSegment({1, 1}, "s1", 10000, 1);
-    s1.GetP2PExtra().tags = {"ssd"};
+    s1.tags = {"ssd"};
 
     // S2: wrong tag (excluded by tag_filters), high priority
     auto s2 = MakeP2PSegment({2, 2}, "s2", 10000, 10);
-    s2.GetP2PExtra().tags = {"hdd"};
+    s2.tags = {"hdd"};
 
     // S3: eligible tier, small
     auto s3 = MakeP2PSegment({3, 3}, "s3", 50, 10);
-    s3.GetP2PExtra().tags = {"ssd"};
+    s3.tags = {"ssd"};
 
     // S4: eligible tier, large
     auto s4 = MakeP2PSegment({4, 4}, "s4", 10000, 10);
-    s4.GetP2PExtra().tags = {"ssd"};
+    s4.tags = {"ssd"};
 
     ASSERT_TRUE(meta->MountSegment(s1).has_value());
     ASSERT_TRUE(meta->MountSegment(s2).has_value());
@@ -797,7 +790,7 @@ TEST_F(P2PClientMetaTest, GetWriteScoreCapacity) {
     // High-priority (10) DRAM tier: small, mostly free.
     auto dram = MakeP2PSegment({1, 1}, "dram", 1000, /*priority=*/10,
                                /*usage=*/200);
-    dram.GetP2PExtra().tags = {"fast"};
+    dram.tags = {"fast"};
     // Low-priority (0) NVMe tier: large, mostly free.
     auto nvme = MakeP2PSegment({2, 2}, "nvme", 10000, /*priority=*/0,
                                /*usage=*/1000);
@@ -899,7 +892,7 @@ TEST_F(P2PClientMetaTest, ConcurrentMountUnmountAndUsageSyncNoDeadlock) {
         int i = 0;
         while (!stop.load(std::memory_order_relaxed)) {
             UUID id{1, static_cast<uint64_t>(i % 32)};
-            Segment seg = MakeP2PSegment(
+            P2PSegment seg = MakeP2PSegment(
                 id, "concurrent_seg_" + std::to_string(i % 32), 1000, 1, 0);
             meta->MountSegment(seg);
             std::this_thread::yield();
@@ -935,7 +928,7 @@ TEST_F(P2PClientMetaTest, ConcurrentMountUnmountAndUsageSyncNoDeadlock) {
     size_t total_usage = 0;
     for (const auto& seg : segments.value()) {
         total_capacity += seg.size;
-        total_usage += seg.GetP2PExtra().usage;
+        total_usage += seg.usage;
     }
     const size_t expected_free =
         total_capacity > total_usage ? total_capacity - total_usage : 0;
@@ -990,8 +983,8 @@ TEST_F(P2PClientMetaTest, UpdateSegmentUsagesConsistentUnderMountUnmountRace) {
     // client_usage_ must equal the sum of the stored per-segment usages.
     size_t expected_usage = 0;
     size_t expected_capacity = 0;
-    meta->segment_manager_->ForEachSegment([&](const Segment& seg) {
-        expected_usage += seg.GetP2PExtra().usage;
+    meta->segment_manager_->ForEachSegment([&](const P2PSegment& seg) {
+        expected_usage += seg.usage;
         expected_capacity += seg.size;
         return false;
     });
