@@ -31,31 +31,30 @@ class P2PClientManagerTest : public ::testing::Test {
                                                   view_version);
     }
 
-    RegisterClientRequest MakeP2PRegisterRequest(
+    P2PRegisterClientRequest MakeP2PRegisterRequest(
         UUID client_id = {100, 200}, const std::string& ip = "10.0.0.1",
-        uint16_t rpc_port = 50051, std::vector<Segment> segments = {}) {
-        RegisterClientRequest req;
+        uint16_t rpc_port = 50051,
+        std::vector<P2PSegment> segments = {}) {
+        P2PRegisterClientRequest req;
         req.client_id = client_id;
-        req.deployment_mode = DeploymentMode::P2P;
         req.ip_address = ip;
         req.rpc_port = rpc_port;
         req.segments = std::move(segments);
         return req;
     }
 
-    Segment MakeP2PSegment(UUID id, const std::string& name = "seg",
-                           size_t size = 1024 * 1024, int priority = 1) {
-        Segment seg;
-        seg.id = id;
-        seg.name = name;
-        seg.size = size;
-        seg.extra = P2PSegmentExtraData{
+    P2PSegment MakeP2PSegment(UUID id, const std::string& name = "seg",
+                              size_t size = 1024 * 1024,
+                              int priority = 1) {
+        return P2PSegment{
+            .id = id,
+            .name = name,
+            .size = size,
             .priority = priority,
             .tags = {},
             .memory_type = MemoryType::DRAM,
             .usage = 0,
         };
-        return seg;
     }
 };
 
@@ -88,19 +87,6 @@ TEST_F(P2PClientManagerTest, RegisterClientDuplicate) {
     EXPECT_EQ(res.error(), ErrorCode::CLIENT_ALREADY_EXISTS);
 }
 
-TEST_F(P2PClientManagerTest, RegisterWrongDeploymentMode) {
-    auto mgr = CreateManager();
-    mgr->Start();
-
-    RegisterClientRequest req;
-    req.client_id = {100, 200};
-    req.deployment_mode = DeploymentMode::CENTRALIZATION;  // Wrong mode!
-    req.segments = {};
-
-    auto res = mgr->RegisterClient(req);
-    EXPECT_FALSE(res.has_value());
-}
-
 TEST_F(P2PClientManagerTest, RegisterComplexScenario) {
     auto mgr = CreateManager();
     mgr->Start();
@@ -120,7 +106,7 @@ TEST_F(P2PClientManagerTest, RegisterComplexScenario) {
 
     // 2. Register a client with multiple segments
     UUID client_id3 = {999, 999};
-    std::vector<Segment> segs;
+    std::vector<P2PSegment> segs;
     for (int i = 0; i < 5; i++) {
         segs.push_back(MakeP2PSegment({999, static_cast<uint64_t>(i)},
                                       "c3_seg_" + std::to_string(i)));
@@ -529,7 +515,7 @@ TEST_F(P2PClientManagerTest, QuerySegmentAndGetClientSegments) {
     EXPECT_EQ(found_seg->id, (UUID{1, 2}));
     EXPECT_EQ(found_seg->name, "c1_seg2");
     EXPECT_EQ(found_seg->size, 2048);
-    EXPECT_EQ(found_seg->GetP2PExtra().priority, 20);
+    EXPECT_EQ(found_seg->priority, 20);
 
     // Verify QuerySegment for non-existent segment or cross-client query
     EXPECT_FALSE(mgr->QuerySegment(client_id1, {2, 1}).has_value());
@@ -578,12 +564,12 @@ TEST_F(P2PClientManagerTest, ForEachClientOrdered) {
     }
 
     std::vector<UUID> ids1, ids2;
-    auto visitor1 = [&ids1](const std::shared_ptr<ClientMeta>& client)
+    auto visitor1 = [&ids1](const std::shared_ptr<P2PClientMeta>& client)
         -> tl::expected<bool, ErrorCode> {
         ids1.push_back(client->get_client_id());
         return false;
     };
-    auto visitor2 = [&ids2](const std::shared_ptr<ClientMeta>& client)
+    auto visitor2 = [&ids2](const std::shared_ptr<P2PClientMeta>& client)
         -> tl::expected<bool, ErrorCode> {
         ids2.push_back(client->get_client_id());
         return false;
@@ -611,7 +597,7 @@ TEST_F(P2PClientManagerTest, ForEachClientCapacityPriority) {
     }
 
     std::vector<UUID> ids;
-    auto visitor = [&ids](const std::shared_ptr<ClientMeta>& client)
+    auto visitor = [&ids](const std::shared_ptr<P2PClientMeta>& client)
         -> tl::expected<bool, ErrorCode> {
         ids.push_back(client->get_client_id());
         return false;
@@ -688,7 +674,7 @@ TEST_F(P2PClientManagerTest, ForEachClientHealthEffect) {
     std::set<UUID> found_ids;
     mgr->ForEachClient(
         ObjectIterateStrategy::ORDERED,
-        [&count, &found_ids](const std::shared_ptr<ClientMeta>& client)
+        [&count, &found_ids](const std::shared_ptr<P2PClientMeta>& client)
             -> tl::expected<bool, ErrorCode> {
             count++;
             found_ids.insert(client->get_client_id());
@@ -741,7 +727,7 @@ TEST_F(P2PClientManagerTest, ConcurrentRegister) {
     std::set<UUID> registered_ids;
     auto res = mgr->ForEachClient(
         ObjectIterateStrategy::ORDERED,
-        [&registered_ids](const std::shared_ptr<ClientMeta>& client)
+        [&registered_ids](const std::shared_ptr<P2PClientMeta>& client)
             -> tl::expected<bool, ErrorCode> {
             registered_ids.insert(client->get_client_id());
             return false;
@@ -821,7 +807,8 @@ TEST_F(P2PClientManagerTest, ConcurrentRegisterSameClient) {
     int count = 0;
     auto res =
         mgr->ForEachClient(ObjectIterateStrategy::ORDERED,
-                           [&count](const std::shared_ptr<ClientMeta>& client)
+                           [&count](
+                               const std::shared_ptr<P2PClientMeta>& client)
                                -> tl::expected<bool, ErrorCode> {
                                count++;
                                return false;
@@ -851,12 +838,11 @@ TEST_F(P2PClientManagerTest, HeartbeatSyncSegmentMeta) {
     EXPECT_EQ(res.value().task_results[0].error, ErrorCode::OK);
 
     // Verify usage update in P2PClientMeta
-    auto p2p_meta =
-        std::static_pointer_cast<P2PClientMeta>(mgr->GetClient(client_id));
+    auto p2p_meta = mgr->GetClient(client_id);
     ASSERT_NE(p2p_meta, nullptr);
     auto seg_res = p2p_meta->QuerySegment({1, 1});
     ASSERT_TRUE(seg_res.has_value());
-    EXPECT_EQ(seg_res.value()->GetP2PExtra().usage, 1 * 1024 * 1024);
+    EXPECT_EQ(seg_res.value()->usage, 1 * 1024 * 1024);
 }
 
 TEST_F(P2PClientManagerTest, HeartbeatSyncSegmentMetaErrorPaths) {
@@ -909,10 +895,8 @@ TEST_F(P2PClientManagerTest, HeartbeatSyncSegmentMetaErrorPaths) {
         EXPECT_EQ(sync_detail.sub_results[1].error,
                   ErrorCode::SEGMENT_NOT_FOUND);
 
-        auto p2p_meta =
-            std::static_pointer_cast<P2PClientMeta>(mgr->GetClient(client_id));
-        EXPECT_EQ(p2p_meta->QuerySegment({1, 1}).value()->GetP2PExtra().usage,
-                  100);
+        auto p2p_meta = mgr->GetClient(client_id);
+        EXPECT_EQ(p2p_meta->QuerySegment({1, 1}).value()->usage, 100);
     }
 
     // 3. Not supported task type (Force casting)
