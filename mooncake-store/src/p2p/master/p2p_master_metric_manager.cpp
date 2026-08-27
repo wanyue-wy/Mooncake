@@ -806,7 +806,29 @@ std::string P2PMasterMetricManager::serialize_metrics() {
     serialize_metric(batch_get_replica_list_items_);
     serialize_metric(batch_get_replica_list_failed_items_);
 
-    return ss.str() + serialize_arch_metrics();
+    serialize_metric(get_write_route_requests_);
+    serialize_metric(get_write_route_failures_);
+    serialize_metric(add_replica_requests_);
+    serialize_metric(add_replica_failures_);
+    serialize_metric(remove_replica_requests_);
+    serialize_metric(remove_replica_failures_);
+
+    serialize_metric(batch_remove_replica_requests_);
+    serialize_metric(batch_remove_replica_failures_);
+    serialize_metric(batch_remove_replica_partial_successes_);
+    serialize_metric(batch_remove_replica_items_);
+    serialize_metric(batch_remove_replica_failed_items_);
+    serialize_metric(batch_get_write_route_requests_);
+    serialize_metric(batch_get_write_route_failures_);
+    serialize_metric(batch_get_write_route_partial_successes_);
+    serialize_metric(batch_get_write_route_items_);
+    serialize_metric(batch_get_write_route_failed_items_);
+
+    std::string cluster_part;
+    client_metrics_aggregator_.Serialize(cluster_part);
+    ss << cluster_part;
+
+    return ss.str();
 }
 
 P2PMasterMetricManager::CacheHitStatDict
@@ -969,7 +991,60 @@ std::string P2PMasterMetricManager::get_summary_string() {
        << ", Item=" << batch_query_ip_items - batch_query_ip_failed_items << "/"
        << batch_query_ip_items << ")";
 
-    return get_arch_summary_string(ss.str());
+
+    std::string summary = "[Arch: P2P] ";
+    summary += ss.str();
+    std::stringstream arch_ss;
+
+    int64_t get_write_routes = get_write_route_requests_.value();
+    int64_t get_write_route_fails = get_write_route_failures_.value();
+    int64_t add_replicas = add_replica_requests_.value();
+    int64_t add_replica_fails = add_replica_failures_.value();
+    int64_t remove_replicas = remove_replica_requests_.value();
+    int64_t remove_replica_fails = remove_replica_failures_.value();
+
+    int64_t batch_get_write_route_requests =
+        batch_get_write_route_requests_.value();
+    int64_t batch_get_write_route_fails =
+        batch_get_write_route_failures_.value();
+    int64_t batch_get_write_route_partial_successes =
+        batch_get_write_route_partial_successes_.value();
+    int64_t batch_remove_replica_requests =
+        batch_remove_replica_requests_.value();
+    int64_t batch_remove_replica_fails = batch_remove_replica_failures_.value();
+    int64_t batch_remove_replica_partial_successes =
+        batch_remove_replica_partial_successes_.value();
+    int64_t batch_remove_replica_items = batch_remove_replica_items_.value();
+    int64_t batch_remove_replica_failed_items =
+        batch_remove_replica_failed_items_.value();
+
+    arch_ss << "Requests (Success/Total): ";
+    arch_ss << "GetWriteRoute=" << get_write_routes - get_write_route_fails
+            << "/" << get_write_routes << ", ";
+    arch_ss << "AddReplica=" << add_replicas - add_replica_fails << "/"
+            << add_replicas << ", ";
+    arch_ss << "RemoveReplica=" << remove_replicas - remove_replica_fails
+            << "/" << remove_replicas;
+
+    arch_ss << " | Batch Requests "
+               "(Req=Success/PartialSuccess/Total, Item=Success/Total): ";
+    arch_ss << "GetWriteRoute:(Req="
+            << batch_get_write_route_requests - batch_get_write_route_fails -
+                   batch_get_write_route_partial_successes
+            << "/" << batch_get_write_route_partial_successes << "/"
+            << batch_get_write_route_requests << "), ";
+    arch_ss << "RemoveReplica:(Req="
+            << batch_remove_replica_requests - batch_remove_replica_fails -
+                   batch_remove_replica_partial_successes
+            << "/" << batch_remove_replica_partial_successes << "/"
+            << batch_remove_replica_requests << ", Item="
+            << batch_remove_replica_items - batch_remove_replica_failed_items
+            << "/" << batch_remove_replica_items << ")";
+
+    summary += " | ";
+    summary += arch_ss.str();
+    summary += client_metrics_aggregator_.Summary();
+    return summary;
 }
 
 
@@ -1112,99 +1187,6 @@ int64_t P2PMasterMetricManager::get_batch_get_write_route_items() {
 
 int64_t P2PMasterMetricManager::get_batch_get_write_route_failed_items() {
     return batch_get_write_route_failed_items_.value();
-}
-
-// --- Serialization ---
-std::string P2PMasterMetricManager::serialize_arch_metrics() {
-    std::stringstream ss;
-
-    auto serialize_metric = [&ss](auto& metric) {
-        std::string metric_str;
-        metric.serialize(metric_str);
-        ss << metric_str;
-    };
-
-    serialize_metric(get_write_route_requests_);
-    serialize_metric(get_write_route_failures_);
-    serialize_metric(add_replica_requests_);
-    serialize_metric(add_replica_failures_);
-    serialize_metric(remove_replica_requests_);
-    serialize_metric(remove_replica_failures_);
-
-    serialize_metric(batch_remove_replica_requests_);
-    serialize_metric(batch_remove_replica_failures_);
-    serialize_metric(batch_remove_replica_partial_successes_);
-    serialize_metric(batch_remove_replica_items_);
-    serialize_metric(batch_remove_replica_failed_items_);
-    serialize_metric(batch_get_write_route_requests_);
-    serialize_metric(batch_get_write_route_failures_);
-    serialize_metric(batch_get_write_route_partial_successes_);
-    serialize_metric(batch_get_write_route_items_);
-    serialize_metric(batch_get_write_route_failed_items_);
-
-    std::string cluster_part;
-    client_metrics_aggregator_.Serialize(cluster_part);
-    ss << cluster_part;
-
-    return ss.str();
-}
-
-// --- Human-Readable Summary ---
-std::string P2PMasterMetricManager::get_arch_summary_string(
-    const std::string& shared_summary) {
-    std::string summary = "[Arch: P2P] ";
-    summary += shared_summary;
-    std::stringstream ss;
-
-    int64_t get_write_routes = get_write_route_requests_.value();
-    int64_t get_write_route_fails = get_write_route_failures_.value();
-    int64_t add_replicas = add_replica_requests_.value();
-    int64_t add_replica_fails = add_replica_failures_.value();
-    int64_t remove_replicas = remove_replica_requests_.value();
-    int64_t remove_replica_fails = remove_replica_failures_.value();
-
-    int64_t batch_get_write_route_requests =
-        batch_get_write_route_requests_.value();
-    int64_t batch_get_write_route_fails =
-        batch_get_write_route_failures_.value();
-    int64_t batch_get_write_route_partial_successes =
-        batch_get_write_route_partial_successes_.value();
-    int64_t batch_remove_replica_requests =
-        batch_remove_replica_requests_.value();
-    int64_t batch_remove_replica_fails = batch_remove_replica_failures_.value();
-    int64_t batch_remove_replica_partial_successes =
-        batch_remove_replica_partial_successes_.value();
-    int64_t batch_remove_replica_items = batch_remove_replica_items_.value();
-    int64_t batch_remove_replica_failed_items =
-        batch_remove_replica_failed_items_.value();
-
-    ss << "Requests (Success/Total): ";
-    ss << "GetWriteRoute=" << get_write_routes - get_write_route_fails << "/"
-       << get_write_routes << ", ";
-    ss << "AddReplica=" << add_replicas - add_replica_fails << "/"
-       << add_replicas << ", ";
-    ss << "RemoveReplica=" << remove_replicas - remove_replica_fails << "/"
-       << remove_replicas;
-
-    ss << " | Batch Requests "
-          "(Req=Success/PartialSuccess/Total, Item=Success/Total): ";
-    ss << "GetWriteRoute:(Req="
-       << batch_get_write_route_requests - batch_get_write_route_fails -
-              batch_get_write_route_partial_successes
-       << "/" << batch_get_write_route_partial_successes << "/"
-       << batch_get_write_route_requests << "), ";
-    ss << "RemoveReplica:(Req="
-       << batch_remove_replica_requests - batch_remove_replica_fails -
-              batch_remove_replica_partial_successes
-       << "/" << batch_remove_replica_partial_successes << "/"
-       << batch_remove_replica_requests << ", Item="
-       << batch_remove_replica_items - batch_remove_replica_failed_items << "/"
-       << batch_remove_replica_items << ")";
-
-    summary += " | ";
-    summary += ss.str();
-    summary += client_metrics_aggregator_.Summary();
-    return summary;
 }
 
 }  // namespace mooncake

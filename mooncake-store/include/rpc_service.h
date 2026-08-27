@@ -18,6 +18,9 @@ namespace mooncake {
 
 static const uint64_t kMetricReportIntervalSeconds = 10;
 
+// TODO(M6): The fork-only RPC wrapper still accounts shared handlers through
+// the centralized MasterMetricManager. The P2P RPC boundary must use
+// P2PMasterMetricManager after the wrappers are separated.
 class WrappedMasterService {
    public:
     WrappedMasterService(const WrappedMasterServiceConfig& config);

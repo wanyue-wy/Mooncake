@@ -40,6 +40,9 @@ class ClientManager;
  *    c. SegmentManager's segment_mutex_
  *    For avoiding deadlock, each metadata managers should follow this order.
  */
+// TODO(M5): P2PMasterService still inherits methods that account through the
+// centralized MasterMetricManager. Route those P2P paths to
+// P2PMasterMetricManager when the service implementations are separated.
 class MasterService {
    public:
     MasterService(const MasterServiceConfig& config);

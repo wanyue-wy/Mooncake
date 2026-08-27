@@ -15,10 +15,10 @@ namespace mooncake {
 // P2P-architecture master metrics.
 class P2PMasterMetricManager {
    public:
-    // Returns the active architecture-specific instance
+    // Returns the P2P singleton.
     static P2PMasterMetricManager& instance();
 
-    // Resets all metrics of the concrete instance to the initial state
+    // Resets all P2P metrics to the initial state.
     // (for tests).
     void reset_all_metrics();
 
@@ -237,11 +237,6 @@ class P2PMasterMetricManager {
     // Update all metrics once to ensure zero values are serialized.
     void update_metrics_for_zero_output();
     void update_arch_metrics_for_zero_output();
-
-    std::string serialize_arch_metrics();
-    std::string get_arch_summary_string(const std::string& shared_summary);
-
-   private:
 
     // --- Metric Members ---
 
