@@ -1160,10 +1160,8 @@ TEST_F(P2PMasterServiceTest, SetSyncCompletedSuccess) {
     auto client_id = generate_uuid();
     RegisterP2PClient(*service, client_id, {seg}, "127.0.0.1", 50051);
 
-    // After registration, OnClientRegistered sets is_syncing = true
-    auto client = service->client_manager_->GetClient(client_id);
-    ASSERT_NE(client, nullptr);
-    auto p2p_client = std::dynamic_pointer_cast<P2PClientMeta>(client);
+    // Registration marks the client as syncing.
+    auto p2p_client = service->client_manager_->GetClient(client_id);
     ASSERT_NE(p2p_client, nullptr);
     EXPECT_TRUE(p2p_client->IsSyncing());
 
@@ -1190,8 +1188,7 @@ TEST_F(P2PMasterServiceTest, SetSyncCompletedIdempotent) {
     EXPECT_TRUE(service->SetSyncCompleted(client_id).has_value());
     EXPECT_TRUE(service->SetSyncCompleted(client_id).has_value());
 
-    auto client = service->client_manager_->GetClient(client_id);
-    auto p2p_client = std::dynamic_pointer_cast<P2PClientMeta>(client);
+    auto p2p_client = service->client_manager_->GetClient(client_id);
     EXPECT_FALSE(p2p_client->IsSyncing());
 }
 

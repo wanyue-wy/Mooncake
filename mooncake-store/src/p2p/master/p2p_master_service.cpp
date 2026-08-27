@@ -333,13 +333,8 @@ auto P2PMasterService::GetWriteRoute(const WriteRouteRequest& req)
 
     client_manager_->ForEachClient(
         req.config.strategy,
-        [&](const std::shared_ptr<ClientMeta>& client)
+        [&](const std::shared_ptr<P2PClientMeta>& p2p)
             -> tl::expected<bool, ErrorCode> {
-            auto p2p = std::static_pointer_cast<P2PClientMeta>(client);
-            if (!p2p) {
-                LOG(ERROR) << "unexpected client meta type";
-                return tl::make_unexpected(ErrorCode::INTERNAL_ERROR);
-            }
             const UUID cid = p2p->get_client_id();
             if (owners.count(cid)) {
                 return false;
@@ -415,8 +410,7 @@ auto P2PMasterService::BatchGetWriteRoute(const BatchGetWriteRouteRequest& req)
 auto P2PMasterService::AddReplica(const AddReplicaRequest& req)
     -> tl::expected<void, ErrorCode> {
     MetadataAccessorRW accessor(this, req.key);
-    auto client = std::static_pointer_cast<P2PClientMeta>(
-        client_manager_->GetClient(req.client_id));
+    auto client = client_manager_->GetClient(req.client_id);
     if (!client) {
         LOG(ERROR) << "client not found"
                    << ", client_id: " << req.client_id;
@@ -654,8 +648,7 @@ auto P2PMasterService::BatchSyncReplica(const BatchSyncReplicaRequest& req)
     response.remove_results.resize(req.remove_keys.size(), ErrorCode::OK);
 
     // Resolve client once for all operations
-    auto client = std::static_pointer_cast<P2PClientMeta>(
-        client_manager_->GetClient(req.client_id));
+    auto client = client_manager_->GetClient(req.client_id);
     if (!client) {
         LOG(ERROR) << "BatchSyncReplica: client not found"
                    << ", client_id=" << req.client_id;
@@ -717,13 +710,7 @@ auto P2PMasterService::SetSyncCompleted(UUID client_id)
                      << ", client_id=" << client_id;
         return tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
     }
-    auto p2p_client = std::dynamic_pointer_cast<P2PClientMeta>(client);
-    if (!p2p_client) {
-        LOG(ERROR) << "SetSyncCompleted: client is not P2PClientMeta"
-                   << ", client_id=" << client_id;
-        return tl::make_unexpected(ErrorCode::INTERNAL_ERROR);
-    }
-    p2p_client->SetSyncing(false);
+    client->SetSyncing(false);
     LOG(INFO) << "SetSyncCompleted: client_id=" << client_id;
     return {};
 }
@@ -775,8 +762,7 @@ ErrorCode P2PMasterService::RestoreFromStandbyMetadata(
             return result.error();
         }
 
-        auto p2p_client = std::dynamic_pointer_cast<P2PClientMeta>(
-            client_manager_->GetClient(client_id));
+        auto p2p_client = client_manager_->GetClient(client_id);
         if (p2p_client) {
             p2p_client->SetSyncing(false);
         }
@@ -802,8 +788,7 @@ ErrorCode P2PMasterService::RestoreFromStandbyMetadata(
 
             const auto& p2p_desc =
                 std::get<P2PProxyDescriptor>(desc.descriptor_variant);
-            auto client = std::dynamic_pointer_cast<P2PClientMeta>(
-                client_manager_->GetClient(p2p_desc.client_id));
+            auto client = client_manager_->GetClient(p2p_desc.client_id);
             if (!client) {
                 LOG(WARNING)
                     << "RestoreFromStandbyMetadata: skip replica with missing "

@@ -3,37 +3,12 @@
 #include <algorithm>
 #include <chrono>
 #include <glog/logging.h>
+#include <random>
 
 #include "master_metric_manager.h"
 #include "p2p/master/p2p_master_metric_manager.h"
 
 namespace mooncake {
-
-class P2PCapacityPriorityIterator : public P2PClientIterator {
-   public:
-    explicit P2PCapacityPriorityIterator(
-        const std::unordered_map<UUID, std::shared_ptr<P2PClientMeta>,
-                                 boost::hash<UUID>>& client_metas) {
-        if (client_metas.empty()) return;
-
-        std::vector<std::pair<size_t, std::shared_ptr<P2PClientMeta>>>
-            client_with_caps;
-        client_with_caps.reserve(client_metas.size());
-        for (const auto& client : client_metas) {
-            client_with_caps.emplace_back(
-                client.second->GetAvailableCapacity(), client.second);
-        }
-
-        std::sort(
-            client_with_caps.begin(), client_with_caps.end(),
-            [](const auto& a, const auto& b) { return a.first > b.first; });
-
-        clients_.reserve(client_with_caps.size());
-        for (auto& [cap, client] : client_with_caps) {
-            clients_.emplace_back(std::move(client));
-        }
-    }
-};
 
 P2PClientManager::P2PClientManager(int64_t disconnect_timeout_sec,
                                    int64_t crash_timeout_sec,
@@ -89,31 +64,62 @@ P2PClientManager::GetAllClients() {
     return clients;
 }
 
-std::unique_ptr<P2PClientIterator>
-P2PClientManager::InnerBuildClientIterator(ObjectIterateStrategy strategy) {
+auto P2PClientManager::BuildClientList(ObjectIterateStrategy strategy) const
+    -> std::optional<std::vector<std::shared_ptr<P2PClientMeta>>> {
+    std::vector<std::shared_ptr<P2PClientMeta>> clients;
+    clients.reserve(client_metas_.size());
+
     switch (strategy) {
-        case ObjectIterateStrategy::ORDERED:
-            return std::make_unique<P2POrderedClientIterator>(client_metas_);
-        case ObjectIterateStrategy::RANDOM:
-            return std::make_unique<P2PRandomClientIterator>(client_metas_);
-        case ObjectIterateStrategy::CAPACITY_PRIORITY:
-            return std::make_unique<P2PCapacityPriorityIterator>(client_metas_);
+        case ObjectIterateStrategy::ORDERED: {
+            for (const auto& [id, meta] : client_metas_) {
+                clients.emplace_back(meta);
+            }
+            break;
+        }
+        case ObjectIterateStrategy::RANDOM: {
+            for (const auto& [id, meta] : client_metas_) {
+                clients.emplace_back(meta);
+            }
+            std::random_device rd;
+            std::mt19937 generator(rd());
+            std::shuffle(clients.begin(), clients.end(), generator);
+            break;
+        }
+        case ObjectIterateStrategy::CAPACITY_PRIORITY: {
+            std::vector<std::pair<size_t, std::shared_ptr<P2PClientMeta>>>
+                clients_with_capacity;
+            clients_with_capacity.reserve(client_metas_.size());
+            for (const auto& [id, meta] : client_metas_) {
+                clients_with_capacity.emplace_back(
+                    meta->GetAvailableCapacity(), meta);
+            }
+            std::sort(clients_with_capacity.begin(),
+                      clients_with_capacity.end(),
+                      [](const auto& lhs, const auto& rhs) {
+                          return lhs.first > rhs.first;
+                      });
+            for (auto& [capacity, client] : clients_with_capacity) {
+                clients.emplace_back(std::move(client));
+            }
+            break;
+        }
         default:
-            return nullptr;
+            return std::nullopt;
     }
+    return clients;
 }
 
 auto P2PClientManager::ForEachClient(ObjectIterateStrategy strategy,
                                      const ClientVisitor& visitor)
     -> tl::expected<void, ErrorCode> {
     SharedMutexLocker lock(&clients_mutex_, shared_lock);
-    auto iterator = InnerBuildClientIterator(strategy);
-    if (!iterator) {
+    auto clients = BuildClientList(strategy);
+    if (!clients) {
         LOG(WARNING) << "fail to get client iterator"
                      << ", strategy=" << strategy;
         return tl::make_unexpected(ErrorCode::INTERNAL_ERROR);
     }
-    while (auto client = iterator->Next()) {
+    for (const auto& client : *clients) {
         auto ret = visitor(client);
         if (!ret) {
             LOG(WARNING) << "client visitor returned error"
@@ -241,32 +247,6 @@ void P2PClientManager::SetSegmentRemovalCallback(SegmentRemovalCallback cb) {
     segment_removal_cb_ = std::move(cb);
 }
 
-auto P2PClientManager::ValidateRegisterRequest(
-    const P2PRegisterClientRequest& req) -> tl::expected<void, ErrorCode> {
-    LOG(INFO) << "RegisterClient(P2P): client_id=" << req.client_id
-              << ", ip_address='" << req.ip_address
-              << "', rpc_port=" << req.rpc_port
-              << ", segments=" << req.segments.size();
-
-    if (req.ip_address.empty()) {
-        LOG(ERROR) << "RegisterClient(P2P): rejected, empty ip_address"
-                   << ", client_id=" << req.client_id;
-        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-    }
-    if (req.rpc_port == 0) {
-        LOG(ERROR) << "RegisterClient(P2P): rejected, invalid rpc_port=0"
-                   << ", client_id=" << req.client_id;
-        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-    }
-    return {};
-}
-
-auto P2PClientManager::CreateClientMeta(const P2PRegisterClientRequest& req)
-    -> std::shared_ptr<P2PClientMeta> {
-    return std::make_shared<P2PClientMeta>(req.client_id, req.ip_address,
-                                           req.rpc_port);
-}
-
 auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
     -> tl::expected<RegisterClientResponse, ErrorCode> {
     const auto& client_id = req.client_id;
@@ -280,13 +260,27 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
         }
     }
 
-    if (auto valid = ValidateRegisterRequest(req); !valid) {
+    LOG(INFO) << "RegisterClient(P2P): client_id=" << req.client_id
+              << ", ip_address='" << req.ip_address
+              << "', rpc_port=" << req.rpc_port
+              << ", segments=" << req.segments.size();
+    if (req.ip_address.empty()) {
+        LOG(ERROR) << "RegisterClient(P2P): rejected, empty ip_address"
+                   << ", client_id=" << req.client_id;
         LOG(WARNING) << "RegisterClient: register request failed"
                      << ", client_id=" << client_id;
-        return tl::make_unexpected(valid.error());
+        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    if (req.rpc_port == 0) {
+        LOG(ERROR) << "RegisterClient(P2P): rejected, invalid rpc_port=0"
+                   << ", client_id=" << req.client_id;
+        LOG(WARNING) << "RegisterClient: register request failed"
+                     << ", client_id=" << client_id;
+        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
     }
 
-    auto meta = CreateClientMeta(req);
+    auto meta = std::make_shared<P2PClientMeta>(req.client_id, req.ip_address,
+                                                req.rpc_port);
     if (segment_removal_cb_) {
         meta->SetSegmentRemovalCallback(segment_removal_cb_);
     }
@@ -301,7 +295,7 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
         }
     }
 
-    OnClientRegistered(meta);
+    meta->SetSyncing(true);
 
     SharedMutexLocker lock(&clients_mutex_);
     if (client_metas_.count(client_id)) {

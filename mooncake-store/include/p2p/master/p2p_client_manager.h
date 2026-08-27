@@ -1,13 +1,12 @@
 #pragma once
 
-#include <algorithm>
 #include <atomic>
 #include <boost/functional/hash.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <random>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -23,51 +22,6 @@
 #include "types.h"
 
 namespace mooncake {
-
-class P2PClientIterator {
-   public:
-    virtual ~P2PClientIterator() = default;
-
-    std::shared_ptr<P2PClientMeta> Next() {
-        if (index_ < clients_.size()) {
-            return clients_[index_++];
-        }
-        return nullptr;
-    }
-
-   protected:
-    P2PClientIterator() = default;
-
-    std::vector<std::shared_ptr<P2PClientMeta>> clients_;
-    size_t index_ = 0;
-};
-
-class P2POrderedClientIterator : public P2PClientIterator {
-   public:
-    explicit P2POrderedClientIterator(
-        const std::unordered_map<UUID, std::shared_ptr<P2PClientMeta>,
-                                 boost::hash<UUID>>& client_metas) {
-        clients_.reserve(client_metas.size());
-        for (const auto& [id, meta] : client_metas) {
-            clients_.emplace_back(meta);
-        }
-    }
-};
-
-class P2PRandomClientIterator : public P2PClientIterator {
-   public:
-    explicit P2PRandomClientIterator(
-        const std::unordered_map<UUID, std::shared_ptr<P2PClientMeta>,
-                                 boost::hash<UUID>>& client_metas) {
-        clients_.reserve(client_metas.size());
-        for (const auto& [id, meta] : client_metas) {
-            clients_.emplace_back(meta);
-        }
-        std::random_device rd;
-        std::mt19937 g(rd());
-        std::shuffle(clients_.begin(), clients_.end(), g);
-    }
-};
 
 /**
  * @brief Manages P2P clients' lifecycle and heartbeat state.
@@ -124,18 +78,8 @@ class P2PClientManager final {
     HeartbeatTaskResult ProcessTask(const UUID& client_id,
                                     const HeartbeatTask& task);
 
-    std::unique_ptr<P2PClientIterator> InnerBuildClientIterator(
-        ObjectIterateStrategy strategy);
-
-    // Retained while merging the former base-class call sequence. These
-    // single-architecture helpers are audited in M3 stage 3.
-    auto ValidateRegisterRequest(const P2PRegisterClientRequest& req)
-        -> tl::expected<void, ErrorCode>;
-    auto CreateClientMeta(const P2PRegisterClientRequest& req)
-        -> std::shared_ptr<P2PClientMeta>;
-    void OnClientRegistered(const std::shared_ptr<P2PClientMeta>& meta) {
-        meta->SetSyncing(true);
-    }
+    auto BuildClientList(ObjectIterateStrategy strategy) const
+        -> std::optional<std::vector<std::shared_ptr<P2PClientMeta>>>;
 
     static constexpr uint64_t kClientMonitorSleepMs = 1000;
 

@@ -553,6 +553,9 @@ class MasterService {
     };
 
    protected:
+    // TODO(M5): Remove this fork-only ClientManager accessor contract.
+    // Centralized client lifecycle returns to MasterService while
+    // P2PMasterService owns a concrete P2PClientManager.
     virtual ClientManager& GetClientManager() = 0;
     virtual const ClientManager& GetClientManager() const = 0;
 
