@@ -63,14 +63,6 @@ class P2PSegmentManager {
     void ForEachSegment(const SegmentVisitor& visitor) const;
 
    private:
-    // Implementation-specific mount/unmount steps (no locking required;
-    // called while holding segment_mutex_).
-    tl::expected<void, ErrorCode> InnerMountSegment(const P2PSegment& segment);
-
-    tl::expected<void, ErrorCode> OnUnmountSegment(
-        const std::shared_ptr<P2PSegment>& segment);
-
-   private:
     OnSegmentAddedCallback on_segment_added_;
     OnSegmentRemovedCallback on_segment_removed_;
 

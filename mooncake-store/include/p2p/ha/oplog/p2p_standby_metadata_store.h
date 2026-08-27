@@ -14,6 +14,7 @@
 
 #include "p2p/ha/oplog/oplog_manager.h"
 #include "p2p/ha/metadata_store.h"
+#include "p2p/common/p2p_types.h"
 #include "replica.h"
 #include "types.h"
 
@@ -25,7 +26,7 @@ struct P2PStandbyClientInfo {
     std::string ip_address;
     uint16_t rpc_port = 0;
     // Segments owned by this client.
-    std::vector<Segment> segments;
+    std::vector<P2PSegment> segments;
 
     YLT_REFL(P2PStandbyClientInfo, client_id, ip_address, rpc_port, segments);
 };
@@ -79,7 +80,7 @@ class P2PStandbyMetadataStore : public MetadataStore {
     /// Register or update a client.
     void RegisterClient(const UUID& client_id, const std::string& ip_address,
                         uint16_t rpc_port,
-                        const std::vector<Segment>& segments);
+                        const std::vector<P2PSegment>& segments);
 
     /// Unregister a client.
     /// Also removes all replicas owned by this client from their objects
@@ -87,7 +88,7 @@ class P2PStandbyMetadataStore : public MetadataStore {
     void UnRegisterClient(const UUID& client_id);
 
     /// Add (mount) a segment to a client.
-    void AddSegment(const UUID& client_id, const Segment& segment);
+    void AddSegment(const UUID& client_id, const P2PSegment& segment);
 
     /// Remove (unmount) a segment from a client.
     /// Also removes all replicas on this segment from their objects (cascade

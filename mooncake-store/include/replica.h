@@ -15,6 +15,7 @@
 #include "types.h"
 #include "allocator.h"
 #include "centralized_master_metric_manager.h"
+#include "p2p/common/p2p_types.h"
 
 namespace mooncake {
 
@@ -132,13 +133,14 @@ struct LocalDiskReplicaData {
 struct P2PProxyReplicaData {
     P2PProxyReplicaData() = default;
     P2PProxyReplicaData(std::shared_ptr<P2PClientMeta> client,
-                        std::shared_ptr<Segment> segment, uint64_t object_size)
+                        std::shared_ptr<P2PSegment> segment,
+                        uint64_t object_size)
         : client(std::move(client)),
           segment(std::move(segment)),
           object_size(object_size) {}
 
     std::shared_ptr<const P2PClientMeta> client;
-    std::shared_ptr<const Segment> segment;
+    std::shared_ptr<const P2PSegment> segment;
     uint64_t object_size = 0;
 };
 
@@ -344,31 +346,31 @@ class Replica {
     const std::vector<std::string>& get_p2p_tags() const {
         static const std::vector<std::string> empty_tags;
         auto segment = get_p2p_segment();
-        if (segment && segment->IsP2PSegment()) {
-            return segment->GetP2PExtra().tags;
+        if (segment) {
+            return segment->tags;
         }
         return empty_tags;
     }
 
     std::optional<int> get_p2p_priority() const {
         auto segment = get_p2p_segment();
-        if (segment && segment->IsP2PSegment()) {
-            return segment->GetP2PExtra().priority;
+        if (segment) {
+            return segment->priority;
         }
         return std::nullopt;
     }
 
     std::optional<MemoryType> get_p2p_memory_type() const {
         auto segment = get_p2p_segment();
-        if (segment && segment->IsP2PSegment()) {
-            return segment->GetP2PExtra().memory_type;
+        if (segment) {
+            return segment->memory_type;
         }
         return std::nullopt;
     }
 
     std::optional<UUID> get_p2p_client_id() const;
 
-    std::shared_ptr<const Segment> get_p2p_segment() const {
+    std::shared_ptr<const P2PSegment> get_p2p_segment() const {
         if (!is_p2p_proxy_replica()) return nullptr;
         return std::get<P2PProxyReplicaData>(data_).segment;
     }

@@ -50,11 +50,13 @@ TEST(P2POpLogTypesTest, RoundTrip_RegisterClientPayload) {
     original.client_id = {100, 200};
     original.ip_address = "192.168.1.1";
     original.rpc_port = 50051;
-    Segment seg;
+    P2PSegment seg;
     seg.id = {300, 400};
     seg.name = "seg_001";
     seg.size = 1024;
-    seg.extra = P2PSegmentExtraData{1, {"tag1"}, MemoryType::DRAM, 0};
+    seg.priority = 1;
+    seg.tags = {"tag1"};
+    seg.memory_type = MemoryType::DRAM;
     original.segments = {seg};
 
     std::string data = SerializeP2PPayload(original);
@@ -98,17 +100,23 @@ TEST(P2POpLogTypesTest, RoundTrip_RegisterClientPayload_MultipleSegments) {
     original.ip_address = "10.0.0.1";
     original.rpc_port = 50052;
 
-    Segment seg1;
+    P2PSegment seg1;
     seg1.id = {1, 2};
     seg1.name = "dram_seg";
     seg1.size = 4096;
-    seg1.extra = P2PSegmentExtraData{2, {"ssd", "gpu"}, MemoryType::DRAM, 512};
+    seg1.priority = 2;
+    seg1.tags = {"ssd", "gpu"};
+    seg1.memory_type = MemoryType::DRAM;
+    seg1.usage = 512;
 
-    Segment seg2;
+    P2PSegment seg2;
     seg2.id = {3, 4};
     seg2.name = "nvme_seg";
     seg2.size = 8192;
-    seg2.extra = P2PSegmentExtraData{3, {"nvme"}, MemoryType::NVME, 1024};
+    seg2.priority = 3;
+    seg2.tags = {"nvme"};
+    seg2.memory_type = MemoryType::NVME;
+    seg2.usage = 1024;
 
     original.segments = {seg1, seg2};
 
@@ -210,8 +218,9 @@ TEST(P2POpLogTypesTest, RoundTrip_MountSegmentPayload) {
     original.segment.id = {70, 80};
     original.segment.name = "test_segment";
     original.segment.size = 2048;
-    original.segment.extra =
-        P2PSegmentExtraData{1, {"tag1"}, MemoryType::DRAM, 0};
+    original.segment.priority = 1;
+    original.segment.tags = {"tag1"};
+    original.segment.memory_type = MemoryType::DRAM;
 
     std::string data = SerializeP2PPayload(original);
     MountSegmentPayload decoded;
@@ -225,8 +234,8 @@ TEST(P2POpLogTypesTest, RoundTrip_MountSegmentPayload) {
     EXPECT_EQ(decoded.segment.size, 2048u);
 }
 
-TEST(P2POpLogTypesTest, RoundTrip_MountSegmentPayload_MonostateExtra) {
-    // Segment with default (monostate) extra data
+TEST(P2POpLogTypesTest, RoundTrip_MountSegmentPayload_DefaultFields) {
+    // P2PSegment with default routing fields.
     MountSegmentPayload original;
     original.client_id = {1, 2};
     original.segment.id = {3, 4};
@@ -239,8 +248,11 @@ TEST(P2POpLogTypesTest, RoundTrip_MountSegmentPayload_MonostateExtra) {
 
     EXPECT_EQ(decoded.segment.id.first, 3u);
     EXPECT_EQ(decoded.segment.name, "default_seg");
+    EXPECT_EQ(decoded.segment.priority, 0);
+    EXPECT_TRUE(decoded.segment.tags.empty());
+    EXPECT_EQ(decoded.segment.memory_type, MemoryType::DRAM);
+    EXPECT_EQ(decoded.segment.usage, 0u);
     EXPECT_EQ(decoded.segment.size, 512u);
-    EXPECT_TRUE(decoded.segment.IsEmpty());
 }
 
 // ============================================================================

@@ -15,6 +15,7 @@
 #include "p2p/client/tiered_cache/tiers/cache_tier.h"
 #include "p2p/client/tiered_cache/data_copier.h"
 #include "p2p/client/tiered_cache/scheduler/stats_collector.h"
+#include "p2p/common/p2p_types.h"
 #include "rpc_types.h"
 #include "utils.h"
 
@@ -115,7 +116,7 @@ struct ConditionalExecuteResult<void> {
  * The callback should register/unregister the segment with Master.
  */
 using SegmentSyncCallback = std::function<tl::expected<void, ErrorCode>(
-    const Segment& segment, bool mount)>;
+    const P2PSegment& segment, bool mount)>;
 
 /**
  * @class TieredBackend

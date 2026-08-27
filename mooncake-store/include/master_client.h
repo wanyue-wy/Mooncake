@@ -179,6 +179,8 @@ class MasterClient {
      * @param segment Segment to register
      * @return tl::expected<void, ErrorCode> indicating success/failure
      */
+    // TODO(M6): P2P uses P2PSegment. Add the typed RPC method when
+    // P2PMasterClient is separated from the centralized client.
     [[nodiscard]] tl::expected<void, ErrorCode> MountSegment(
         const Segment& segment);
 
@@ -187,6 +189,8 @@ class MasterClient {
      * @param req request with registration information
      * @return tl::expected<RegisterClientResponse, ErrorCode>
      */
+    // TODO(M6): P2P registration uses P2PRegisterClientRequest. Add the typed
+    // RPC method at the P2P MasterClient boundary stage.
     [[nodiscard]] tl::expected<RegisterClientResponse, ErrorCode>
     RegisterClient(const RegisterClientRequest& req);
 

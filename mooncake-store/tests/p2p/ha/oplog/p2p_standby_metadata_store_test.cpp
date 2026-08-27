@@ -14,9 +14,9 @@ namespace {
 // Helper to create a UUID from two uint64_t values.
 UUID MakeUUID(uint64_t hi, uint64_t lo) { return UUID{hi, lo}; }
 
-// Helper to create a basic Segment.
-Segment MakeSegment(const UUID& id, size_t size = 1024) {
-    Segment seg;
+// Helper to create a basic P2PSegment.
+P2PSegment MakeSegment(const UUID& id, size_t size = 1024) {
+    P2PSegment seg;
     seg.id = id;
     seg.size = size;
     return seg;
@@ -110,11 +110,10 @@ TEST(P2PStandbyMetadataStoreTest, AddReplicaPreservesSegmentExtra) {
     auto client_id = MakeUUID(1, 0);
     auto seg_id = MakeUUID(10, 0);
     auto seg = MakeSegment(seg_id, 4096);
-    auto& registered_extra = seg.GetP2PExtra();
-    registered_extra.priority = 7;
-    registered_extra.tags = {"hot", "ssd"};
-    registered_extra.memory_type = MemoryType::NVME;
-    registered_extra.usage = 256;
+    seg.priority = 7;
+    seg.tags = {"hot", "ssd"};
+    seg.memory_type = MemoryType::NVME;
+    seg.usage = 256;
     store.RegisterClient(client_id, "10.0.0.1", 50051, {seg});
 
     store.AddReplica("key1", client_id, seg_id, 1024, 1);
@@ -122,12 +121,11 @@ TEST(P2PStandbyMetadataStoreTest, AddReplicaPreservesSegmentExtra) {
     auto info = store.GetClient(client_id);
     ASSERT_NE(info, nullptr);
     ASSERT_EQ(info->segments.size(), 1u);
-    ASSERT_TRUE(info->segments[0].IsP2PSegment());
-    const auto& extra = info->segments[0].GetP2PExtra();
-    EXPECT_EQ(extra.priority, 7);
-    EXPECT_EQ(extra.tags, std::vector<std::string>({"hot", "ssd"}));
-    EXPECT_EQ(extra.memory_type, MemoryType::NVME);
-    EXPECT_EQ(extra.usage, 256u);
+    const auto& registered = info->segments[0];
+    EXPECT_EQ(registered.priority, 7);
+    EXPECT_EQ(registered.tags, std::vector<std::string>({"hot", "ssd"}));
+    EXPECT_EQ(registered.memory_type, MemoryType::NVME);
+    EXPECT_EQ(registered.usage, 256u);
 }
 
 TEST(P2PStandbyMetadataStoreTest, AddReplicaCreatesObject) {
@@ -226,7 +224,7 @@ TEST(P2PStandbyMetadataStoreTest, RemoveReplicaNonexistentKey) {
 TEST(P2PStandbyMetadataStoreTest, RegisterClientBasic) {
     P2PStandbyMetadataStore store;
     auto client_id = MakeUUID(1, 0);
-    std::vector<Segment> segments;
+    std::vector<P2PSegment> segments;
     segments.push_back(MakeSegment(MakeUUID(100, 0)));
 
     store.RegisterClient(client_id, "192.168.1.1", 50051, segments);
@@ -259,7 +257,7 @@ TEST(P2PStandbyMetadataStoreTest, RegisterClientPreservesEarlyMountSegment) {
     auto early_seg_id = MakeUUID(50, 0);
 
     // MOUNT_SEGMENT arrives before REGISTER_CLIENT
-    Segment early_seg;
+    P2PSegment early_seg;
     early_seg.id = early_seg_id;
     early_seg.size = 2048;
     store.AddSegment(client_id, early_seg);
@@ -280,7 +278,7 @@ TEST(P2PStandbyMetadataStoreTest, RegisterClientDuplicateSegmentIgnored) {
     auto seg_id = MakeUUID(100, 0);
 
     // MOUNT_SEGMENT first
-    Segment seg = MakeSegment(seg_id, 4096);
+    P2PSegment seg = MakeSegment(seg_id, 4096);
     store.AddSegment(client_id, seg);
 
     // REGISTER_CLIENT with same segment — should not duplicate
@@ -417,7 +415,7 @@ TEST(P2PStandbyMetadataStoreTest, AddSegmentDuplicateIgnored) {
     P2PStandbyMetadataStore store;
     auto client_id = MakeUUID(1, 0);
     auto seg_id = MakeUUID(100, 0);
-    Segment seg = MakeSegment(seg_id, 4096);
+    P2PSegment seg = MakeSegment(seg_id, 4096);
 
     store.AddSegment(client_id, seg);
     store.AddSegment(client_id, seg);  // duplicate — should be ignored
@@ -441,7 +439,7 @@ TEST(P2PStandbyMetadataStoreTest, AddAndRemoveSegment) {
     P2PStandbyMetadataStore store;
     auto client_id = MakeUUID(1, 0);
     auto seg_id = MakeUUID(100, 0);
-    Segment seg = MakeSegment(seg_id, 4096);
+    P2PSegment seg = MakeSegment(seg_id, 4096);
 
     store.AddSegment(client_id, seg);
 

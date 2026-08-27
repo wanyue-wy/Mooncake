@@ -123,11 +123,8 @@ std::ostream& operator<<(std::ostream& os, const Replica& replica) {
         }
         if (proxy_data.segment) {
             os << ", segment_id: " << proxy_data.segment->id;
-            if (proxy_data.segment->IsP2PSegment()) {
-                os << ", memory_type: "
-                   << MemoryTypeToString(
-                          proxy_data.segment->GetP2PExtra().memory_type);
-            }
+            os << ", memory_type: "
+               << MemoryTypeToString(proxy_data.segment->memory_type);
         }
         os << ", object_size: " << proxy_data.object_size;
     }

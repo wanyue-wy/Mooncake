@@ -84,8 +84,8 @@ OpLogEntry MakeRemoveEntry(uint64_t seq, const std::string& key) {
 
 UUID MakeUUID(uint64_t hi, uint64_t lo) { return UUID{hi, lo}; }
 
-Segment MakeSegment(const UUID& id, size_t size) {
-    Segment segment;
+P2PSegment MakeSegment(const UUID& id, size_t size) {
+    P2PSegment segment;
     segment.id = id;
     segment.size = size;
     return segment;
@@ -214,7 +214,7 @@ TEST(P2POpLogApplierTest, ApplyMountSegment) {
     auto client = MakeUUID(1, 0);
     auto seg_id = MakeUUID(100, 0);
 
-    Segment segment;
+    P2PSegment segment;
     segment.id = seg_id;
     segment.size = 4096;
 
@@ -241,7 +241,7 @@ TEST(P2POpLogApplierTest, ApplyUnmountSegment) {
     // First register client and mount
     store.RegisterClient(client, "1.2.3.4", 50051, {});
 
-    Segment segment;
+    P2PSegment segment;
     segment.id = seg_id;
     segment.size = 4096;
 
@@ -279,7 +279,7 @@ TEST(P2POpLogApplierTest, ApplyRegisterClient) {
     auto client = MakeUUID(1, 0);
     auto seg_id = MakeUUID(100, 0);
 
-    Segment segment;
+    P2PSegment segment;
     segment.id = seg_id;
     segment.size = 2048;
 
@@ -393,7 +393,7 @@ TEST(P2POpLogApplierTest, ReplayMountSegmentAlreadyInSnapshotIsNoOp) {
 
     auto client = MakeUUID(1, 0);
     auto seg = MakeUUID(10, 0);
-    Segment segment = MakeSegment(seg, 4096);
+    P2PSegment segment = MakeSegment(seg, 4096);
     store.RegisterClient(client, "192.168.1.100", 50051, {segment});
     applier.Recover(100);
 
@@ -416,8 +416,8 @@ TEST(P2POpLogApplierTest, ReplayRegisterClientAlreadyInSnapshotIsStable) {
     auto client = MakeUUID(1, 0);
     auto registration_seg = MakeUUID(10, 0);
     auto later_seg = MakeUUID(20, 0);
-    Segment registration_segment = MakeSegment(registration_seg, 4096);
-    Segment later_segment = MakeSegment(later_seg, 8192);
+    P2PSegment registration_segment = MakeSegment(registration_seg, 4096);
+    P2PSegment later_segment = MakeSegment(later_seg, 8192);
     store.RegisterClient(client, "192.168.1.100", 50051,
                          {registration_segment, later_segment});
     applier.Recover(100);

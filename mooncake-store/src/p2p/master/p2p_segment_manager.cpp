@@ -15,14 +15,31 @@ tl::expected<void, ErrorCode> P2PSegmentManager::MountSegment(
                      << ", warn=segment_already_exists";
         return tl::make_unexpected(ErrorCode::SEGMENT_ALREADY_EXISTS);
     }
-    auto ret = InnerMountSegment(segment);
-    if (!ret.has_value()) {
-        LOG(ERROR) << "fail to mount segment"
-                   << ", segment_id=" << segment.id
-                   << ", segment_name=" << segment.name
-                   << ", segment_size=" << segment.size
-                   << ", ret=" << ret.error();
-        return ret;
+    auto new_segment = std::make_shared<P2PSegment>(segment);
+    mounted_segments_[new_segment->id] = new_segment;
+
+    if (on_segment_added_) {
+        on_segment_added_(*new_segment);
+    }
+
+    const MemoryType type = new_segment->memory_type;
+    if (type == MemoryType::NVME) {
+        P2PMasterMetricManager::instance().inc_total_file_capacity(
+            segment.size);
+        P2PMasterMetricManager::instance().inc_allocated_file_size(
+            segment.usage);
+    } else {
+        if (type != MemoryType::DRAM) {
+            LOG(WARNING) << "mounting segment with unsupported memory type, "
+                            "counting toward mem capacity"
+                         << ", segment_id=" << segment.id
+                         << ", name=" << segment.name
+                         << ", memory_type=" << MemoryTypeToString(type);
+        }
+        P2PMasterMetricManager::instance().inc_total_mem_capacity(segment.name,
+                                                                  segment.size);
+        P2PMasterMetricManager::instance().inc_allocated_mem_size(segment.name,
+                                                                  segment.usage);
     }
     return {};
 }
@@ -37,12 +54,31 @@ tl::expected<void, ErrorCode> P2PSegmentManager::UnmountSegment(
             LOG(WARNING) << "attempt to unmount segment but it does not exist";
             return tl::make_unexpected(ErrorCode::SEGMENT_NOT_FOUND);
         }
-        auto ret = OnUnmountSegment(it->second);
-        if (!ret.has_value()) {
-            LOG(ERROR) << "fail to unmount segment"
-                       << ", segment_id=" << segment_id
-                       << ", ret=" << ret.error();
-            return ret;
+        const auto& segment = it->second;
+        if (on_segment_removed_) {
+            on_segment_removed_(*segment);
+        }
+
+        // Drop capacity and the last reported usage.
+        const MemoryType type = segment->memory_type;
+        const size_t usage = segment->usage;
+        if (type == MemoryType::NVME) {
+            P2PMasterMetricManager::instance().dec_total_file_capacity(
+                segment->size);
+            P2PMasterMetricManager::instance().dec_allocated_file_size(usage);
+        } else {
+            if (type != MemoryType::DRAM) {
+                LOG(WARNING)
+                    << "unmounting segment with unsupported memory type, "
+                       "counting toward mem capacity"
+                    << ", segment_id=" << segment->id
+                    << ", name=" << segment->name
+                    << ", memory_type=" << MemoryTypeToString(type);
+            }
+            P2PMasterMetricManager::instance().dec_total_mem_capacity(
+                segment->name, segment->size);
+            P2PMasterMetricManager::instance().dec_allocated_mem_size(
+                segment->name, usage);
         }
         mounted_segments_.erase(it);
     }
@@ -100,66 +136,6 @@ P2PSegmentManager::QuerySegments(const std::string& segment) {
     }
 
     return std::make_pair(used, capacity);
-}
-
-tl::expected<void, ErrorCode> P2PSegmentManager::InnerMountSegment(
-    const P2PSegment& segment) {
-    auto new_segment = std::make_shared<P2PSegment>(segment);
-    mounted_segments_[new_segment->id] = new_segment;
-
-    if (on_segment_added_) {
-        on_segment_added_(*new_segment);
-    }
-
-    const MemoryType type = new_segment->memory_type;
-    if (type == MemoryType::NVME) {
-        P2PMasterMetricManager::instance().inc_total_file_capacity(
-            segment.size);
-        P2PMasterMetricManager::instance().inc_allocated_file_size(
-            segment.usage);
-    } else {
-        if (type != MemoryType::DRAM) {
-            LOG(WARNING) << "mounting segment with unsupported memory type, "
-                            "counting toward mem capacity"
-                         << ", segment_id=" << segment.id
-                         << ", name=" << segment.name
-                         << ", memory_type=" << MemoryTypeToString(type);
-        }
-        P2PMasterMetricManager::instance().inc_total_mem_capacity(segment.name,
-                                                                  segment.size);
-        P2PMasterMetricManager::instance().inc_allocated_mem_size(
-            segment.name, segment.usage);
-    }
-    return {};
-}
-
-tl::expected<void, ErrorCode> P2PSegmentManager::OnUnmountSegment(
-    const std::shared_ptr<P2PSegment>& segment) {
-    if (on_segment_removed_) {
-        on_segment_removed_(*segment);
-    }
-
-    // drop capacity and the last reported usage
-    const MemoryType type = segment->memory_type;
-    const size_t usage = segment->usage;
-    if (type == MemoryType::NVME) {
-        P2PMasterMetricManager::instance().dec_total_file_capacity(
-            segment->size);
-        P2PMasterMetricManager::instance().dec_allocated_file_size(usage);
-    } else {
-        if (type != MemoryType::DRAM) {
-            LOG(WARNING) << "unmounting segment with unsupported memory type, "
-                            "counting toward mem capacity"
-                         << ", segment_id=" << segment->id
-                         << ", name=" << segment->name
-                         << ", memory_type=" << MemoryTypeToString(type);
-        }
-        P2PMasterMetricManager::instance().dec_total_mem_capacity(
-            segment->name, segment->size);
-        P2PMasterMetricManager::instance().dec_allocated_mem_size(segment->name,
-                                                                  usage);
-    }
-    return {};
 }
 
 tl::expected<size_t, ErrorCode> P2PSegmentManager::UpdateSegmentUsage(

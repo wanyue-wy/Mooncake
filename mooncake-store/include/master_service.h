@@ -49,6 +49,8 @@ class MasterService {
     /**
      * @brief Register a client with its segments.
      */
+    // TODO(M5): P2P registration uses P2PRegisterClientRequest. Add its typed
+    // operation when P2PMasterService is separated from this class.
     virtual auto RegisterClient(const RegisterClientRequest& req)
         -> tl::expected<RegisterClientResponse, ErrorCode>;
 
@@ -78,6 +80,9 @@ class MasterService {
      * @return ErrorCode::SEGMENT_ALREADY_EXISTS if it is already mounted.
      *         ErrorCode::CLIENT_UNHEALTHY if the client is unhealthy.
      */
+    // TODO(M5): P2PMasterService uses P2PSegment and cannot reuse this
+    // centralized Segment boundary. Add its typed operation when the service
+    // implementations are separated.
     virtual auto MountSegment(const Segment& segment, const UUID& client_id)
         -> tl::expected<void, ErrorCode>;
 

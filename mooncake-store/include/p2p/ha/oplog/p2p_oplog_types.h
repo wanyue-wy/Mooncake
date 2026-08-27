@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "p2p/ha/oplog/oplog_manager.h"
+#include "p2p/common/p2p_types.h"
 #include "replica.h"
 #include "types.h"
 
@@ -35,7 +36,7 @@ inline bool IsBestEffortP2POpLog(OpType type) {
 // ============================================================================
 // Each payload is struct_pack-serialized and stored in OpLogEntry::payload.
 // On the apply side, P2POpLogApplier deserializes back to the struct.
-// Payload structs embed complex types (Segment, vector<Segment>) directly,
+// Payload structs embed P2P data types directly,
 // consistent with main branch's MetadataPayload which embeds
 // vector<Replica::Descriptor> the same way.
 
@@ -47,7 +48,7 @@ struct RegisterClientPayload {
     std::string ip_address;
     uint16_t rpc_port = 0;
     // Segments registered by this client at registration time.
-    std::vector<Segment> segments;
+    std::vector<P2PSegment> segments;
 
     YLT_REFL(RegisterClientPayload, client_id, ip_address, rpc_port, segments);
 };
@@ -85,7 +86,7 @@ struct RemoveReplicaPayload {
 /// Records that a segment was mounted by a client.
 struct MountSegmentPayload {
     UUID client_id{0, 0};
-    Segment segment;
+    P2PSegment segment;
 
     YLT_REFL(MountSegmentPayload, client_id, segment);
 };

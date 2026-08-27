@@ -478,7 +478,7 @@ P2PClientService::SyncBatchRemoveReplica(std::string_view key,
 }
 
 SegmentSyncCallback P2PClientService::BuildSegmentSyncCallback() {
-    return [this](const Segment& segment,
+    return [this](const P2PSegment& segment,
                   bool mount) -> tl::expected<void, ErrorCode> {
         if (mount) {
             // Skip MountSegment in degraded mode (master not connected).
@@ -555,8 +555,8 @@ HeartbeatRequest P2PClientService::build_heartbeat_request() {
     return req;
 }
 
-std::vector<Segment> P2PClientService::CollectTierSegments() const {
-    std::vector<Segment> segments;
+std::vector<P2PSegment> P2PClientService::CollectTierSegments() const {
+    std::vector<P2PSegment> segments;
     if (!data_manager_.has_value()) {
         return segments;
     }
@@ -564,15 +564,14 @@ std::vector<Segment> P2PClientService::CollectTierSegments() const {
     auto tier_views = data_manager_->GetTierViews();
     segments.reserve(tier_views.size());
     for (const auto& view : tier_views) {
-        Segment seg;
+        P2PSegment seg;
         seg.id = view.id;
         seg.name = view.GetName();
         seg.size = view.capacity;
-        auto& p2p_extra = seg.GetP2PExtra();
-        p2p_extra.priority = view.priority;
-        p2p_extra.tags = view.tags;
-        p2p_extra.memory_type = view.type;
-        p2p_extra.usage = view.usage;
+        seg.priority = view.priority;
+        seg.tags = view.tags;
+        seg.memory_type = view.type;
+        seg.usage = view.usage;
         segments.push_back(std::move(seg));
     }
     return segments;
@@ -580,10 +579,9 @@ std::vector<Segment> P2PClientService::CollectTierSegments() const {
 
 tl::expected<RegisterClientResponse, ErrorCode>
 P2PClientService::InnerRegisterClient() {
-    RegisterClientRequest req;
+    P2PRegisterClientRequest req;
     req.client_id = client_id_;
     req.segments = CollectTierSegments();
-    req.deployment_mode = DeploymentMode::P2P;
     req.ip_address = local_ip_;
     req.rpc_port = client_rpc_port_;
 

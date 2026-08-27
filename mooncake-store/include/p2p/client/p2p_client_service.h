@@ -257,7 +257,7 @@ class P2PClientService final : public ClientService {
     /**
      * @brief Collect tier info from DataManager and build P2P Segments.
      */
-    std::vector<Segment> CollectTierSegments() const;
+    std::vector<P2PSegment> CollectTierSegments() const;
 
     /**
      * @brief Register the P2P client with the master. On a re-registration from

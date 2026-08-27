@@ -3,7 +3,7 @@
 #include "p2p/master/p2p_master_service.h"
 #include "rpc_service.h"
 
-#include "p2p/master/p2p_rpc_types.h"
+#include "p2p/common/p2p_rpc_types.h"
 
 namespace mooncake {
 

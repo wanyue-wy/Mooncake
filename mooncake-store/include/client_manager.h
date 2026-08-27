@@ -85,6 +85,9 @@ class ClientManager {
      * Must be called before any other client/segment operations.
      * @return RegisterClientResponse containing master's view_version
      */
+    // TODO(M3): P2P registration carries P2PSegment in
+    // P2PRegisterClientRequest and cannot reuse this centralized request.
+    // Add the typed registration path when P2PClientManager is split.
     auto RegisterClient(const RegisterClientRequest& req)
         -> tl::expected<RegisterClientResponse, ErrorCode>;
 
@@ -172,6 +175,9 @@ class ClientManager {
         ObjectIterateStrategy strategy);
 
    protected:
+    // TODO(M3): These construction hooks are tied to RegisterClientRequest.
+    // Replace them with P2P-specific operations when P2PClientManager is
+    // separated from this class.
     virtual tl::expected<void, ErrorCode> ValidateRegisterRequest(
         const RegisterClientRequest& /*req*/) {
         return {};

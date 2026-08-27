@@ -12,17 +12,17 @@ P2PClientMeta::P2PClientMeta(const UUID& client_id,
     : ClientMeta(client_id), ip_address_(ip_address), rpc_port_(rpc_port) {
     segment_manager_ = std::make_shared<P2PSegmentManager>();
     segment_manager_->SetSegmentChangeCallbacks(
-        [this](const Segment& segment) {
+        [this](const P2PSegment& segment) {
             // OnSegmentAddedCallback
             SpinRWLockLocker lock(&capacity_mutex_);
             client_capacity_ += segment.size;
-            client_usage_ += segment.GetP2PExtra().usage;
+            client_usage_ += segment.usage;
         },
-        [this](const Segment& segment) {
+        [this](const P2PSegment& segment) {
             // OnSegmentRemovedCallback
             SpinRWLockLocker lock(&capacity_mutex_);
             client_capacity_ -= segment.size;
-            client_usage_ -= segment.GetP2PExtra().usage;
+            client_usage_ -= segment.usage;
         });
 }
 
@@ -100,11 +100,11 @@ P2PClientMeta::CapacityStat P2PClientMeta::GetWriteScoreCapacity(
     bool top_tier_only) const {
     // A segment is eligible for scoring if it carries no filtered tag and its
     // priority is >= priority_limit.
-    auto eligible = [&](const P2PSegmentExtraData& extra) -> bool {
-        if (extra.priority < priority_limit) return false;
+    auto eligible = [&](const P2PSegment& segment) -> bool {
+        if (segment.priority < priority_limit) return false;
         for (const auto& tag : tag_filters) {
-            if (std::find(extra.tags.begin(), extra.tags.end(), tag) !=
-                extra.tags.end()) {
+            if (std::find(segment.tags.begin(), segment.tags.end(), tag) !=
+                segment.tags.end()) {
                 return false;
             }
         }
@@ -113,16 +113,15 @@ P2PClientMeta::CapacityStat P2PClientMeta::GetWriteScoreCapacity(
 
     CapacityStat all, top;
     int max_priority = std::numeric_limits<int>::min();
-    segment_manager_->ForEachSegment([&](const Segment& seg) -> bool {
-        const auto& extra = seg.GetP2PExtra();
-        if (!eligible(extra)) return false;
-        const size_t free = seg.size > extra.usage ? seg.size - extra.usage : 0;
+    segment_manager_->ForEachSegment([&](const P2PSegment& seg) -> bool {
+        if (!eligible(seg)) return false;
+        const size_t free = seg.size > seg.usage ? seg.size - seg.usage : 0;
         all.total += seg.size;
         all.free += free;
-        if (extra.priority > max_priority) {
-            max_priority = extra.priority;
+        if (seg.priority > max_priority) {
+            max_priority = seg.priority;
             top = {free, seg.size};
-        } else if (extra.priority == max_priority) {
+        } else if (seg.priority == max_priority) {
             top.total += seg.size;
             top.free += free;
         }

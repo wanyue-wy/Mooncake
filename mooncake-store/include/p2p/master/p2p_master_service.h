@@ -4,7 +4,7 @@
 
 #include "master_service.h"
 #include "p2p/master/p2p_client_manager.h"
-#include "p2p/master/p2p_rpc_types.h"
+#include "p2p/common/p2p_rpc_types.h"
 #include "p2p/ha/oplog/oplog_manager.h"
 #include "p2p/ha/oplog/p2p_standby_metadata_store.h"
 

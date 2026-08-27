@@ -98,6 +98,9 @@ class ClientMeta {
     std::string HealthToString(ClientStatus status) const;
 
    protected:
+    // TODO(M2): P2P uses P2PSegment and cannot implement this centralized
+    // SegmentManager contract. Remove the P2P inheritance when ClientMeta is
+    // split and move the typed segment operations into P2PClientMeta.
     virtual std::shared_ptr<SegmentManager> GetSegmentManager() = 0;
 
    protected:

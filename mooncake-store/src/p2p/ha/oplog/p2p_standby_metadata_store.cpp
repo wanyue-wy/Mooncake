@@ -159,7 +159,7 @@ void P2PStandbyMetadataStore::RemoveReplica(const std::string& object_key,
 
 void P2PStandbyMetadataStore::RegisterClient(
     const UUID& client_id, const std::string& ip_address, uint16_t rpc_port,
-    const std::vector<Segment>& segments) {
+    const std::vector<P2PSegment>& segments) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto& info = clients_[client_id];
     info.client_id = client_id;
@@ -170,7 +170,7 @@ void P2PStandbyMetadataStore::RegisterClient(
     // REGISTER_CLIENT.
     for (const auto& seg : segments) {
         if (std::find_if(info.segments.begin(), info.segments.end(),
-                         [&](const Segment& existing) {
+                         [&](const P2PSegment& existing) {
                              return existing.id == seg.id;
                          }) == info.segments.end()) {
             info.segments.push_back(seg);
@@ -219,7 +219,7 @@ void P2PStandbyMetadataStore::UnRegisterClient(const UUID& client_id) {
 }
 
 void P2PStandbyMetadataStore::AddSegment(const UUID& client_id,
-                                         const Segment& segment) {
+                                         const P2PSegment& segment) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto& info = clients_[client_id];
     info.client_id = client_id;  // In case client wasn't registered yet
@@ -248,7 +248,7 @@ void P2PStandbyMetadataStore::RemoveSegment(const UUID& segment_id,
     if (client_it != clients_.end()) {
         auto& segments = client_it->second.segments;
         segments.erase(std::remove_if(segments.begin(), segments.end(),
-                                      [&](const Segment& seg) {
+                                      [&](const P2PSegment& seg) {
                                           return seg.id == segment_id;
                                       }),
                        segments.end());

@@ -6,10 +6,22 @@
 #include <vector>
 
 #include "replica.h"
+#include "p2p/common/p2p_types.h"
 #include "types.h"
 #include <ylt/reflection/user_reflect_macro.hpp>
 
 namespace mooncake {
+
+/**
+ * @brief Registration data sent by a P2P client to the P2P master.
+ */
+struct P2PRegisterClientRequest {
+    UUID client_id;
+    std::vector<P2PSegment> segments;
+    std::string ip_address;
+    uint16_t rpc_port{0};
+};
+YLT_REFL(P2PRegisterClientRequest, client_id, segments, ip_address, rpc_port);
 
 /**
  * @brief Request config for write route
