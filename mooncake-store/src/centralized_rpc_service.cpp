@@ -1,5 +1,5 @@
 #include "centralized_rpc_service.h"
-#include "centralized_master_metric_manager.h"
+#include "master_metric_manager.h"
 #include "rpc_helper.h"
 #include <csignal>
 
@@ -108,10 +108,10 @@ WrappedCentralizedMasterService::PutStart(const UUID& client_id,
                              ", slice_length=", slice_length);
         },
         [&] {
-            CentralizedMasterMetricManager::instance().inc_put_start_requests();
+            MasterMetricManager::instance().inc_put_start_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance().inc_put_start_failures();
+            MasterMetricManager::instance().inc_put_start_failures();
         });
 }
 
@@ -125,10 +125,10 @@ tl::expected<void, ErrorCode> WrappedCentralizedMasterService::PutEnd(
                              ", replica_type=", replica_type);
         },
         [] {
-            CentralizedMasterMetricManager::instance().inc_put_end_requests();
+            MasterMetricManager::instance().inc_put_end_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance().inc_put_end_failures();
+            MasterMetricManager::instance().inc_put_end_failures();
         });
 }
 
@@ -142,11 +142,11 @@ tl::expected<void, ErrorCode> WrappedCentralizedMasterService::PutRevoke(
                              ", replica_type=", replica_type);
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_put_revoke_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_put_revoke_failures();
         });
 }
@@ -158,7 +158,7 @@ WrappedCentralizedMasterService::BatchPutStart(
     ScopedVLogTimer timer(1, "BatchPutStart");
     const size_t total_keys = keys.size();
     timer.LogRequest("client_id=", client_id, ", keys_count=", total_keys);
-    CentralizedMasterMetricManager::instance().inc_batch_put_start_requests(
+    MasterMetricManager::instance().inc_batch_put_start_requests(
         total_keys);
 
     std::vector<tl::expected<std::vector<Replica::Descriptor>, ErrorCode>>
@@ -218,10 +218,10 @@ WrappedCentralizedMasterService::BatchPutStart(
     }
 
     if (failure_count == total_keys) {
-        CentralizedMasterMetricManager::instance().inc_batch_put_start_failures(
+        MasterMetricManager::instance().inc_batch_put_start_failures(
             failure_count);
     } else if (failure_count != 0) {
-        CentralizedMasterMetricManager::instance()
+        MasterMetricManager::instance()
             .inc_batch_put_start_partial_success(failure_count);
     }
 
@@ -237,7 +237,7 @@ WrappedCentralizedMasterService::BatchPutEnd(
     ScopedVLogTimer timer(1, "BatchPutEnd");
     const size_t total_keys = keys.size();
     timer.LogRequest("client_id=", client_id, ", keys_count=", total_keys);
-    CentralizedMasterMetricManager::instance().inc_batch_put_end_requests(
+    MasterMetricManager::instance().inc_batch_put_end_requests(
         total_keys);
 
     std::vector<tl::expected<void, ErrorCode>> results;
@@ -259,10 +259,10 @@ WrappedCentralizedMasterService::BatchPutEnd(
     }
 
     if (failure_count == total_keys) {
-        CentralizedMasterMetricManager::instance().inc_batch_put_end_failures(
+        MasterMetricManager::instance().inc_batch_put_end_failures(
             failure_count);
     } else if (failure_count != 0) {
-        CentralizedMasterMetricManager::instance()
+        MasterMetricManager::instance()
             .inc_batch_put_end_partial_success(failure_count);
     }
 
@@ -278,7 +278,7 @@ WrappedCentralizedMasterService::BatchPutRevoke(
     ScopedVLogTimer timer(1, "BatchPutRevoke");
     const size_t total_keys = keys.size();
     timer.LogRequest("client_id=", client_id, ", keys_count=", total_keys);
-    CentralizedMasterMetricManager::instance().inc_batch_put_revoke_requests(
+    MasterMetricManager::instance().inc_batch_put_revoke_requests(
         total_keys);
 
     std::vector<tl::expected<void, ErrorCode>> results;
@@ -300,10 +300,10 @@ WrappedCentralizedMasterService::BatchPutRevoke(
     }
 
     if (failure_count == total_keys) {
-        CentralizedMasterMetricManager::instance()
+        MasterMetricManager::instance()
             .inc_batch_put_revoke_failures(failure_count);
     } else if (failure_count != 0) {
-        CentralizedMasterMetricManager::instance()
+        MasterMetricManager::instance()
             .inc_batch_put_revoke_partial_success(failure_count);
     }
 
@@ -322,7 +322,7 @@ WrappedCentralizedMasterService::BatchReplicaClear(
     timer.LogRequest("object_keys_count=", total_keys,
                      ", client_id=", client_id,
                      ", segment_name=", segment_name);
-    CentralizedMasterMetricManager::instance().inc_batch_replica_clear_requests(
+    MasterMetricManager::instance().inc_batch_replica_clear_requests(
         total_keys);
 
     auto result =
@@ -341,10 +341,10 @@ WrappedCentralizedMasterService::BatchReplicaClear(
     }
 
     if (failure_count == total_keys) {
-        CentralizedMasterMetricManager::instance()
+        MasterMetricManager::instance()
             .inc_batch_replica_clear_failures(failure_count);
     } else if (failure_count != 0) {
-        CentralizedMasterMetricManager::instance()
+        MasterMetricManager::instance()
             .inc_batch_replica_clear_partial_success(failure_count);
     }
 
@@ -369,11 +369,11 @@ WrappedCentralizedMasterService::CopyStart(
                              ", tgt_segments_count=", tgt_segments.size());
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_copy_start_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_copy_start_failures();
         });
 }
@@ -386,10 +386,10 @@ tl::expected<void, ErrorCode> WrappedCentralizedMasterService::CopyEnd(
             timer.LogRequest("client_id=", client_id, ", key=", key);
         },
         [] {
-            CentralizedMasterMetricManager::instance().inc_copy_end_requests();
+            MasterMetricManager::instance().inc_copy_end_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance().inc_copy_end_failures();
+            MasterMetricManager::instance().inc_copy_end_failures();
         });
 }
 
@@ -402,11 +402,11 @@ tl::expected<void, ErrorCode> WrappedCentralizedMasterService::CopyRevoke(
             timer.LogRequest("client_id=", client_id, ", key=", key);
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_copy_revoke_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_copy_revoke_failures();
         });
 }
@@ -428,11 +428,11 @@ WrappedCentralizedMasterService::MoveStart(const UUID& client_id,
                              ", tgt_segment=", tgt_segment);
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_move_start_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_move_start_failures();
         });
 }
@@ -445,10 +445,10 @@ tl::expected<void, ErrorCode> WrappedCentralizedMasterService::MoveEnd(
             timer.LogRequest("client_id=", client_id, ", key=", key);
         },
         [] {
-            CentralizedMasterMetricManager::instance().inc_move_end_requests();
+            MasterMetricManager::instance().inc_move_end_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance().inc_move_end_failures();
+            MasterMetricManager::instance().inc_move_end_failures();
         });
 }
 
@@ -461,11 +461,11 @@ tl::expected<void, ErrorCode> WrappedCentralizedMasterService::MoveRevoke(
             timer.LogRequest("client_id=", client_id, ", key=", key);
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_move_revoke_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_move_revoke_failures();
         });
 }
@@ -479,11 +479,11 @@ tl::expected<UUID, ErrorCode> WrappedCentralizedMasterService::CreateCopyTask(
             timer.LogRequest("key=", key, ", targets_size=", targets.size());
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_create_copy_task_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_create_copy_task_failures();
         });
 }
@@ -499,11 +499,11 @@ tl::expected<UUID, ErrorCode> WrappedCentralizedMasterService::CreateMoveTask(
                              ", target=", target);
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_create_move_task_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_create_move_task_failures();
         });
 }
@@ -514,11 +514,11 @@ WrappedCentralizedMasterService::QueryTask(const UUID& task_id) {
         "QueryTask", [&] { return master_service_.QueryTask(task_id); },
         [&](auto& timer) { timer.LogRequest("task_id=", task_id); },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_query_task_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_query_task_failures();
         });
 }
@@ -534,11 +534,11 @@ WrappedCentralizedMasterService::FetchTasks(const UUID& client_id,
                              ", batch_size=", batch_size);
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_fetch_tasks_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_fetch_tasks_failures();
         });
 }
@@ -553,11 +553,11 @@ WrappedCentralizedMasterService::MarkTaskToComplete(
             timer.LogRequest("client_id=", client_id, ", task_id=", request.id);
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_update_task_requests();
         },
         [] {
-            CentralizedMasterMetricManager::instance()
+            MasterMetricManager::instance()
                 .inc_update_task_failures();
         });
 }
