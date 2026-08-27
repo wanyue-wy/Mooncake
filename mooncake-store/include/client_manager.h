@@ -9,13 +9,14 @@
 #include <ylt/util/tl/expected.hpp>
 
 #include "p2p/client/heartbeat_type.h"
-#include "client_meta.h"
 #include "mutex.h"
 #include "rpc_types.h"
 #include "types.h"
 #include <random>
 
 namespace mooncake {
+
+class ClientMeta;
 
 class ClientIterator {
    public:
