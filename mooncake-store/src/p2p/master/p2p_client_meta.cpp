@@ -255,7 +255,6 @@ void P2PClientMeta::OnDisconnected() {
     }
     LOG(INFO) << "the client is disconnected"
               << ", client_id=" << client_id_;
-    DoOnDisconnected();
     MasterMetricManager::instance().dec_active_clients();
     MasterMetricManager::instance().inc_clients_disconnected_total();
 }
@@ -272,7 +271,6 @@ void P2PClientMeta::OnRecovered() {
     }
     LOG(INFO) << "the client is recovered"
               << ", client_id=" << client_id_;
-    DoOnRecovered();
     MasterMetricManager::instance().inc_active_clients();
     MasterMetricManager::instance().inc_clients_recovered_total();
 }

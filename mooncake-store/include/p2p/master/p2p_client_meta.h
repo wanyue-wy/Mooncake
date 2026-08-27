@@ -111,11 +111,6 @@ class P2PClientMeta final {
 
     std::shared_ptr<P2PSegmentManager> GetSegmentManager();
 
-    // Retained while merging the former base-class call sequence. These P2P
-    // hooks are intentionally empty and are audited in M2 stage 3.
-    void DoOnDisconnected() {}
-    void DoOnRecovered() {}
-
    private:
     /// Free/total capacity over the segments eligible for write-route scoring.
     struct CapacityStat {

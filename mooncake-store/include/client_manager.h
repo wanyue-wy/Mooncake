@@ -16,6 +16,9 @@
 
 namespace mooncake {
 
+// TODO(M3): Remove this transitional pointer boundary when P2PClientManager
+// owns its concrete P2PClientMeta map and centralized client lifecycle returns
+// to MasterService.
 class ClientMeta;
 
 class ClientIterator {
