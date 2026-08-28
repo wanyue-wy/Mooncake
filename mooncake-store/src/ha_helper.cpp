@@ -1,6 +1,5 @@
 #include "ha_helper.h"
 #include "etcd_helper.h"
-#include "centralized_rpc_service.h"
 #include "p2p/ha/oplog/p2p_hot_standby_service.h"
 #include "p2p/master/p2p_rpc_service.h"
 #include "rpc_service.h"
@@ -357,17 +356,21 @@ int MasterServiceSupervisor::Start() {
         // == 0).
         const bool dedicated_heartbeat = config_.heartbeat_rpc_port > 0;
         const bool main_includes_heartbeat = !dedicated_heartbeat;
-        std::unique_ptr<WrappedCentralizedMasterService>
-            centralized_wrapped_service;
+        if (config_.deployment_mode == DeploymentMode::CENTRALIZATION &&
+            dedicated_heartbeat) {
+            LOG(ERROR) << "Dedicated heartbeat RPC is not supported by the "
+                          "centralized Ping protocol";
+            mv_helper->CancelKeepAlive(lease_id);
+            keep_leader_thread.join();
+            return -1;
+        }
+        std::unique_ptr<WrappedMasterService> centralized_wrapped_service;
         std::unique_ptr<WrappedP2PMasterService> p2p_wrapped_service;
         if (config_.deployment_mode == DeploymentMode::CENTRALIZATION) {
             centralized_wrapped_service =
-                std::make_unique<WrappedCentralizedMasterService>(
+                std::make_unique<WrappedMasterService>(
                     WrappedMasterServiceConfig(config_, view_version));
-            centralized_wrapped_service->init();
-            RegisterCentralizedRpcService(server, *centralized_wrapped_service,
-                                          /*include_heartbeat=*/
-                                          main_includes_heartbeat);
+            RegisterRpcService(server, *centralized_wrapped_service);
         } else {
             p2p_wrapped_service = std::make_unique<WrappedP2PMasterService>(
                 WrappedMasterServiceConfig(config_, view_version));
@@ -407,13 +410,8 @@ int MasterServiceSupervisor::Start() {
                 std::max<size_t>(1, config_.heartbeat_rpc_thread_num),
                 config_.heartbeat_rpc_port, config_.rpc_address,
                 config_.rpc_conn_timeout, config_.rpc_enable_tcp_no_delay);
-            if (centralized_wrapped_service) {
-                RegisterHeartbeatRpcService(*heartbeat_server,
-                                            *centralized_wrapped_service);
-            } else {
-                RegisterP2PHeartbeatRpcService(*heartbeat_server,
-                                               *p2p_wrapped_service);
-            }
+            RegisterP2PHeartbeatRpcService(*heartbeat_server,
+                                           *p2p_wrapped_service);
             LOG(INFO) << "Starting dedicated heartbeat RPC server on port "
                       << config_.heartbeat_rpc_port;
             auto heartbeat_ec = heartbeat_server->async_start();

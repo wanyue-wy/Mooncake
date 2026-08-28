@@ -11,7 +11,6 @@
 
 #include "http_metadata_server.h"
 #include "master_config.h"
-#include "centralized_rpc_service.h"
 #include "rpc_service.h"
 #include "types.h"
 #include "utils.h"
@@ -31,6 +30,11 @@ class InProcMaster {
 
     bool Start(InProcMasterConfig config) {
         try {
+            if (config.heartbeat_rpc_port.value_or(0) != 0) {
+                LOG(ERROR) << "Dedicated heartbeat RPC is not supported by "
+                              "the centralized Ping protocol";
+                return false;
+            }
             // Choose ports if not provided
             rpc_port_ = config.rpc_port.has_value() ? config.rpc_port.value()
                                                     : getFreeTcpPort();
@@ -121,32 +125,8 @@ class InProcMaster {
                 wms_cfg.client_crashed_ttl_sec = DEFAULT_CLIENT_CRASHED_TTL_SEC;
             }
 
-            wrapped_ =
-                std::make_unique<WrappedCentralizedMasterService>(wms_cfg);
-            wrapped_->init();
-            // When a dedicated heartbeat port is configured, serve Heartbeat on
-            // a separate coro_rpc_server (plain TCP). Otherwise Heartbeat is
-            // served on the main server as the legacy fallback.
-            const bool dedicated_heartbeat =
-                config.heartbeat_rpc_port.has_value() &&
-                config.heartbeat_rpc_port.value() > 0;
-            const bool main_includes_heartbeat = !dedicated_heartbeat;
-            RegisterCentralizedRpcService(
-                *server_, *wrapped_,
-                /*include_heartbeat=*/main_includes_heartbeat);
-            if (dedicated_heartbeat) {
-                heartbeat_rpc_port_ = config.heartbeat_rpc_port.value();
-                uint32_t hb_threads =
-                    config.heartbeat_rpc_thread_num.has_value()
-                        ? config.heartbeat_rpc_thread_num.value()
-                        : 1u;
-                if (hb_threads == 0) hb_threads = 1;
-                heartbeat_server_ = std::make_unique<coro_rpc::coro_rpc_server>(
-                    /*thread_num=*/hb_threads, /*port=*/heartbeat_rpc_port_,
-                    /*address=*/"0.0.0.0", std::chrono::seconds(0),
-                    /*tcp_no_delay=*/true);
-                RegisterHeartbeatRpcService(*heartbeat_server_, *wrapped_);
-            }
+            wrapped_ = std::make_unique<WrappedMasterService>(wms_cfg);
+            RegisterRpcService(*server_, *wrapped_);
 
             auto ec = server_->async_start();
             if (ec.hasResult()) {
@@ -200,12 +180,12 @@ class InProcMaster {
                std::to_string(http_metrics_port_);
     }
 
-    WrappedCentralizedMasterService& GetWrapped() { return *wrapped_; }
+    WrappedMasterService& GetWrapped() { return *wrapped_; }
 
    private:
     std::unique_ptr<coro_rpc::coro_rpc_server> server_;
     std::unique_ptr<coro_rpc::coro_rpc_server> heartbeat_server_;
-    std::unique_ptr<WrappedCentralizedMasterService> wrapped_;
+    std::unique_ptr<WrappedMasterService> wrapped_;
     std::unique_ptr<HttpMetadataServer> meta_server_;
     int rpc_port_ = 0;
     int heartbeat_rpc_port_ = 0;

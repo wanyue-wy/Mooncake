@@ -1,7 +1,7 @@
 #pragma once
 
 #include "client_service.h"
-#include "centralized_master_client.h"
+#include "centralized_master_rpc_adapter.h"
 #include "storage_backend.h"
 #include "file_storage.h"
 #include "transfer_task.h"
@@ -115,6 +115,7 @@ class CentralizedClientService
 
     ErrorCode Init(const CentralizedClientConfig& config);
     void Stop() override;
+    void StopHeartbeat() override EXCLUDES(registration_mutex_);
     void Destroy() override;
 
     tl::expected<std::unique_ptr<QueryResult>, ErrorCode> Query(
@@ -292,8 +293,10 @@ class CentralizedClientService
 
    protected:
     HeartbeatRequest build_heartbeat_request() override;
+    void StartPing(const std::string& master_server_entry);
+    void PingThreadMain(bool is_ha_mode, std::string current_master_address);
 
-    CentralizedMasterClient& GetMasterClient() { return master_client_; }
+    CentralizedMasterRpcAdapter& GetMasterClient() { return master_client_; }
 
     ErrorCode ConnectMasterClient(const std::string& master_address) override {
         return master_client_.Connect(master_address);
@@ -314,9 +317,7 @@ class CentralizedClientService
     }
 
     tl::expected<HeartbeatResponse, ErrorCode> SendHeartbeat(
-        const HeartbeatRequest& request) override {
-        return master_client_.Heartbeat(request);
-    }
+        const HeartbeatRequest& request) override;
 
     tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
     CalcCacheStatsFromMaster() override {
@@ -415,7 +416,7 @@ class CentralizedClientService
     std::vector<std::unique_ptr<void, HugepageSegmentDeleter>>
         hugepage_segment_ptrs_;
 
-    CentralizedMasterClient master_client_;
+    CentralizedMasterRpcAdapter master_client_;
     std::unique_ptr<TransferSubmitter> transfer_submitter_;
 
     // Mutex to protect mounted_segments_

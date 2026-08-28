@@ -26,6 +26,29 @@ namespace mooncake {
 
 const uint64_t kMetricReportIntervalSeconds = 10;
 
+namespace {
+
+tl::expected<CentralizedGetReplicaListResponse, ErrorCode>
+ToCentralizedGetReplicaListResponse(
+    tl::expected<GetReplicaListResponse, ErrorCode> response) {
+    if (!response) {
+        return tl::make_unexpected(response.error());
+    }
+
+    CentralizedGetReplicaListResponse wire_response;
+    wire_response.replicas = std::move(response->replicas);
+    if (response->centralized_extra.has_value()) {
+        wire_response.lease_ttl_ms =
+            response->centralized_extra->lease_ttl_ms;
+    } else {
+        LOG(ERROR) << "Centralized GetReplicaList response is missing lease "
+                      "metadata; using zero TTL";
+    }
+    return wire_response;
+}
+
+}  // namespace
+
 WrappedMasterService::WrappedMasterService(
     const WrappedMasterServiceConfig& config)
     : master_service_(MasterServiceConfig(config)),
@@ -394,10 +417,14 @@ WrappedMasterService::GetReplicaListByRegex(const std::string& str) {
         });
 }
 
-tl::expected<GetReplicaListResponse, ErrorCode>
+tl::expected<CentralizedGetReplicaListResponse, ErrorCode>
 WrappedMasterService::GetReplicaList(const std::string& key) {
     return execute_rpc(
-        "GetReplicaList", [&] { return master_service_.GetReplicaList(key); },
+        "GetReplicaList",
+        [&] {
+            return ToCentralizedGetReplicaListResponse(
+                master_service_.GetReplicaList(key));
+        },
         [&](auto& timer) { timer.LogRequest("key=", key); },
         [] { MasterMetricManager::instance().inc_get_replica_list_requests(); },
         [] {
@@ -405,7 +432,7 @@ WrappedMasterService::GetReplicaList(const std::string& key) {
         });
 }
 
-std::vector<tl::expected<GetReplicaListResponse, ErrorCode>>
+std::vector<tl::expected<CentralizedGetReplicaListResponse, ErrorCode>>
 WrappedMasterService::BatchGetReplicaList(
     const std::vector<std::string>& keys) {
     ScopedVLogTimer timer(1, "BatchGetReplicaList");
@@ -414,11 +441,13 @@ WrappedMasterService::BatchGetReplicaList(
     MasterMetricManager::instance().inc_batch_get_replica_list_requests(
         total_keys);
 
-    std::vector<tl::expected<GetReplicaListResponse, ErrorCode>> results;
+    std::vector<tl::expected<CentralizedGetReplicaListResponse, ErrorCode>>
+        results;
     results.reserve(keys.size());
 
     for (const auto& key : keys) {
-        results.emplace_back(master_service_.GetReplicaList(key));
+        results.emplace_back(ToCentralizedGetReplicaListResponse(
+            master_service_.GetReplicaList(key)));
     }
 
     size_t failure_count = 0;

@@ -10,6 +10,7 @@ set(MOONCAKE_STORE_SOURCES
     client_metric.cpp
     types.cpp
     master_client.cpp
+    centralized_master_rpc_adapter.cpp
     utils.cpp
     master_metric_manager.cpp
     storage_backend.cpp

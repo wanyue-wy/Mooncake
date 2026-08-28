@@ -71,13 +71,8 @@ void CentralizedClientService::Destroy() {
     }
 
     for (auto& segment : segments_to_unmount) {
-        if (!segment.IsCentralizedSegment()) {
-            LOG(ERROR) << "Segment " << segment.id << " is not centralized";
-            continue;
-        }
         auto result = InnerUnmountSegment(
-            reinterpret_cast<void*>(segment.GetCentralizedExtra().base),
-            segment.size);
+            reinterpret_cast<void*>(segment.base), segment.size);
         if (!result) {
             LOG(ERROR) << "Failed to unmount segment: "
                        << toString(result.error());
@@ -100,9 +95,14 @@ void CentralizedClientService::Destroy() {
 
 ErrorCode CentralizedClientService::Init(
     const CentralizedClientConfig& config) {
+    if (config.heartbeat_rpc_port != 0) {
+        LOG(ERROR) << "Dedicated heartbeat RPC is not supported by the "
+                      "centralized Ping protocol"
+                   << ", heartbeat_rpc_port=" << config.heartbeat_rpc_port;
+        return ErrorCode::INVALID_PARAMS;
+    }
     auto master_server_entry = config.master_server_entry;
     master_server_entry_ = master_server_entry;
-    master_client_.SetHeartbeatRpcPort(config.heartbeat_rpc_port);
     SetMasterDiscoveryConfig(config);
 
     ErrorCode err = ConnectToMaster(master_server_entry);
@@ -282,8 +282,8 @@ ErrorCode CentralizedClientService::Init(
 
     client_requester_ = std::make_shared<ClientRequester>();
 
-    // Start heartbeat AFTER all initialization is complete
-    StartHeartbeat(master_server_entry);
+    // Start Ping AFTER all initialization is complete.
+    StartPing(master_server_entry);
 
     StartHttpServer();
 
@@ -1760,16 +1760,12 @@ tl::expected<void, ErrorCode> CentralizedClientService::MountSegment(
     // Check if the segment overlaps with any existing segment
     for (auto& it : mounted_segments_) {
         auto& mtseg = it.second;
-        if (!mtseg.IsCentralizedSegment()) {
-            continue;
-        }
-        auto& extra = mtseg.GetCentralizedExtra();
-        uintptr_t l1 = extra.base;
+        uintptr_t l1 = mtseg.base;
         uintptr_t r1 = reinterpret_cast<uintptr_t>(mtseg.size) + l1;
         uintptr_t l2 = reinterpret_cast<uintptr_t>(buffer);
         uintptr_t r2 = reinterpret_cast<uintptr_t>(size) + l2;
         if (std::max(l1, l2) < std::min(r1, r2)) {
-            LOG(ERROR) << "segment_overlaps base1=" << extra.base
+            LOG(ERROR) << "segment_overlaps base1=" << mtseg.base
                        << " size1=" << mtseg.size << " base2=" << buffer
                        << " size2=" << size;
             return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -1789,12 +1785,9 @@ tl::expected<void, ErrorCode> CentralizedClientService::MountSegment(
     segment.id = generate_uuid();
     segment.name = local_endpoint();
     segment.size = size;
-
-    CentralizedSegmentExtraData extra;
-    extra.base = reinterpret_cast<uintptr_t>(buffer);
-    extra.protocol = protocol;
-    extra.te_endpoint = get_te_endpoint();
-    segment.extra = extra;
+    segment.base = reinterpret_cast<uintptr_t>(buffer);
+    segment.protocol = protocol;
+    segment.te_endpoint = get_te_endpoint();
 
     auto mount_result = master_client_.MountSegment(segment);
     if (!mount_result) {
@@ -1825,13 +1818,7 @@ tl::expected<void, ErrorCode> CentralizedClientService::InnerUnmountSegment(
 
     for (auto it = mounted_segments_.begin(); it != mounted_segments_.end();
          ++it) {
-        if (!it->second.IsCentralizedSegment()) {
-            LOG(ERROR) << "segment_not_found base=" << buffer
-                       << " size=" << size;
-            return tl::unexpected(ErrorCode::INVALID_PARAMS);
-        }
-        if (it->second.GetCentralizedExtra().base ==
-                reinterpret_cast<uintptr_t>(buffer) &&
+        if (it->second.base == reinterpret_cast<uintptr_t>(buffer) &&
             it->second.size == size) {
             segment = it;
             break;
@@ -1851,7 +1838,7 @@ tl::expected<void, ErrorCode> CentralizedClientService::InnerUnmountSegment(
     }
 
     int rc = transfer_engine_->unregisterLocalMemory(
-        reinterpret_cast<void*>(segment->second.GetCentralizedExtra().base));
+        reinterpret_cast<void*>(segment->second.base));
     if (rc != 0) {
         LOG(ERROR) << "Failed to unregister transfer buffer with transfer "
                       "engine ret is "
@@ -2057,6 +2044,88 @@ HeartbeatRequest CentralizedClientService::build_heartbeat_request() {
     return req;
 }
 
+tl::expected<HeartbeatResponse, ErrorCode>
+CentralizedClientService::SendHeartbeat(const HeartbeatRequest& request) {
+    (void)request;
+    LOG(ERROR) << "Heartbeat RPC is not part of the centralized protocol";
+    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+}
+
+void CentralizedClientService::StopHeartbeat() {
+    MutexLocker lock(&registration_mutex_);
+    InnerStopHeartbeat();
+}
+
+void CentralizedClientService::StartPing(
+    const std::string& master_server_entry) {
+    if (heartbeat_running_) {
+        LOG(WARNING) << "Ping thread already running, skip starting";
+        return;
+    }
+
+    const bool is_ha_mode = IsHAMode(master_server_entry);
+    std::string current_master_address = master_server_entry;
+    if (is_ha_mode) {
+        auto err =
+            ResolveMasterAddress(master_server_entry, current_master_address);
+        if (err != ErrorCode::OK) {
+            LOG(WARNING) << "Failed to resolve master before starting ping; "
+                            "the ping loop will retry"
+                         << ", error=" << err;
+        }
+    }
+
+    heartbeat_running_ = true;
+    heartbeat_thread_ = std::thread(
+        [this, is_ha_mode, current_master_address]() mutable {
+            PingThreadMain(is_ha_mode, std::move(current_master_address));
+        });
+}
+
+void CentralizedClientService::PingThreadMain(
+    bool is_ha_mode, std::string current_master_address) {
+    constexpr int kMaxPingFailCount = 3;
+    constexpr int kPingIntervalMs = 1000;
+    int ping_fail_count = 0;
+    std::future<void> remount_future;
+
+    auto remount = [this]() { HeartbeatTryRegister(); };
+
+    while (heartbeat_running_) {
+        if (remount_future.valid() &&
+            remount_future.wait_for(std::chrono::seconds(0)) ==
+                std::future_status::ready) {
+            remount_future = std::future<void>();
+        }
+
+        auto ping = master_client_.Ping();
+        if (ping) {
+            ping_fail_count = 0;
+            view_version_.store(ping->view_version_id);
+            if (ping->client_status != CentralizedClientStatus::OK &&
+                !remount_future.valid()) {
+                remount_future = std::async(std::launch::async, remount);
+            }
+            WaitForNextHeartbeat(kPingIntervalMs);
+            continue;
+        }
+
+        ++ping_fail_count;
+        LOG(ERROR) << "Failed to ping centralized master"
+                   << ", consecutive_failures=" << ping_fail_count;
+        if (ping_fail_count >= kMaxPingFailCount &&
+            ReconnectToMaster(is_ha_mode, current_master_address)) {
+            ping_fail_count = 0;
+            continue;
+        }
+        WaitForNextHeartbeat(kPingIntervalMs);
+    }
+
+    if (remount_future.valid()) {
+        remount_future.wait();
+    }
+}
+
 tl::expected<RegisterClientResponse, ErrorCode>
 CentralizedClientService::InnerRegisterClient() {
     // Runs under registration_mutex_; mounted_segments_mutex_ nests inside it.
@@ -2071,18 +2140,24 @@ CentralizedClientService::InnerRegisterClient() {
         segments.emplace_back(segment);
     }
 
-    RegisterClientRequest req;
-    req.client_id = client_id_;
-    req.segments = std::move(segments);
-    req.deployment_mode = DeploymentMode::CENTRALIZATION;
-
-    auto register_result = master_client_.RegisterClient(req);
-    if (!register_result) {
-        LOG(ERROR) << "Failed to register client: " << register_result.error();
-    } else {
-        view_version_ = register_result.value().view_version;
+    auto remount_result = master_client_.ReMountSegment(segments);
+    if (!remount_result) {
+        LOG(ERROR) << "Failed to remount centralized client segments"
+                   << ", error=" << remount_result.error();
+        return tl::make_unexpected(remount_result.error());
     }
-    return register_result;
+
+    auto ping_result = master_client_.Ping();
+    if (!ping_result) {
+        LOG(ERROR) << "Failed to read centralized master view after remount"
+                   << ", error=" << ping_result.error();
+        return tl::make_unexpected(ping_result.error());
+    }
+
+    RegisterClientResponse response;
+    response.view_version = ping_result->view_version_id;
+    view_version_.store(response.view_version);
+    return response;
 }
 
 ErrorCode CentralizedClientService::GetPreferredReplica(
@@ -2093,7 +2168,7 @@ ErrorCode CentralizedClientService::GetPreferredReplica(
         SharedMutexLocker lock(&mounted_segments_mutex_, shared_lock);
         local_endpoints.reserve(mounted_segments_.size());
         for (const auto& [uuid, seg] : mounted_segments_) {
-            local_endpoints.insert(seg.GetCentralizedExtra().te_endpoint);
+            local_endpoints.insert(seg.te_endpoint);
         }
     }
 

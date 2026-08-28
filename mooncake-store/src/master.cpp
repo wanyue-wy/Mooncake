@@ -12,7 +12,6 @@
 #include "default_config.h"
 #include "ha_helper.h"
 #include "http_metadata_server.h"
-#include "centralized_rpc_service.h"
 #include "p2p/master/p2p_rpc_service.h"
 #include "rpc_service.h"
 #include "types.h"
@@ -929,6 +928,12 @@ int main(int argc, char* argv[]) {
         // heartbeat port is configured (heartbeat_rpc_port == 0).
         const bool dedicated_heartbeat = master_config.heartbeat_rpc_port > 0;
         const bool main_includes_heartbeat = !dedicated_heartbeat;
+        if (master_config.deployment_mode == "Centralization" &&
+            dedicated_heartbeat) {
+            LOG(ERROR) << "Dedicated heartbeat RPC is not supported by the "
+                          "centralized Ping protocol";
+            return -1;
+        }
         std::optional<coro_rpc::coro_rpc_server> heartbeat_server;
         if (dedicated_heartbeat) {
             heartbeat_server.emplace(
@@ -940,24 +945,15 @@ int main(int argc, char* argv[]) {
 
         // Keep the architecture-specific concrete service alive until
         // server.start() completes.
-        std::unique_ptr<mooncake::WrappedCentralizedMasterService>
-            centralized_service;
+        std::unique_ptr<mooncake::WrappedMasterService> centralized_service;
         std::unique_ptr<mooncake::WrappedP2PMasterService> p2p_service;
 
         if (master_config.deployment_mode == "Centralization") {
             centralized_service =
-                std::make_unique<mooncake::WrappedCentralizedMasterService>(
+                std::make_unique<mooncake::WrappedMasterService>(
                     mooncake::WrappedMasterServiceConfig(master_config,
                                                          version));
-            centralized_service->init();
-
-            mooncake::RegisterCentralizedRpcService(
-                server, *centralized_service,
-                /*include_heartbeat=*/main_includes_heartbeat);
-            if (dedicated_heartbeat) {
-                mooncake::RegisterHeartbeatRpcService(*heartbeat_server,
-                                                      *centralized_service);
-            }
+            mooncake::RegisterRpcService(server, *centralized_service);
         } else {
             p2p_service = std::make_unique<mooncake::WrappedP2PMasterService>(
                 mooncake::WrappedMasterServiceConfig(master_config, version));

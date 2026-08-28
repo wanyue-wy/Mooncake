@@ -10,6 +10,56 @@
 namespace mooncake {
 
 /**
+ * @brief Centralized client status used by the baseline Ping protocol.
+ */
+enum class CentralizedClientStatus {
+    UNDEFINED = 0,
+    OK,
+    NEED_REMOUNT,
+};
+
+inline std::ostream& operator<<(std::ostream& os,
+                                CentralizedClientStatus status) noexcept {
+    switch (status) {
+        case CentralizedClientStatus::OK:
+            return os << "OK";
+        case CentralizedClientStatus::NEED_REMOUNT:
+            return os << "NEED_REMOUNT";
+        default:
+            return os << "UNDEFINED";
+    }
+}
+
+/**
+ * @brief Response structure for the centralized Ping operation.
+ */
+struct PingResponse {
+    ViewVersionId view_version_id;
+    CentralizedClientStatus client_status;
+
+    PingResponse() = default;
+    PingResponse(ViewVersionId view_version, CentralizedClientStatus status)
+        : view_version_id(view_version), client_status(status) {}
+
+    friend std::ostream& operator<<(std::ostream& os,
+                                    const PingResponse& response) noexcept {
+        return os << "PingResponse: { view_version_id: "
+                  << response.view_version_id
+                  << ", client_status: " << response.client_status << " }";
+    }
+};
+YLT_REFL(PingResponse, view_version_id, client_status);
+
+/**
+ * @brief Wire-compatible response for the centralized GetReplicaList RPC.
+ */
+struct CentralizedGetReplicaListResponse {
+    std::vector<Replica::Descriptor> replicas;
+    uint64_t lease_ttl_ms = 0;
+};
+YLT_REFL(CentralizedGetReplicaListResponse, replicas, lease_ttl_ms);
+
+/**
  * @brief P2P specific configuration for read route
  */
 struct P2PGetReplicaListConfigExtra {
