@@ -2051,11 +2051,6 @@ CentralizedClientService::SendHeartbeat(const HeartbeatRequest& request) {
     return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
 }
 
-void CentralizedClientService::StopHeartbeat() {
-    MutexLocker lock(&registration_mutex_);
-    InnerStopHeartbeat();
-}
-
 void CentralizedClientService::StartPing(
     const std::string& master_server_entry) {
     if (heartbeat_running_) {

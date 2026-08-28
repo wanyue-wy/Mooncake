@@ -115,7 +115,6 @@ class CentralizedClientService
 
     ErrorCode Init(const CentralizedClientConfig& config);
     void Stop() override;
-    void StopHeartbeat() override EXCLUDES(registration_mutex_);
     void Destroy() override;
 
     tl::expected<std::unique_ptr<QueryResult>, ErrorCode> Query(
@@ -295,8 +294,6 @@ class CentralizedClientService
     HeartbeatRequest build_heartbeat_request() override;
     void StartPing(const std::string& master_server_entry);
     void PingThreadMain(bool is_ha_mode, std::string current_master_address);
-
-    CentralizedMasterRpcAdapter& GetMasterClient() { return master_client_; }
 
     ErrorCode ConnectMasterClient(const std::string& master_address) override {
         return master_client_.Connect(master_address);

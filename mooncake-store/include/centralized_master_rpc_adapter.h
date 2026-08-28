@@ -16,8 +16,6 @@ class CentralizedMasterRpcAdapter final : public MasterClient {
                                 MasterClientMetric* metrics = nullptr)
         : MasterClient(client_id, metrics) {}
 
-    using MasterClient::GetReplicaList;
-
     tl::expected<GetReplicaListResponse, ErrorCode> GetReplicaList(
         const std::string& key, const ReadRouteConfig& config);
 

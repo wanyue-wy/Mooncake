@@ -132,12 +132,6 @@ class InProcMaster {
             if (ec.hasResult()) {
                 return false;
             }
-            if (heartbeat_server_) {
-                auto hb_ec = heartbeat_server_->async_start();
-                if (hb_ec.hasResult()) {
-                    return false;
-                }
-            }
             // Allow server to bind
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             return true;
@@ -147,10 +141,6 @@ class InProcMaster {
     }
 
     void Stop() {
-        if (heartbeat_server_) {
-            heartbeat_server_->stop();
-            heartbeat_server_.reset();
-        }
         if (server_) {
             server_->stop();
             server_.reset();
@@ -164,7 +154,6 @@ class InProcMaster {
 
     // Accessors
     int rpc_port() const { return rpc_port_; }
-    int heartbeat_rpc_port() const { return heartbeat_rpc_port_; }
     int http_metrics_port() const { return http_metrics_port_; }
     int http_metadata_port() const { return http_metadata_port_; }
     std::string master_address() const {
@@ -184,11 +173,9 @@ class InProcMaster {
 
    private:
     std::unique_ptr<coro_rpc::coro_rpc_server> server_;
-    std::unique_ptr<coro_rpc::coro_rpc_server> heartbeat_server_;
     std::unique_ptr<WrappedMasterService> wrapped_;
     std::unique_ptr<HttpMetadataServer> meta_server_;
     int rpc_port_ = 0;
-    int heartbeat_rpc_port_ = 0;
     int http_metrics_port_ = 0;
     int http_metadata_port_ = 0;
 };
