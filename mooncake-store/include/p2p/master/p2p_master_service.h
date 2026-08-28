@@ -110,13 +110,6 @@ class P2PMasterService : public MasterService {
     }
     size_t GetShardCount() const override { return kNumShards; }
 
-   protected:
-    // Hooks
-    void OnObjectAccessed(const ObjectMetadata& metadata) override;
-    void OnObjectHit(const ObjectMetadata& metadata) override;
-    void OnReplicaRemoved(const Replica& replica) override;
-    void OnReplicaAdded(const Replica& replica) override;
-
    private:
     using OwnerClientSet = std::unordered_set<UUID, boost::hash<UUID>>;
 

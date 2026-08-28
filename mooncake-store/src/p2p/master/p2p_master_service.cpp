@@ -868,20 +868,4 @@ ErrorCode P2PMasterService::RestoreFromStandbyMetadata(
     return ErrorCode::OK;
 }
 
-void P2PMasterService::OnObjectAccessed(const ObjectMetadata& metadata) {
-    // do nothing
-}
-
-void P2PMasterService::OnObjectHit(const ObjectMetadata&) {
-    // Data-plane hit statistics are synced by ClientMetricsAggregator.
-}
-
-void P2PMasterService::OnReplicaRemoved(const Replica&) {
-    // Replica inventory is independent from client-reported hit metrics.
-}
-
-void P2PMasterService::OnReplicaAdded(const Replica&) {
-    // Replica inventory is independent from client-reported hit metrics.
-}
-
 }  // namespace mooncake

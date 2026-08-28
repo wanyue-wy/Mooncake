@@ -567,7 +567,9 @@ class MasterService {
         const GetReplicaListRequestConfig& config,
         const ObjectMetadata& metadata) = 0;
 
-    // The following methods are hooks function to handle special events
+    // TODO(M5): Remove these fork-only subclass hooks. Centralized behavior
+    // returns to the baseline MasterService implementation, while P2P no
+    // longer needs object/replica hooks.
 
     // Triggered when the metadata of an object is accessed (e.g. Get or Exist)
     virtual void OnObjectAccessed(const ObjectMetadata& metadata) = 0;
