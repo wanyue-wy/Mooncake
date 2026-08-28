@@ -23,7 +23,6 @@
 #include "client_metric.h"
 #include "mutex.h"
 #include "p2p/common/p2p_rpc_types.h"
-#include "rpc_types.h"
 #include "types.h"
 
 namespace mooncake {
@@ -69,21 +68,21 @@ class P2PMasterClient final {
     [[nodiscard]] std::vector<tl::expected<bool, ErrorCode>> BatchExistKey(
         const std::vector<std::string_view>& object_keys);
 
-    [[nodiscard]] tl::expected<GetReplicaListResponse, ErrorCode>
+    [[nodiscard]] tl::expected<P2PGetReplicaListResponse, ErrorCode>
     GetReplicaList(std::string_view key,
-                   const GetReplicaListRequestConfig& config =
-                       GetReplicaListRequestConfig());
+                   const P2PGetReplicaListRequestConfig& config =
+                       P2PGetReplicaListRequestConfig());
 
     [[nodiscard]] async_simple::coro::Lazy<
-        tl::expected<GetReplicaListResponse, ErrorCode>>
+        tl::expected<P2PGetReplicaListResponse, ErrorCode>>
     AsyncGetReplicaList(std::string_view key,
-                        const GetReplicaListRequestConfig& config =
-                            GetReplicaListRequestConfig());
+                        const P2PGetReplicaListRequestConfig& config =
+                            P2PGetReplicaListRequestConfig());
 
-    [[nodiscard]] std::vector<tl::expected<GetReplicaListResponse, ErrorCode>>
+    [[nodiscard]] std::vector<tl::expected<P2PGetReplicaListResponse, ErrorCode>>
     BatchGetReplicaList(const std::vector<std::string_view>& keys,
-                        const GetReplicaListRequestConfig& config =
-                            GetReplicaListRequestConfig());
+                        const P2PGetReplicaListRequestConfig& config =
+                            P2PGetReplicaListRequestConfig());
 
     [[nodiscard]] tl::expected<
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
@@ -106,42 +105,66 @@ class P2PMasterClient final {
     [[nodiscard]] tl::expected<void, ErrorCode> UnmountSegment(
         const UUID& segment_id);
 
-    [[nodiscard]] tl::expected<QueryClientStatusResponse, ErrorCode>
+    [[nodiscard]] tl::expected<P2PQueryClientStatusResponse, ErrorCode>
     QueryClientStatus(const UUID& client_id);
 
-    [[nodiscard]] tl::expected<HeartbeatResponse, ErrorCode> Heartbeat(
-        const HeartbeatRequest& req);
+    [[nodiscard]] tl::expected<P2PHeartbeatResponse, ErrorCode> Heartbeat(
+        const P2PHeartbeatRequest& req);
 
     [[nodiscard]] tl::expected<void, ErrorCode> MountSegment(
         const P2PSegment& segment);
 
-    [[nodiscard]] tl::expected<RegisterClientResponse, ErrorCode>
+    [[nodiscard]] tl::expected<P2PRegisterClientResponse, ErrorCode>
     RegisterClient(const P2PRegisterClientRequest& req);
 
-    [[nodiscard]] tl::expected<UnregisterClientResponse, ErrorCode>
-    UnregisterClient(const UnregisterClientRequest& req);
+    [[nodiscard]] tl::expected<P2PUnregisterClientResponse, ErrorCode>
+    UnregisterClient(const P2PUnregisterClientRequest& req);
 
     [[nodiscard]] tl::expected<WriteRouteResponse, ErrorCode> GetWriteRoute(
         const WriteRouteRequest& req);
 
+    /**
+     * @brief Batch gets write candidate routes for multiple keys in one RPC
+     */
     [[nodiscard]] tl::expected<BatchGetWriteRouteResponse, ErrorCode>
     BatchGetWriteRoute(const BatchGetWriteRouteRequest& req);
 
+    /**
+     * @brief Adds a replica to master
+     */
     [[nodiscard]] tl::expected<void, ErrorCode> AddReplica(
         const AddReplicaRequest& req);
 
+    /**
+     * @brief Removes a replica from master
+     */
     [[nodiscard]] tl::expected<void, ErrorCode> RemoveReplica(
         const RemoveReplicaRequest& req);
 
+    /**
+     * @brief Removes replicas from multiple segments in one call
+     */
     [[nodiscard]] std::vector<tl::expected<void, ErrorCode>> BatchRemoveReplica(
         const BatchRemoveReplicaRequest& req);
 
+    /**
+     * @brief Batch sync replicas with mixed ADD and REMOVE ops
+     */
     [[nodiscard]] tl::expected<BatchSyncReplicaResponse, ErrorCode>
     BatchSyncReplica(const BatchSyncReplicaRequest& req);
 
-    [[nodiscard]] tl::expected<void, ErrorCode> SetSyncCompleted(UUID client_id);
+    /**
+     * @brief Notify Master that this client has finished syncing metadata
+     */
+    [[nodiscard]] tl::expected<void, ErrorCode> SetSyncCompleted(
+        UUID client_id);
 
    private:
+    // TODO(M8): Re-evaluate extracting the pool access, invoke, batch-failure
+    // and RPC-metric plumbing into a stateless shared transport helper after the
+    // architecture-specific protocols stabilize. Keep this implementation
+    // local for now so centralized MasterClient remains identical to the A00
+    // baseline.
     template <auto ServiceMethod, typename ReturnType, typename... Args>
     [[nodiscard]] async_simple::coro::Lazy<tl::expected<ReturnType, ErrorCode>>
     invoke_rpc_async(Args&&... args) {

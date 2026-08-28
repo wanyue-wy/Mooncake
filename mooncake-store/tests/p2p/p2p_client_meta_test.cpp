@@ -145,7 +145,7 @@ TEST_F(P2PClientMetaTest, MountFailsWhenUnhealthy) {
     // 1. DISCONNECTION state
     constexpr int kWaitMsDisc = kDisconnectTimeoutSec * 1000 + 100;
     std::this_thread::sleep_for(std::chrono::milliseconds(kWaitMsDisc));
-    ASSERT_EQ(meta->CheckHealth().second, ClientStatus::DISCONNECTION);
+    ASSERT_EQ(meta->CheckHealth().second, P2PClientStatus::DISCONNECTION);
 
     auto res_disc = meta->MountSegment(seg);
     EXPECT_FALSE(res_disc.has_value());
@@ -155,7 +155,7 @@ TEST_F(P2PClientMetaTest, MountFailsWhenUnhealthy) {
     constexpr int kWaitMsCrash =
         (kCrashTimeoutSec - kDisconnectTimeoutSec) * 1000 + 100;
     std::this_thread::sleep_for(std::chrono::milliseconds(kWaitMsCrash));
-    ASSERT_EQ(meta->CheckHealth().second, ClientStatus::CRASHED);
+    ASSERT_EQ(meta->CheckHealth().second, P2PClientStatus::CRASHED);
 
     auto res_crash = meta->MountSegment(seg);
     EXPECT_FALSE(res_crash.has_value());
@@ -178,7 +178,7 @@ TEST_F(P2PClientMetaExtendedTest, UnmountSegmentCheckHealth) {
     ASSERT_TRUE(meta->MountSegment(seg).has_value());
     std::this_thread::sleep_for(
         std::chrono::milliseconds(kDiscTimeout * 1000 + 100));
-    ASSERT_EQ(meta->CheckHealth().second, ClientStatus::DISCONNECTION);
+    ASSERT_EQ(meta->CheckHealth().second, P2PClientStatus::DISCONNECTION);
 
     auto res = meta->UnmountSegment(seg.id);
     EXPECT_FALSE(res.has_value());
@@ -188,7 +188,7 @@ TEST_F(P2PClientMetaExtendedTest, UnmountSegmentCheckHealth) {
     // Wait for crash timeout
     std::this_thread::sleep_for(
         std::chrono::milliseconds((kCrashTimeout - kDiscTimeout) * 1000 + 100));
-    ASSERT_EQ(meta->CheckHealth().second, ClientStatus::CRASHED);
+    ASSERT_EQ(meta->CheckHealth().second, P2PClientStatus::CRASHED);
 
     auto res_crash = meta->UnmountSegment(seg.id);
     EXPECT_FALSE(res_crash.has_value());
@@ -283,22 +283,22 @@ TEST_F(P2PClientMetaExtendedTest, HealthStateMachineTransitions) {
     // 1. Wait for DISCONNECTION
     std::this_thread::sleep_for(
         std::chrono::milliseconds(kDisconnectSec * 1000 + 100));
-    EXPECT_EQ(meta->CheckHealth().second, ClientStatus::DISCONNECTION);
+    EXPECT_EQ(meta->CheckHealth().second, P2PClientStatus::DISCONNECTION);
     EXPECT_FALSE(meta->is_health());
 
     // 2. Recover via Heartbeat
     auto res = meta->Heartbeat();
-    EXPECT_EQ(res.first, ClientStatus::DISCONNECTION);
-    EXPECT_EQ(res.second, ClientStatus::HEALTH);
+    EXPECT_EQ(res.first, P2PClientStatus::DISCONNECTION);
+    EXPECT_EQ(res.second, P2PClientStatus::HEALTH);
     EXPECT_TRUE(meta->is_health());
 
     // 3. Wait for CRASHED
     std::this_thread::sleep_for(
         std::chrono::milliseconds(kCrashSec * 1000 + 100));
-    EXPECT_EQ(meta->CheckHealth().second, ClientStatus::CRASHED);
+    EXPECT_EQ(meta->CheckHealth().second, P2PClientStatus::CRASHED);
 
     // 4. Irreversible CRASHED
-    EXPECT_EQ(meta->Heartbeat().second, ClientStatus::CRASHED);
+    EXPECT_EQ(meta->Heartbeat().second, P2PClientStatus::CRASHED);
 }
 
 // ============================================================
@@ -552,7 +552,7 @@ TEST_F(P2PClientMetaExtendedTest, QueryIpCheckHealth) {
     // 1. DISCONNECTION
     std::this_thread::sleep_for(
         std::chrono::milliseconds(kDiscTimeout * 1000 + 100));
-    ASSERT_EQ(meta->CheckHealth().second, ClientStatus::DISCONNECTION);
+    ASSERT_EQ(meta->CheckHealth().second, P2PClientStatus::DISCONNECTION);
     auto res_disconnected = meta->QueryIp(id);
     EXPECT_FALSE(res_disconnected.has_value());
     EXPECT_EQ(res_disconnected.error(), mooncake::ErrorCode::CLIENT_UNHEALTHY);
@@ -560,7 +560,7 @@ TEST_F(P2PClientMetaExtendedTest, QueryIpCheckHealth) {
     // 2. CRASHED
     std::this_thread::sleep_for(
         std::chrono::milliseconds((kCrashTimeout - kDiscTimeout) * 1000 + 100));
-    ASSERT_EQ(meta->CheckHealth().second, ClientStatus::CRASHED);
+    ASSERT_EQ(meta->CheckHealth().second, P2PClientStatus::CRASHED);
     auto res_crashed = meta->QueryIp(id);
     EXPECT_FALSE(res_crashed.has_value());
     EXPECT_EQ(res_crashed.error(), mooncake::ErrorCode::CLIENT_UNHEALTHY);
@@ -839,9 +839,9 @@ TEST_F(P2PClientMetaExtendedTest, ConcurrentHealthChangeAndMount) {
             0, 2);  // 0: HEALTH, 1: DISC, 2: CRASHED
         while (!stop) {
             int state = dist(rng);
-            ClientStatus s = ClientStatus::HEALTH;
-            if (state == 1) s = ClientStatus::DISCONNECTION;
-            if (state == 2) s = ClientStatus::CRASHED;
+            P2PClientStatus s = P2PClientStatus::HEALTH;
+            if (state == 1) s = P2PClientStatus::DISCONNECTION;
+            if (state == 2) s = P2PClientStatus::CRASHED;
 
             {
                 SharedMutexLocker lock(&meta->client_mutex_);

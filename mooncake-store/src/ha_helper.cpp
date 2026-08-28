@@ -354,16 +354,19 @@ int MasterServiceSupervisor::Start() {
         // server. The main server serves Heartbeat only as a legacy fallback
         // when no dedicated heartbeat port is configured (heartbeat_rpc_port
         // == 0).
-        const bool dedicated_heartbeat = config_.heartbeat_rpc_port > 0;
-        const bool main_includes_heartbeat = !dedicated_heartbeat;
+        const bool heartbeat_port_configured = config_.heartbeat_rpc_port > 0;
         if (config_.deployment_mode == DeploymentMode::CENTRALIZATION &&
-            dedicated_heartbeat) {
+            heartbeat_port_configured) {
             LOG(ERROR) << "Dedicated heartbeat RPC is not supported by the "
                           "centralized Ping protocol";
             mv_helper->CancelKeepAlive(lease_id);
             keep_leader_thread.join();
             return -1;
         }
+        const bool p2p_dedicated_heartbeat =
+            config_.deployment_mode == DeploymentMode::P2P &&
+            heartbeat_port_configured;
+        const bool main_includes_heartbeat = !p2p_dedicated_heartbeat;
         std::unique_ptr<WrappedMasterService> centralized_wrapped_service;
         std::unique_ptr<WrappedP2PMasterService> p2p_wrapped_service;
         if (config_.deployment_mode == DeploymentMode::CENTRALIZATION) {
@@ -405,7 +408,7 @@ int MasterServiceSupervisor::Start() {
         // shares the active wrapped service, so it must be stopped before that
         // service object is destroyed (below, after the main server stops).
         std::optional<coro_rpc::coro_rpc_server> heartbeat_server;
-        if (dedicated_heartbeat) {
+        if (p2p_dedicated_heartbeat) {
             heartbeat_server.emplace(
                 std::max<size_t>(1, config_.heartbeat_rpc_thread_num),
                 config_.heartbeat_rpc_port, config_.rpc_address,

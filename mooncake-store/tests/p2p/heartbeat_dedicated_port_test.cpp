@@ -51,9 +51,9 @@ namespace testing {
 
 namespace {
 
-// Build a HeartbeatRequest for the given client id (no tasks, lightweight).
-HeartbeatRequest MakeHeartbeatRequest(const UUID& client_id) {
-    HeartbeatRequest req;
+// Build a P2PHeartbeatRequest for the given client id (no tasks, lightweight).
+P2PHeartbeatRequest MakeHeartbeatRequest(const UUID& client_id) {
+    P2PHeartbeatRequest req;
     req.client_id = client_id;
     return req;
 }
@@ -102,8 +102,8 @@ class HeartbeatTestClient {
         return client_.Connect(address);
     }
 
-    tl::expected<HeartbeatResponse, ErrorCode> Heartbeat(
-        const HeartbeatRequest& request) {
+    tl::expected<P2PHeartbeatResponse, ErrorCode> Heartbeat(
+        const P2PHeartbeatRequest& request) {
         return client_.Heartbeat(request);
     }
 

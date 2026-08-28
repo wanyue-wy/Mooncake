@@ -48,10 +48,10 @@ class WrappedMasterService {
         ErrorCode>
     GetReplicaListByRegex(const std::string& str);
 
-    tl::expected<CentralizedGetReplicaListResponse, ErrorCode> GetReplicaList(
+    tl::expected<GetReplicaListResponse, ErrorCode> GetReplicaList(
         const std::string& key);
 
-    std::vector<tl::expected<CentralizedGetReplicaListResponse, ErrorCode>>
+    std::vector<tl::expected<GetReplicaListResponse, ErrorCode>>
     BatchGetReplicaList(const std::vector<std::string>& keys);
 
     tl::expected<std::vector<Replica::Descriptor>, ErrorCode> PutStart(

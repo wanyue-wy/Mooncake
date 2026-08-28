@@ -308,17 +308,13 @@ struct Segment {
 YLT_REFL(Segment, id, name, base, size, te_endpoint, protocol);
 
 /**
- * @brief Client status from the master's perspective.
- *
- * State machine: HEALTH -> DISCONNECTION (heartbeat timeout)
- *                DISCONNECTION -> HEALTH (heartbeat recovered)
- *                DISCONNECTION -> CRASHED (long-term timeout)
+ * @brief Client status from the master's perspective
  */
 enum class ClientStatus {
-    UNDEFINED = 0,  // Client does not exist
-    HEALTH,         // Normal operation
-    DISCONNECTION,  // Heartbeat lost, waiting for recovery
-    CRASHED,        // Terminal state, all metadata will be cleaned up
+    UNDEFINED = 0,  // Uninitialized
+    OK,             // Client is alive, no need to remount for now
+    NEED_REMOUNT,   // Ping ttl expired, or the first time connect to master,
+                    // so need to remount
 };
 
 /**
@@ -328,9 +324,8 @@ inline std::ostream& operator<<(std::ostream& os,
                                 const ClientStatus& status) noexcept {
     static const std::unordered_map<ClientStatus, std::string_view>
         status_strings{{ClientStatus::UNDEFINED, "UNDEFINED"},
-                       {ClientStatus::HEALTH, "HEALTH"},
-                       {ClientStatus::DISCONNECTION, "DISCONNECTION"},
-                       {ClientStatus::CRASHED, "CRASHED"}};
+                       {ClientStatus::OK, "OK"},
+                       {ClientStatus::NEED_REMOUNT, "NEED_REMOUNT"}};
 
     os << (status_strings.count(status) ? status_strings.at(status)
                                         : "UNKNOWN");

@@ -1431,12 +1431,12 @@ size_t MasterService::GetKeyCount() const {
 auto MasterService::Ping(const UUID& client_id)
     -> tl::expected<PingResponse, ErrorCode> {
     std::shared_lock<std::shared_mutex> lock(client_mutex_);
-    CentralizedClientStatus client_status;
+    ClientStatus client_status;
     auto it = ok_client_.find(client_id);
     if (it != ok_client_.end()) {
-        client_status = CentralizedClientStatus::OK;
+        client_status = ClientStatus::OK;
     } else {
-        client_status = CentralizedClientStatus::NEED_REMOUNT;
+        client_status = ClientStatus::NEED_REMOUNT;
     }
     PodUUID pod_client_id = {client_id.first, client_id.second};
     if (!client_ping_queue_.push(pod_client_id)) {

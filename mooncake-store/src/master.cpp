@@ -926,16 +926,20 @@ int main(int argc, char* argv[]) {
         // contending for IB resources with the main server. The main server
         // serves Heartbeat only as a legacy fallback when no dedicated
         // heartbeat port is configured (heartbeat_rpc_port == 0).
-        const bool dedicated_heartbeat = master_config.heartbeat_rpc_port > 0;
-        const bool main_includes_heartbeat = !dedicated_heartbeat;
+        const bool heartbeat_port_configured =
+            master_config.heartbeat_rpc_port > 0;
         if (master_config.deployment_mode == "Centralization" &&
-            dedicated_heartbeat) {
+            heartbeat_port_configured) {
             LOG(ERROR) << "Dedicated heartbeat RPC is not supported by the "
                           "centralized Ping protocol";
             return -1;
         }
+        const bool p2p_dedicated_heartbeat =
+            master_config.deployment_mode == "P2P" &&
+            heartbeat_port_configured;
+        const bool main_includes_heartbeat = !p2p_dedicated_heartbeat;
         std::optional<coro_rpc::coro_rpc_server> heartbeat_server;
-        if (dedicated_heartbeat) {
+        if (p2p_dedicated_heartbeat) {
             heartbeat_server.emplace(
                 std::max<uint32_t>(1u, master_config.heartbeat_rpc_thread_num),
                 master_config.heartbeat_rpc_port, master_config.rpc_address,
@@ -962,13 +966,13 @@ int main(int argc, char* argv[]) {
             mooncake::RegisterP2PRpcService(server, *p2p_service,
                                             /*include_heartbeat=*/
                                             main_includes_heartbeat);
-            if (dedicated_heartbeat) {
+            if (p2p_dedicated_heartbeat) {
                 mooncake::RegisterP2PHeartbeatRpcService(*heartbeat_server,
                                                          *p2p_service);
             }
         }
 
-        if (dedicated_heartbeat) {
+        if (p2p_dedicated_heartbeat) {
             LOG(INFO) << "Starting dedicated heartbeat RPC server on port "
                       << master_config.heartbeat_rpc_port;
             auto heartbeat_ec = heartbeat_server->async_start();

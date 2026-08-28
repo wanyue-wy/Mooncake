@@ -74,13 +74,13 @@ void P2PMasterService::InitializeClientManager() {
         [this](const UUID& segment_id) { OnSegmentRemoved(segment_id); });
 }
 
-auto P2PMasterService::Heartbeat(const HeartbeatRequest& req)
-    -> tl::expected<HeartbeatResponse, ErrorCode> {
+auto P2PMasterService::Heartbeat(const P2PHeartbeatRequest& req)
+    -> tl::expected<P2PHeartbeatResponse, ErrorCode> {
     return client_manager_->Heartbeat(req);
 }
 
-auto P2PMasterService::QueryClientStatus(const QueryClientStatusRequest& req)
-    -> tl::expected<QueryClientStatusResponse, ErrorCode> {
+auto P2PMasterService::QueryClientStatus(const P2PQueryClientStatusRequest& req)
+    -> tl::expected<P2PQueryClientStatusResponse, ErrorCode> {
     return client_manager_->QueryClientStatus(req);
 }
 
@@ -217,8 +217,8 @@ auto P2PMasterService::GetReplicaListByRegex(
 }
 
 auto P2PMasterService::GetReplicaList(
-    std::string_view key, const GetReplicaListRequestConfig& config)
-    -> tl::expected<GetReplicaListResponse, ErrorCode> {
+    std::string_view key, const P2PGetReplicaListRequestConfig& config)
+    -> tl::expected<P2PGetReplicaListResponse, ErrorCode> {
     MetadataAccessorRO accessor(this, key);
     if (!accessor.Exists()) {
         VLOG(1) << "key=" << key << ", info=object_not_found";
@@ -231,7 +231,7 @@ auto P2PMasterService::GetReplicaList(
         return tl::make_unexpected(ErrorCode::REPLICA_IS_NOT_READY);
     }
 
-    GetReplicaListResponse response;
+    P2PGetReplicaListResponse response;
     response.replicas = std::move(replica_list);
     return response;
 }
@@ -438,7 +438,7 @@ ErrorCode P2PMasterService::RecordOplog(OpType type, const std::string& key,
 }
 
 auto P2PMasterService::RegisterClient(const P2PRegisterClientRequest& req)
-    -> tl::expected<RegisterClientResponse, ErrorCode> {
+    -> tl::expected<P2PRegisterClientResponse, ErrorCode> {
     if (req.ip_address.empty() || req.rpc_port == 0) {
         LOG(ERROR) << "RegisterClient(P2P): missing endpoint"
                    << ", client_id=" << req.client_id;
@@ -446,7 +446,7 @@ auto P2PMasterService::RegisterClient(const P2PRegisterClientRequest& req)
     }
 
     auto make_idempotent_response = [&]() {
-        RegisterClientResponse response;
+        P2PRegisterClientResponse response;
         response.view_version = view_version_;
         LOG(INFO) << "RegisterClient(P2P): client already registered, "
                      "treating as idempotent re-register"
@@ -487,8 +487,8 @@ auto P2PMasterService::RegisterClient(const P2PRegisterClientRequest& req)
     return result;
 }
 
-auto P2PMasterService::UnregisterClient(const UnregisterClientRequest& req)
-    -> tl::expected<UnregisterClientResponse, ErrorCode> {
+auto P2PMasterService::UnregisterClient(const P2PUnregisterClientRequest& req)
+    -> tl::expected<P2PUnregisterClientResponse, ErrorCode> {
     auto result = client_manager_->UnregisterClient(req);
     if (!result.has_value()) {
         LOG(ERROR) << "UnregisterClient(P2P): failed"
@@ -616,9 +616,9 @@ auto P2PMasterService::CollectReplicaOwnerClients(
 }
 
 std::vector<Replica::Descriptor> P2PMasterService::FilterReplicas(
-    const GetReplicaListRequestConfig& config, const ObjectMetadata& metadata) {
+    const P2PGetReplicaListRequestConfig& config, const ObjectMetadata& metadata) {
     const auto& p2p_config = config.p2p_config ? config.p2p_config.value()
-                                               : P2PGetReplicaListConfigExtra();
+                                               : P2PReadRouteConfigExtra();
     // candidates kept at client granularity
     std::vector<std::pair<uint32_t, Replica::Descriptor>> candidates;
     std::unordered_map<UUID, size_t, boost::hash<UUID>> best_by_client;
@@ -676,7 +676,7 @@ std::vector<Replica::Descriptor> P2PMasterService::FilterReplicas(
     }  // iter replicas over
 
     if (config.max_candidates ==
-            GetReplicaListRequestConfig::RETURN_ALL_CANDIDATES ||
+            P2PGetReplicaListRequestConfig::RETURN_ALL_CANDIDATES ||
         config.max_candidates >= candidates.size() || candidates.empty()) {
         // return all candidates
         std::vector<Replica::Descriptor> result;

@@ -143,7 +143,7 @@ TEST_F(P2PClientManagerTest, UnregisterClientSuccess) {
     EXPECT_EQ(mgr->GetAllClients().size(), 1);
 
     auto res = mgr->UnregisterClient(
-        UnregisterClientRequest{client_id, DeploymentMode::P2P});
+        P2PUnregisterClientRequest{client_id, DeploymentMode::P2P});
     ASSERT_TRUE(res.has_value());
 
     // Client and all its segments are gone.
@@ -159,7 +159,7 @@ TEST_F(P2PClientManagerTest, UnregisterClientNotFoundIsIdempotent) {
 
     // Unregistering an absent client is a no-op success.
     auto res = mgr->UnregisterClient(
-        UnregisterClientRequest{{999, 999}, DeploymentMode::P2P});
+        P2PUnregisterClientRequest{{999, 999}, DeploymentMode::P2P});
     EXPECT_TRUE(res.has_value());
 }
 
@@ -174,7 +174,7 @@ TEST_F(P2PClientManagerTest, UnregisterThenReRegister) {
                     .has_value());
 
     ASSERT_TRUE(mgr->UnregisterClient(
-                       UnregisterClientRequest{client_id, DeploymentMode::P2P})
+                       P2PUnregisterClientRequest{client_id, DeploymentMode::P2P})
                     .has_value());
     EXPECT_EQ(mgr->GetClient(client_id), nullptr);
 
@@ -207,7 +207,7 @@ TEST_F(P2PClientManagerTest, RegisterUnregisterActiveGauge) {
 
     // Proactively unregister a HEALTH client: active-- and NOT counted a crash.
     ASSERT_TRUE(mgr->UnregisterClient(
-                       UnregisterClientRequest{{1, 0}, DeploymentMode::P2P})
+                       P2PUnregisterClientRequest{{1, 0}, DeploymentMode::P2P})
                     .has_value());
     EXPECT_EQ(m.get_active_clients(), 1);
     EXPECT_EQ(m.get_clients_crashed_total(), 0);
@@ -236,7 +236,7 @@ TEST_F(P2PClientManagerTest, HealthTransitionMetrics) {
 
     // Heartbeat recovers the client -> recovered++, active++.
     ASSERT_TRUE(
-        mgr->Heartbeat(HeartbeatRequest{.client_id = UUID{1, 0}, .tasks = {}})
+        mgr->Heartbeat(P2PHeartbeatRequest{.client_id = UUID{1, 0}, .tasks = {}})
             .has_value());
     EXPECT_EQ(m.get_clients_recovered_total(), 1);
     EXPECT_EQ(m.get_active_clients(), 1);
@@ -261,12 +261,12 @@ TEST_F(P2PClientManagerTest, HeartbeatSuccess) {
     auto req = MakeP2PRegisterRequest();
     ASSERT_TRUE(mgr->RegisterClient(req).has_value());
 
-    HeartbeatRequest hb_req;
+    P2PHeartbeatRequest hb_req;
     hb_req.client_id = {100, 200};
 
     auto res = mgr->Heartbeat(hb_req);
     ASSERT_TRUE(res.has_value());
-    EXPECT_EQ(res.value().status, ClientStatus::HEALTH);
+    EXPECT_EQ(res.value().status, P2PClientStatus::HEALTH);
 }
 
 TEST_F(P2PClientManagerTest, HeartbeatSyncClientMetric) {
@@ -280,7 +280,7 @@ TEST_F(P2PClientManagerTest, HeartbeatSyncClientMetric) {
     first.total_request.get_requests = 5;
     HeartbeatTask task1(HeartbeatTaskType::SYNC_CLIENT_METRIC,
                         SyncClientMetricParam{.snapshot = first});
-    HeartbeatRequest hb_req1;
+    P2PHeartbeatRequest hb_req1;
     hb_req1.client_id = {100, 200};
     hb_req1.tasks.push_back(task1);
     auto res1 = mgr->Heartbeat(hb_req1);
@@ -296,7 +296,7 @@ TEST_F(P2PClientManagerTest, HeartbeatSyncClientMetric) {
     second.total_request.get_requests = 8;
     HeartbeatTask task2(HeartbeatTaskType::SYNC_CLIENT_METRIC,
                         SyncClientMetricParam{.snapshot = second});
-    HeartbeatRequest hb_req2;
+    P2PHeartbeatRequest hb_req2;
     hb_req2.client_id = {100, 200};
     hb_req2.tasks.push_back(task2);
     auto res2 = mgr->Heartbeat(hb_req2);
@@ -316,7 +316,7 @@ TEST_F(P2PClientManagerTest, HeartbeatSyncClientMetricInvalidParam) {
     // Wrong variant alternative for the SYNC_CLIENT_METRIC type.
     HeartbeatTask task(HeartbeatTaskType::SYNC_CLIENT_METRIC,
                        SyncSegmentMetaParam{});
-    HeartbeatRequest hb_req;
+    P2PHeartbeatRequest hb_req;
     hb_req.client_id = {100, 200};
     hb_req.tasks.push_back(task);
     auto res = mgr->Heartbeat(hb_req);
@@ -329,12 +329,12 @@ TEST_F(P2PClientManagerTest, HeartbeatUnregisteredClient) {
     auto mgr = CreateManager();
     mgr->Start();
 
-    HeartbeatRequest hb_req;
+    P2PHeartbeatRequest hb_req;
     hb_req.client_id = {999, 999};
 
     auto res = mgr->Heartbeat(hb_req);
     ASSERT_TRUE(res.has_value());
-    EXPECT_EQ(res.value().status, ClientStatus::UNDEFINED);
+    EXPECT_EQ(res.value().status, P2PClientStatus::UNDEFINED);
 }
 
 TEST_F(P2PClientManagerTest, HeartbeatRecoverFromDisconnection) {
@@ -348,20 +348,20 @@ TEST_F(P2PClientManagerTest, HeartbeatRecoverFromDisconnection) {
 
     auto client = mgr->GetClient(client_id);
     ASSERT_NE(client, nullptr);
-    EXPECT_EQ(client->get_health_state().status, ClientStatus::HEALTH);
+    EXPECT_EQ(client->get_health_state().status, P2PClientStatus::HEALTH);
 
     // Wait for internal timeout
     std::this_thread::sleep_for(std::chrono::seconds(disconnect_sec + 1));
 
     // Background client_monitor_thread_ will transition status
-    EXPECT_EQ(client->get_health_state().status, ClientStatus::DISCONNECTION);
+    EXPECT_EQ(client->get_health_state().status, P2PClientStatus::DISCONNECTION);
 
-    HeartbeatRequest hb_req;
+    P2PHeartbeatRequest hb_req;
     hb_req.client_id = client_id;
     auto res = mgr->Heartbeat(hb_req);
     ASSERT_TRUE(res.has_value());
-    EXPECT_EQ(res.value().status, ClientStatus::HEALTH);
-    EXPECT_EQ(client->get_health_state().status, ClientStatus::HEALTH);
+    EXPECT_EQ(res.value().status, P2PClientStatus::HEALTH);
+    EXPECT_EQ(client->get_health_state().status, P2PClientStatus::HEALTH);
 }
 
 TEST_F(P2PClientManagerTest, HeartbeatKeepCrashedStatus) {
@@ -377,12 +377,12 @@ TEST_F(P2PClientManagerTest, HeartbeatKeepCrashedStatus) {
     // Wait for crash (crash_sec + safety margin)
     std::this_thread::sleep_for(std::chrono::seconds(crash_sec + 2));
 
-    HeartbeatRequest hb_req;
+    P2PHeartbeatRequest hb_req;
     hb_req.client_id = client_id;
     auto res = mgr->Heartbeat(hb_req);
     ASSERT_TRUE(res.has_value());
     // Once crashed, ClientMonitorFunc removes it from client_metas_
-    EXPECT_EQ(res.value().status, ClientStatus::UNDEFINED);
+    EXPECT_EQ(res.value().status, P2PClientStatus::UNDEFINED);
 }
 
 TEST_F(P2PClientManagerTest, ClientMonitorStatusTransition) {
@@ -405,7 +405,7 @@ TEST_F(P2PClientManagerTest, ClientMonitorStatusTransition) {
     std::this_thread::sleep_for(std::chrono::seconds(disconnect_sec + 2));
     auto client = mgr->GetClient(client_id);
     ASSERT_NE(client, nullptr);
-    EXPECT_EQ(client->get_health_state().status, ClientStatus::DISCONNECTION);
+    EXPECT_EQ(client->get_health_state().status, P2PClientStatus::DISCONNECTION);
     EXPECT_EQ(removal_count.load(), 0);
 
     // DISCONNECTION -> CRASHED -> REMOVED
@@ -538,7 +538,7 @@ TEST_F(P2PClientManagerTest, QueryInterfacesNonHealth) {
     EXPECT_FALSE(mgr->QueryIp({100, 200}).has_value());
 
     // Recover via Heartbeat
-    HeartbeatRequest hb_req;
+    P2PHeartbeatRequest hb_req;
     hb_req.client_id = {100, 200};
     ASSERT_TRUE(mgr->Heartbeat(hb_req).has_value());
 
@@ -613,7 +613,7 @@ TEST_F(P2PClientManagerTest, ForEachClientCapacityPriority) {
 
     // Test sorting change after usage update (simulated via SYNC_SEGMENT_META)
     ids.clear();
-    HeartbeatRequest hb_req;
+    P2PHeartbeatRequest hb_req;
     hb_req.client_id = {2, 0};
     hb_req.tasks.push_back(
         {HeartbeatTaskType::SYNC_SEGMENT_META,
@@ -648,9 +648,9 @@ TEST_F(P2PClientManagerTest, ForEachClientHealthEffect) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
 
     // Heartbeat Client 1, 3, 4. (Reset their timers)
-    mgr->Heartbeat(HeartbeatRequest{.client_id = UUID{1, 0}, .tasks = {}});
-    mgr->Heartbeat(HeartbeatRequest{.client_id = UUID{3, 0}, .tasks = {}});
-    mgr->Heartbeat(HeartbeatRequest{.client_id = UUID{4, 0}, .tasks = {}});
+    mgr->Heartbeat(P2PHeartbeatRequest{.client_id = UUID{1, 0}, .tasks = {}});
+    mgr->Heartbeat(P2PHeartbeatRequest{.client_id = UUID{3, 0}, .tasks = {}});
+    mgr->Heartbeat(P2PHeartbeatRequest{.client_id = UUID{4, 0}, .tasks = {}});
 
     // Manually trigger monitor.
     // Client 1, 3, 4: HEALTHY
@@ -661,8 +661,8 @@ TEST_F(P2PClientManagerTest, ForEachClientHealthEffect) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
 
     // Refresh 1 & 4 again
-    mgr->Heartbeat(HeartbeatRequest{.client_id = UUID{1, 0}, .tasks = {}});
-    mgr->Heartbeat(HeartbeatRequest{.client_id = UUID{4, 0}, .tasks = {}});
+    mgr->Heartbeat(P2PHeartbeatRequest{.client_id = UUID{1, 0}, .tasks = {}});
+    mgr->Heartbeat(P2PHeartbeatRequest{.client_id = UUID{4, 0}, .tasks = {}});
 
     // Manually trigger monitor again.
     // Client 1, 4: HEALTHY (HB recently)
@@ -760,7 +760,7 @@ TEST_F(P2PClientManagerTest, ConcurrentHeartbeat) {
     for (int i = 0; i < kNumClients; i++) {
         threads.emplace_back([&mgr, &success_count, i]() {
             UUID client_id = {static_cast<uint64_t>(i + 1), 0};
-            HeartbeatRequest req;
+            P2PHeartbeatRequest req;
             req.client_id = client_id;
             auto res = mgr->Heartbeat(req);
             if (res.has_value()) {
@@ -826,7 +826,7 @@ TEST_F(P2PClientManagerTest, HeartbeatSyncSegmentMeta) {
     auto req = MakeP2PRegisterRequest(client_id, "10.0.0.1", 50051, {seg});
     ASSERT_TRUE(mgr->RegisterClient(req).has_value());
 
-    HeartbeatRequest hb_req;
+    P2PHeartbeatRequest hb_req;
     hb_req.client_id = client_id;
     SyncSegmentMetaParam sync_param;
     sync_param.tier_usages.push_back({UUID{1, 1}, 1 * 1024 * 1024});
@@ -857,19 +857,19 @@ TEST_F(P2PClientManagerTest, HeartbeatSyncSegmentMetaErrorPaths) {
 
     // 1. Unregistered Client (Heartbeat interface level)
     {
-        HeartbeatRequest req;
+        P2PHeartbeatRequest req;
         req.client_id = {999, 999};
         req.tasks.push_back(
             {HeartbeatTaskType::SYNC_SEGMENT_META, SyncSegmentMetaParam{}});
         auto res = mgr->Heartbeat(req);
         // Heartbeat should return success but status UNDEFINED
         ASSERT_TRUE(res.has_value());
-        EXPECT_EQ(res.value().status, ClientStatus::UNDEFINED);
+        EXPECT_EQ(res.value().status, P2PClientStatus::UNDEFINED);
     }
 
     // 2. Mix valid and invalid Segment IDs
     {
-        HeartbeatRequest req;
+        P2PHeartbeatRequest req;
         req.client_id = client_id;
         SyncSegmentMetaParam param;
         param.tier_usages.push_back({UUID{1, 1}, 100});    // Valid

@@ -323,7 +323,7 @@ TEST_F(P2PMasterServiceTest, GetWriteRouteRejectsWhenOwnerClientLimitReached) {
 TEST_F(P2PMasterServiceTest, GetWriteRouteLocalFirstBeatsCapacityOrdering) {
     auto service = CreateService();
     auto local_seg = MakeP2PSegment("local", 1000, {}, 1);
-    local_seg.GetP2PExtra().usage = 900;  // free 100 -> free_ratio 0.1
+    local_seg.usage = 900;  // free 100 -> free_ratio 0.1
     auto local_id = generate_uuid();
     RegisterP2PClient(*service, local_id, {local_seg}, "10.0.0.1", 50051);
 
@@ -353,7 +353,7 @@ TEST_F(P2PMasterServiceTest, GetWriteRouteLocalFirstBeatsCapacityOrdering) {
 TEST_F(P2PMasterServiceTest, GetWriteRouteWeightedRemoteCanWin) {
     auto service = CreateService();
     auto local_seg = MakeP2PSegment("local", 1000, {}, 1);
-    local_seg.GetP2PExtra().usage = 900;  // free_ratio 0.1
+    local_seg.usage = 900;  // free_ratio 0.1
     auto local_id = generate_uuid();
     RegisterP2PClient(*service, local_id, {local_seg}, "10.0.0.1", 50051);
 
@@ -382,7 +382,7 @@ TEST_F(P2PMasterServiceTest, GetWriteRouteWeightedRemoteCanWin) {
 TEST_F(P2PMasterServiceTest, GetWriteRouteEarlyReturnStopsAtFirstCandidate) {
     auto service = CreateService();
     auto local_seg = MakeP2PSegment("local", 1000, {}, 1);
-    local_seg.GetP2PExtra().usage = 900;  // free_ratio 0.1
+    local_seg.usage = 900;  // free_ratio 0.1
     auto local_id = generate_uuid();
     RegisterP2PClient(*service, local_id, {local_seg}, "10.0.0.1", 50051);
 
@@ -414,17 +414,17 @@ TEST_F(P2PMasterServiceTest, GetWriteRouteTopTierCapacityAffectsScore) {
     // Client A: small high-prio DRAM mostly free; large low-prio NVMe mostly
     // full.
     auto a_dram = MakeP2PSegment("a_dram", 1000, {}, 10);
-    a_dram.GetP2PExtra().usage = 100;  // free 900 -> top-tier ratio 0.9
+    a_dram.usage = 100;  // free 900 -> top-tier ratio 0.9
     auto a_nvme = MakeP2PSegment("a_nvme", 100000, {}, 0);
-    a_nvme.GetP2PExtra().usage = 99000;  // free 1000
+    a_nvme.usage = 99000;  // free 1000
     auto a_id = generate_uuid();
     RegisterP2PClient(*service, a_id, {a_dram, a_nvme}, "10.0.0.1", 50051);
 
     // Client B: high-prio DRAM half free; large low-prio NVMe fully free.
     auto b_dram = MakeP2PSegment("b_dram", 1000, {}, 10);
-    b_dram.GetP2PExtra().usage = 500;  // free 500 -> top-tier ratio 0.5
+    b_dram.usage = 500;  // free 500 -> top-tier ratio 0.5
     auto b_nvme = MakeP2PSegment("b_nvme", 100000, {}, 0);
-    b_nvme.GetP2PExtra().usage = 0;  // free 100000
+    b_nvme.usage = 0;  // free 100000
     auto b_id = generate_uuid();
     RegisterP2PClient(*service, b_id, {b_dram, b_nvme}, "10.0.0.2", 50052);
 
@@ -832,7 +832,7 @@ TEST_F(P2PMasterServiceTest, UnregisterClientRemovesReplicasAndSegments) {
 
     // Unregister cascades: segment unmount -> replica/object removal.
     auto res = service->UnregisterClient(
-        UnregisterClientRequest{client_id, DeploymentMode::P2P});
+        P2PUnregisterClientRequest{client_id, DeploymentMode::P2P});
     ASSERT_TRUE(res.has_value());
 
     EXPECT_EQ(service->GetClientManager().GetClient(client_id), nullptr);
@@ -856,7 +856,7 @@ TEST_F(P2PMasterServiceTest, UnregisterClientPartialKeepsOtherOwner) {
     // Unregister client1 -> only its replica is removed.
     ASSERT_TRUE(service
                     ->UnregisterClient(
-                        UnregisterClientRequest{client1, DeploymentMode::P2P})
+                        P2PUnregisterClientRequest{client1, DeploymentMode::P2P})
                     .has_value());
 
     EXPECT_EQ(service->GetClientManager().GetClient(client1), nullptr);
@@ -877,12 +877,12 @@ TEST_F(P2PMasterServiceTest, UnregisterClientIdempotent) {
 
     ASSERT_TRUE(service
                     ->UnregisterClient(
-                        UnregisterClientRequest{client_id, DeploymentMode::P2P})
+                        P2PUnregisterClientRequest{client_id, DeploymentMode::P2P})
                     .has_value());
     // Second call: client already gone -> still OK (idempotent).
     EXPECT_TRUE(service
                     ->UnregisterClient(
-                        UnregisterClientRequest{client_id, DeploymentMode::P2P})
+                        P2PUnregisterClientRequest{client_id, DeploymentMode::P2P})
                     .has_value());
 }
 
@@ -924,9 +924,9 @@ TEST_F(P2PMasterServiceTest, FilterReplicasWithTagAndPriority) {
     AddReplicaHelper(*service, "key1", 1024, client2, seg_b.id);
 
     // Filter out replicas with tag "memory" — only seg_b remains
-    GetReplicaListRequestConfig config;
+    P2PGetReplicaListRequestConfig config;
     config.max_candidates = 10;
-    config.p2p_config = P2PGetReplicaListConfigExtra{
+    config.p2p_config = P2PReadRouteConfigExtra{
         .tag_filters = {"memory"},
         .priority_limit = 0,
     };
@@ -954,9 +954,9 @@ TEST_F(P2PMasterServiceTest, FilterReplicasWithMaxCandidates) {
     }
 
     // Limit to 3 candidates — should return top 3 by priority
-    GetReplicaListRequestConfig config;
+    P2PGetReplicaListRequestConfig config;
     config.max_candidates = 3;
-    config.p2p_config = P2PGetReplicaListConfigExtra{
+    config.p2p_config = P2PReadRouteConfigExtra{
         .tag_filters = {},
         .priority_limit = 0,
     };

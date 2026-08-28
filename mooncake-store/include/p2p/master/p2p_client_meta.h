@@ -21,7 +21,7 @@
 namespace mooncake {
 
 struct P2PClientHealthState {
-    ClientStatus status = ClientStatus::UNDEFINED;
+    P2PClientStatus status = P2PClientStatus::UNDEFINED;
     std::chrono::steady_clock::time_point last_heartbeat;
 };
 
@@ -54,15 +54,15 @@ class P2PClientMeta final {
     /**
      * @brief Update heartbeat timestamp and health status.
      * Attention: if client is CRASHED, the heartbeat will not be updated.
-     * @return std::pair<ClientStatus, ClientStatus> {old_status, new_status}
+     * @return std::pair<P2PClientStatus, P2PClientStatus> {old_status, new_status}
      */
-    std::pair<ClientStatus, ClientStatus> Heartbeat();
+    std::pair<P2PClientStatus, P2PClientStatus> Heartbeat();
 
     /**
      * @brief Update health status based on the last heartbeat timestamp.
-     * @return std::pair<ClientStatus, ClientStatus> {old_status, new_status}
+     * @return std::pair<P2PClientStatus, P2PClientStatus> {old_status, new_status}
      */
-    std::pair<ClientStatus, ClientStatus> CheckHealth();
+    std::pair<P2PClientStatus, P2PClientStatus> CheckHealth();
 
     void OnDisconnected();
     void OnRecovered();
@@ -106,8 +106,8 @@ class P2PClientMeta final {
    protected:
     auto InnerStatusCheck() const -> tl::expected<void, ErrorCode>;
     void InnerUpdateHeartbeat();
-    std::pair<ClientStatus, ClientStatus> InnerUpdateHealthStatus();
-    std::string HealthToString(ClientStatus status) const;
+    std::pair<P2PClientStatus, P2PClientStatus> InnerUpdateHealthStatus();
+    std::string HealthToString(P2PClientStatus status) const;
 
     std::shared_ptr<P2PSegmentManager> GetSegmentManager();
 

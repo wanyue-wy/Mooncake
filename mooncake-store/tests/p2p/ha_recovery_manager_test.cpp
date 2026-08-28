@@ -75,12 +75,11 @@ class HARecoveryManagerTest : public ::testing::Test {
         segment_ = MakeSegment();
 
         // Register client + segment with master
-        RegisterClientRequest reg;
+        P2PRegisterClientRequest reg;
         reg.client_id = client_id_;
         reg.ip_address = "127.0.0.1";
         reg.rpc_port = 50099;
         reg.segments.push_back(segment_);
-        reg.deployment_mode = DeploymentMode::P2P;
         auto& svc = master_.GetWrapped().GetMasterService();
         auto res = svc.RegisterClient(reg);
         ASSERT_TRUE(res.has_value())
@@ -105,16 +104,13 @@ class HARecoveryManagerTest : public ::testing::Test {
         master_client_.reset();
     }
 
-    static Segment MakeSegment(size_t size = 16 * 1024 * 1024) {
-        Segment seg;
+    static P2PSegment MakeSegment(size_t size = 16 * 1024 * 1024) {
+        P2PSegment seg;
         seg.id = generate_uuid();
         seg.name = "test_segment";
         seg.size = size;
-        seg.extra = P2PSegmentExtraData{
-            .priority = 0,
-            .tags = {},
-            .memory_type = MemoryType::DRAM,
-        };
+        seg.priority = 0;
+        seg.memory_type = MemoryType::DRAM;
         return seg;
     }
 
@@ -198,7 +194,7 @@ class HARecoveryManagerTest : public ::testing::Test {
     }
 
     void MountLocalTierOnMaster(const UUID& tier_id) {
-        Segment local_segment = MakeSegment();
+        P2PSegment local_segment = MakeSegment();
         local_segment.id = tier_id;
         local_segment.name = "local_recovery_tier";
         auto& svc = master_.GetWrapped().GetMasterService();
@@ -235,7 +231,7 @@ class HARecoveryManagerTest : public ::testing::Test {
     static std::string master_addr_;
 
     UUID client_id_{};
-    Segment segment_;
+    P2PSegment segment_;
     std::unique_ptr<P2PMasterClient> master_client_;
     std::atomic<ViewVersionId> view_version_{0};
     std::optional<DataManager> data_manager_;

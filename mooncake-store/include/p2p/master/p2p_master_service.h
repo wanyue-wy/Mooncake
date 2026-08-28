@@ -19,7 +19,6 @@
 #include "p2p/ha/oplog/p2p_standby_metadata_store.h"
 #include "p2p/master/p2p_client_manager.h"
 #include "replica.h"
-#include "rpc_types.h"
 #include "types.h"
 #include "utils.h"
 
@@ -50,13 +49,13 @@ class P2PMasterService {
     }
 
     auto RegisterClient(const P2PRegisterClientRequest& req)
-        -> tl::expected<RegisterClientResponse, ErrorCode>;
-    auto UnregisterClient(const UnregisterClientRequest& req)
-        -> tl::expected<UnregisterClientResponse, ErrorCode>;
-    auto Heartbeat(const HeartbeatRequest& req)
-        -> tl::expected<HeartbeatResponse, ErrorCode>;
-    auto QueryClientStatus(const QueryClientStatusRequest& req)
-        -> tl::expected<QueryClientStatusResponse, ErrorCode>;
+        -> tl::expected<P2PRegisterClientResponse, ErrorCode>;
+    auto UnregisterClient(const P2PUnregisterClientRequest& req)
+        -> tl::expected<P2PUnregisterClientResponse, ErrorCode>;
+    auto Heartbeat(const P2PHeartbeatRequest& req)
+        -> tl::expected<P2PHeartbeatResponse, ErrorCode>;
+    auto QueryClientStatus(const P2PQueryClientStatusRequest& req)
+        -> tl::expected<P2PQueryClientStatusResponse, ErrorCode>;
 
     auto MountSegment(const P2PSegment& segment, const UUID& client_id)
         -> tl::expected<void, ErrorCode>;
@@ -83,9 +82,9 @@ class P2PMasterService {
             std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
             ErrorCode>;
     auto GetReplicaList(std::string_view key,
-                        const GetReplicaListRequestConfig& config =
-                            GetReplicaListRequestConfig())
-        -> tl::expected<GetReplicaListResponse, ErrorCode>;
+                        const P2PGetReplicaListRequestConfig& config =
+                            P2PGetReplicaListRequestConfig())
+        -> tl::expected<P2PGetReplicaListResponse, ErrorCode>;
 
     auto Remove(std::string_view key, bool force = false)
         -> tl::expected<void, ErrorCode>;
@@ -321,7 +320,7 @@ class P2PMasterService {
         -> tl::expected<OwnerClientSet, ErrorCode>;
 
     std::vector<Replica::Descriptor> FilterReplicas(
-        const GetReplicaListRequestConfig& config,
+        const P2PGetReplicaListRequestConfig& config,
         const ObjectMetadata& metadata);
 
     tl::expected<void, ErrorCode> InnerAddReplica(

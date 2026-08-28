@@ -2,6 +2,7 @@
 
 #include <csignal>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -200,35 +201,18 @@ class P2PClientService final : public ClientService {
 
     P2PMasterClient& GetMasterClient() { return master_client_; }
 
-    ErrorCode ConnectMasterClient(const std::string& master_address) override {
-        return master_client_.Connect(master_address);
-    }
-
     tl::expected<
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>
-    BatchQueryIpFromMaster(const std::vector<UUID>& client_ids) override {
-        return master_client_.BatchQueryIp(client_ids);
-    }
+    BatchQueryIp(const std::vector<UUID>& client_ids) override;
 
     tl::expected<
         std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
         ErrorCode>
-    QueryByRegexFromMaster(const std::string& regex) override {
-        return master_client_.GetReplicaListByRegex(regex);
-    }
-
-    tl::expected<HeartbeatResponse, ErrorCode> SendHeartbeat(
-        const HeartbeatRequest& request) override {
-        return master_client_.Heartbeat(request);
-    }
+    QueryByRegex(const std::string& regex) override;
 
     tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
-    CalcCacheStatsFromMaster() override {
-        LOG(ERROR)
-            << "CalcCacheStats is not implemented for P2P client service";
-        return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
-    }
+    CalcCacheStats() override;
 
     ClientMetric* GetMetrics() override { return metrics_.get(); }
 
@@ -294,7 +278,7 @@ class P2PClientService final : public ClientService {
      * LOCAL_ONLY (heartbeat stopped), also restarts the heartbeat and drives
      * metadata recovery back to FULL.
      */
-    tl::expected<RegisterClientResponse, ErrorCode> InnerRegisterClient()
+    tl::expected<ViewVersionId, ErrorCode> InnerRegisterClient()
         override REQUIRES(registration_mutex_);
 
     /**
@@ -305,7 +289,20 @@ class P2PClientService final : public ClientService {
     tl::expected<void, ErrorCode> InnerUnregisterClient()
         REQUIRES(registration_mutex_);
 
-    HeartbeatRequest build_heartbeat_request() override;
+    ErrorCode ConnectToMaster(const std::string& master_server_entry);
+    void StartHeartbeat(const std::string& master_server_entry);
+    void HeartbeatThreadMain(bool is_ha_mode,
+                             std::string current_master_address);
+    bool ReconnectToMaster(bool is_ha_mode,
+                           std::string& current_master_address);
+    void HandleHeartbeatResponse(
+        const P2PHeartbeatResponse& response,
+        const std::string& current_master_address,
+        const std::function<void()>& register_client,
+        std::future<void>& register_client_future);
+    void HandleHeartbeatTaskResult(const HeartbeatTaskResult& task_result);
+    P2PHeartbeatRequest build_heartbeat_request();
+    void OnHAEvent(HAEvent event);
 
    private:
     bool IsLocalWrite(const WriteRouteRequestConfig& cfg) const;
@@ -562,7 +559,6 @@ class P2PClientService final : public ClientService {
     async_simple::Executor* GetCoroExecutor() const;
 
    private:
-    void OnHAEvent(HAEvent event) override;
     void RegisterHttpMethods() override;
     void RecordLocalInflight(bool entering) override;
 
@@ -578,6 +574,9 @@ class P2PClientService final : public ClientService {
     // Heartbeats since the last SYNC_CLIENT_METRIC task.
     int metric_sync_heartbeat_count_ = 0;
     P2PMasterClient master_client_;
+    // Accessed only by the P2P heartbeat thread.
+    bool connection_interrupted_ = false;
+    std::atomic<bool> registered_{false};
     uint16_t client_rpc_port_ = 12345;
 
     std::unique_ptr<coro_rpc::coro_rpc_server> client_rpc_server_;

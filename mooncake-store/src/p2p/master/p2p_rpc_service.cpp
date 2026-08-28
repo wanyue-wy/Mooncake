@@ -18,45 +18,6 @@
 
 namespace mooncake {
 
-static_assert(p2p_rpc_wire::kExistKey ==
-              coro_rpc::func_id<&WrappedP2PMasterService::ExistKey>());
-static_assert(p2p_rpc_wire::kBatchExistKey ==
-              coro_rpc::func_id<&WrappedP2PMasterService::BatchExistKey>());
-static_assert(p2p_rpc_wire::kBatchQueryIp ==
-              coro_rpc::func_id<&WrappedP2PMasterService::BatchQueryIp>());
-static_assert(
-    p2p_rpc_wire::kGetReplicaListByRegex ==
-    coro_rpc::func_id<&WrappedP2PMasterService::GetReplicaListByRegex>());
-static_assert(p2p_rpc_wire::kGetReplicaList ==
-              coro_rpc::func_id<&WrappedP2PMasterService::GetReplicaList>());
-static_assert(
-    p2p_rpc_wire::kBatchGetReplicaList ==
-    coro_rpc::func_id<&WrappedP2PMasterService::BatchGetReplicaList>());
-static_assert(p2p_rpc_wire::kRemove ==
-              coro_rpc::func_id<&WrappedP2PMasterService::Remove>());
-static_assert(p2p_rpc_wire::kRemoveByRegex ==
-              coro_rpc::func_id<&WrappedP2PMasterService::RemoveByRegex>());
-static_assert(p2p_rpc_wire::kRemoveAll ==
-              coro_rpc::func_id<&WrappedP2PMasterService::RemoveAll>());
-static_assert(p2p_rpc_wire::kMountSegment ==
-              coro_rpc::func_id<&WrappedP2PMasterService::MountSegment>());
-static_assert(p2p_rpc_wire::kUnmountSegment ==
-              coro_rpc::func_id<&WrappedP2PMasterService::UnmountSegment>());
-static_assert(p2p_rpc_wire::kHeartbeat ==
-              coro_rpc::func_id<&WrappedP2PMasterService::Heartbeat>());
-static_assert(
-    p2p_rpc_wire::kQueryClientStatus ==
-    coro_rpc::func_id<&WrappedP2PMasterService::QueryClientStatus>());
-static_assert(p2p_rpc_wire::kRegisterClient ==
-              coro_rpc::func_id<&WrappedP2PMasterService::RegisterClient>());
-static_assert(p2p_rpc_wire::kUnregisterClient ==
-              coro_rpc::func_id<&WrappedP2PMasterService::UnregisterClient>());
-static_assert(p2p_rpc_wire::kServiceReady ==
-              coro_rpc::func_id<&WrappedP2PMasterService::ServiceReady>());
-static_assert(
-    p2p_rpc_wire::kHeartbeatServiceReady ==
-    coro_rpc::func_id<&WrappedP2PMasterService::HeartbeatServiceReady>());
-
 WrappedP2PMasterService::WrappedP2PMasterService(
     const WrappedMasterServiceConfig& config)
     : master_service_(config),
@@ -305,9 +266,9 @@ WrappedP2PMasterService::GetReplicaListByRegex(const std::string& str) {
         });
 }
 
-tl::expected<GetReplicaListResponse, ErrorCode>
+tl::expected<P2PGetReplicaListResponse, ErrorCode>
 WrappedP2PMasterService::GetReplicaList(
-    std::string_view key, const GetReplicaListRequestConfig& config) {
+    std::string_view key, const P2PGetReplicaListRequestConfig& config) {
     return execute_rpc(
         "GetReplicaList",
         [&] { return master_service_.GetReplicaList(key, config); },
@@ -320,17 +281,17 @@ WrappedP2PMasterService::GetReplicaList(
         });
 }
 
-std::vector<tl::expected<GetReplicaListResponse, ErrorCode>>
+std::vector<tl::expected<P2PGetReplicaListResponse, ErrorCode>>
 WrappedP2PMasterService::BatchGetReplicaList(
     const std::vector<std::string_view>& keys,
-    const GetReplicaListRequestConfig& config) {
+    const P2PGetReplicaListRequestConfig& config) {
     ScopedVLogTimer timer(1, "BatchGetReplicaList");
     const size_t total_requests = keys.size();
     timer.LogRequest("requests_count=", total_requests);
     P2PMasterMetricManager::instance().inc_batch_get_replica_list_requests(
         total_requests);
 
-    std::vector<tl::expected<GetReplicaListResponse, ErrorCode>> results;
+    std::vector<tl::expected<P2PGetReplicaListResponse, ErrorCode>> results;
     results.reserve(total_requests);
     for (const auto& key : keys) {
         results.emplace_back(master_service_.GetReplicaList(key, config));
@@ -432,8 +393,8 @@ tl::expected<void, ErrorCode> WrappedP2PMasterService::MountSegment(
         });
 }
 
-tl::expected<HeartbeatResponse, ErrorCode>
-WrappedP2PMasterService::Heartbeat(const HeartbeatRequest& req) {
+tl::expected<P2PHeartbeatResponse, ErrorCode>
+WrappedP2PMasterService::Heartbeat(const P2PHeartbeatRequest& req) {
     ScopedVLogTimer timer(1, "Heartbeat");
     timer.LogRequest("client_id=", req.client_id);
     P2PMasterMetricManager::instance().inc_heartbeat_requests();
@@ -442,9 +403,9 @@ WrappedP2PMasterService::Heartbeat(const HeartbeatRequest& req) {
     return result;
 }
 
-tl::expected<QueryClientStatusResponse, ErrorCode>
+tl::expected<P2PQueryClientStatusResponse, ErrorCode>
 WrappedP2PMasterService::QueryClientStatus(
-    const QueryClientStatusRequest& req) {
+    const P2PQueryClientStatusRequest& req) {
     ScopedVLogTimer timer(1, "QueryClientStatus");
     timer.LogRequest("client_id=", req.client_id);
     auto result = master_service_.QueryClientStatus(req);
@@ -452,7 +413,7 @@ WrappedP2PMasterService::QueryClientStatus(
     return result;
 }
 
-tl::expected<RegisterClientResponse, ErrorCode>
+tl::expected<P2PRegisterClientResponse, ErrorCode>
 WrappedP2PMasterService::RegisterClient(
     const P2PRegisterClientRequest& req) {
     return execute_rpc(
@@ -469,9 +430,9 @@ WrappedP2PMasterService::RegisterClient(
         });
 }
 
-tl::expected<UnregisterClientResponse, ErrorCode>
+tl::expected<P2PUnregisterClientResponse, ErrorCode>
 WrappedP2PMasterService::UnregisterClient(
-    const UnregisterClientRequest& req) {
+    const P2PUnregisterClientRequest& req) {
     return execute_rpc(
         "UnregisterClient",
         [&] { return master_service_.UnregisterClient(req); },
@@ -491,9 +452,9 @@ WrappedP2PMasterService::ServiceReady() {
     return GetMooncakeStoreVersion();
 }
 
-tl::expected<HeartbeatServiceReadyResponse, ErrorCode>
+tl::expected<P2PHeartbeatServiceReadyResponse, ErrorCode>
 WrappedP2PMasterService::HeartbeatServiceReady() {
-    HeartbeatServiceReadyResponse response;
+    P2PHeartbeatServiceReadyResponse response;
     response.heartbeat_rpc_port = heartbeat_rpc_port_;
     return response;
 }
@@ -646,41 +607,41 @@ void RegisterP2PRpcService(
     mooncake::WrappedP2PMasterService& wrapped_master_service,
     bool include_heartbeat) {
     server.register_handler<&WrappedP2PMasterService::ExistKey>(
-        &wrapped_master_service, p2p_rpc_wire::kExistKey);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::BatchExistKey>(
-        &wrapped_master_service, p2p_rpc_wire::kBatchExistKey);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::BatchQueryIp>(
-        &wrapped_master_service, p2p_rpc_wire::kBatchQueryIp);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::GetReplicaListByRegex>(
-        &wrapped_master_service, p2p_rpc_wire::kGetReplicaListByRegex);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::GetReplicaList>(
-        &wrapped_master_service, p2p_rpc_wire::kGetReplicaList);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::BatchGetReplicaList>(
-        &wrapped_master_service, p2p_rpc_wire::kBatchGetReplicaList);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::Remove>(
-        &wrapped_master_service, p2p_rpc_wire::kRemove);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::RemoveByRegex>(
-        &wrapped_master_service, p2p_rpc_wire::kRemoveByRegex);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::RemoveAll>(
-        &wrapped_master_service, p2p_rpc_wire::kRemoveAll);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::UnmountSegment>(
-        &wrapped_master_service, p2p_rpc_wire::kUnmountSegment);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::MountSegment>(
-        &wrapped_master_service, p2p_rpc_wire::kMountSegment);
+        &wrapped_master_service);
     if (include_heartbeat) {
         server.register_handler<&WrappedP2PMasterService::Heartbeat>(
-            &wrapped_master_service, p2p_rpc_wire::kHeartbeat);
+            &wrapped_master_service);
     }
     server.register_handler<&WrappedP2PMasterService::QueryClientStatus>(
-        &wrapped_master_service, p2p_rpc_wire::kQueryClientStatus);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::RegisterClient>(
-        &wrapped_master_service, p2p_rpc_wire::kRegisterClient);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::UnregisterClient>(
-        &wrapped_master_service, p2p_rpc_wire::kUnregisterClient);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::ServiceReady>(
-        &wrapped_master_service, p2p_rpc_wire::kServiceReady);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::HeartbeatServiceReady>(
-        &wrapped_master_service, p2p_rpc_wire::kHeartbeatServiceReady);
+        &wrapped_master_service);
 
     server.register_handler<&WrappedP2PMasterService::GetWriteRoute>(
         &wrapped_master_service);
@@ -702,9 +663,9 @@ void RegisterP2PHeartbeatRpcService(
     coro_rpc::coro_rpc_server& server,
     mooncake::WrappedP2PMasterService& wrapped_master_service) {
     server.register_handler<&WrappedP2PMasterService::Heartbeat>(
-        &wrapped_master_service, p2p_rpc_wire::kHeartbeat);
+        &wrapped_master_service);
     server.register_handler<&WrappedP2PMasterService::ServiceReady>(
-        &wrapped_master_service, p2p_rpc_wire::kServiceReady);
+        &wrapped_master_service);
 }
 
 }  // namespace mooncake

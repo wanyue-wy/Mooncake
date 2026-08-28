@@ -537,8 +537,8 @@ TEST_F(P2PClientIntegrationTest, PutOverwrite) {
     const std::string data1 = "version_1";
     const std::string data2 = "version_2_longer";
 
-    GetReplicaListRequestConfig config;
-    config.max_candidates = GetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
+    P2PGetReplicaListRequestConfig config;
+    config.max_candidates = P2PGetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
 
     // First put
     {
@@ -917,7 +917,7 @@ TEST_F(P2PClientIntegrationTest, ForwardRemotePutAndGet) {
 
         ReadRouteConfig rcfg;
         rcfg.max_candidates =
-            GetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
+            P2PGetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
 
         std::vector<char> buf(payload.size(), 0);
         auto get_res =
@@ -988,7 +988,7 @@ TEST_F(P2PClientIntegrationTest, ForwardRemoteBatchPutAndBatchGet) {
 
         ReadRouteConfig read_config;
         read_config.max_candidates =
-            GetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
+            P2PGetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
 
         std::vector<std::vector<char>> read_payloads(batch_size);
         std::vector<std::vector<void*>> all_buffers(batch_size);
@@ -1089,7 +1089,7 @@ TEST_F(P2PClientIntegrationTest, TeAsyncPollForwardRemoteBatchPutAndGet) {
 
         ReadRouteConfig read_config;
         read_config.max_candidates =
-            GetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
+            P2PGetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
         std::vector<std::vector<char>> read_payloads(batch_size);
         std::vector<std::vector<void*>> all_buffers(batch_size);
         std::vector<std::vector<size_t>> all_sizes(batch_size);
@@ -1165,7 +1165,7 @@ TEST_F(P2PClientIntegrationTest, TeAsyncPollReverseRemoteBatchPutAndGet) {
 
         ReadRouteConfig read_config;
         read_config.max_candidates =
-            GetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
+            P2PGetReplicaListRequestConfig::RETURN_ALL_CANDIDATES;
         std::vector<std::vector<char>> read_payloads(batch_size);
         std::vector<std::vector<void*>> all_buffers(batch_size);
         std::vector<std::vector<size_t>> all_sizes(batch_size);

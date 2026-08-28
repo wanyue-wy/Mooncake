@@ -247,7 +247,7 @@ void P2PClientManager::SetSegmentRemovalCallback(SegmentRemovalCallback cb) {
 }
 
 auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
-    -> tl::expected<RegisterClientResponse, ErrorCode> {
+    -> tl::expected<P2PRegisterClientResponse, ErrorCode> {
     const auto& client_id = req.client_id;
     {
         SharedMutexLocker lock(&clients_mutex_, shared_lock);
@@ -307,7 +307,7 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
 
     P2PMasterMetricManager::instance().inc_active_clients();
 
-    RegisterClientResponse response;
+    P2PRegisterClientResponse response;
     response.view_version = view_version_;
 
     LOG(INFO) << "RegisterClient: client_id=" << client_id
@@ -317,8 +317,8 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
     return response;
 }
 
-auto P2PClientManager::UnregisterClient(const UnregisterClientRequest& req)
-    -> tl::expected<UnregisterClientResponse, ErrorCode> {
+auto P2PClientManager::UnregisterClient(const P2PUnregisterClientRequest& req)
+    -> tl::expected<P2PUnregisterClientResponse, ErrorCode> {
     if (req.deployment_mode != DeploymentMode::P2P) {
         LOG(ERROR) << "UnregisterClient: architecture mismatch"
                    << ", client_mode=" << static_cast<int>(req.deployment_mode)
@@ -335,14 +335,14 @@ auto P2PClientManager::UnregisterClient(const UnregisterClientRequest& req)
         auto it = client_metas_.find(client_id);
         if (it == client_metas_.end()) {
             // Idempotent: already absent (crashed-out or double unregister).
-            UnregisterClientResponse response;
+            P2PUnregisterClientResponse response;
             response.view_version = view_version_;
             LOG(INFO) << "UnregisterClient: client not found (idempotent ok)"
                       << ", client_id=" << client_id;
             return response;
         }
         meta = std::move(it->second);
-        was_health = (meta->get_health_state().status == ClientStatus::HEALTH);
+        was_health = (meta->get_health_state().status == P2PClientStatus::HEALTH);
         client_metas_.erase(it);
     }
 
@@ -356,17 +356,17 @@ auto P2PClientManager::UnregisterClient(const UnregisterClientRequest& req)
         P2PMasterMetricManager::instance().dec_active_clients();
     }
 
-    UnregisterClientResponse response;
+    P2PUnregisterClientResponse response;
     response.view_version = view_version_;
     LOG(INFO) << "UnregisterClient: client_id=" << client_id
               << ", was_health=" << was_health;
     return response;
 }
 
-auto P2PClientManager::Heartbeat(const HeartbeatRequest& req)
-    -> tl::expected<HeartbeatResponse, ErrorCode> {
+auto P2PClientManager::Heartbeat(const P2PHeartbeatRequest& req)
+    -> tl::expected<P2PHeartbeatResponse, ErrorCode> {
     const auto& client_id = req.client_id;
-    HeartbeatResponse response;
+    P2PHeartbeatResponse response;
     response.view_version = view_version_;
 
     SharedMutexLocker lock(&clients_mutex_, shared_lock);
@@ -375,7 +375,7 @@ auto P2PClientManager::Heartbeat(const HeartbeatRequest& req)
         // Client not in client_metas_: master restarted or client heartbeat
         // timed out and the meta of client was cleaned up. Return UNDEFINED +
         // view_version to inform client to re-register.
-        response.status = ClientStatus::UNDEFINED;
+        response.status = P2PClientStatus::UNDEFINED;
         return response;
     }
 
@@ -384,7 +384,7 @@ auto P2PClientManager::Heartbeat(const HeartbeatRequest& req)
     // Update Heartbeat
     auto [old_status, new_status] = meta->Heartbeat();
     response.status = new_status;
-    if (new_status == ClientStatus::HEALTH) {
+    if (new_status == P2PClientStatus::HEALTH) {
         if (old_status != new_status) {
             LOG(INFO) << "client recovered"
                       << ", client_id=" << client_id;
@@ -398,15 +398,15 @@ auto P2PClientManager::Heartbeat(const HeartbeatRequest& req)
     return response;
 }
 
-auto P2PClientManager::QueryClientStatus(const QueryClientStatusRequest& req)
-    -> tl::expected<QueryClientStatusResponse, ErrorCode> {
+auto P2PClientManager::QueryClientStatus(const P2PQueryClientStatusRequest& req)
+    -> tl::expected<P2PQueryClientStatusResponse, ErrorCode> {
     const auto& client_id = req.client_id;
-    QueryClientStatusResponse response;
+    P2PQueryClientStatusResponse response;
 
     SharedMutexLocker lock(&clients_mutex_, shared_lock);
     auto it = client_metas_.find(client_id);
     if (it == client_metas_.end()) {
-        response.status = ClientStatus::UNDEFINED;
+        response.status = P2PClientStatus::UNDEFINED;
     } else {
         response.status = it->second->get_health_state().status;
     }
@@ -480,9 +480,9 @@ void P2PClientManager::ClientMonitorFunc() {
         for (auto& [client_id, meta] : client_metas_) {
             auto [old_status, new_status] = meta->CheckHealth();
             if (old_status != new_status) {
-                if (new_status == ClientStatus::DISCONNECTION) {
+                if (new_status == P2PClientStatus::DISCONNECTION) {
                     newly_disconnected.push_back(meta);
-                } else if (new_status == ClientStatus::CRASHED) {
+                } else if (new_status == P2PClientStatus::CRASHED) {
                     newly_crashed.push_back(meta);
                 }
             }

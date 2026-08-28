@@ -17,7 +17,7 @@ P2PClientMeta::P2PClientMeta(const UUID& client_id,
       ip_address_(ip_address),
       rpc_port_(rpc_port),
       segment_manager_(std::make_shared<P2PSegmentManager>()) {
-    health_state_.status = ClientStatus::HEALTH;
+    health_state_.status = P2PClientStatus::HEALTH;
     health_state_.last_heartbeat = std::chrono::steady_clock::now();
     segment_manager_->SetSegmentChangeCallbacks(
         [this](const P2PSegment& segment) {
@@ -159,27 +159,27 @@ P2PClientHealthState P2PClientMeta::get_health_state() const {
 
 bool P2PClientMeta::is_health() const {
     SharedMutexLocker lock(&client_mutex_, shared_lock);
-    return health_state_.status == ClientStatus::HEALTH;
+    return health_state_.status == P2PClientStatus::HEALTH;
 }
 
-std::pair<ClientStatus, ClientStatus> P2PClientMeta::Heartbeat() {
+std::pair<P2PClientStatus, P2PClientStatus> P2PClientMeta::Heartbeat() {
     SharedMutexLocker lock(&client_mutex_);
     InnerUpdateHeartbeat();
     return InnerUpdateHealthStatus();
 }
 
-std::pair<ClientStatus, ClientStatus> P2PClientMeta::CheckHealth() {
+std::pair<P2PClientStatus, P2PClientStatus> P2PClientMeta::CheckHealth() {
     SharedMutexLocker lock(&client_mutex_);
     return InnerUpdateHealthStatus();
 }
 
 void P2PClientMeta::InnerUpdateHeartbeat() {
-    if (health_state_.status == ClientStatus::CRASHED) {
+    if (health_state_.status == P2PClientStatus::CRASHED) {
         LOG(WARNING) << "heartbeat received while in CRASHED state, "
                         "timestamp will not update"
                      << ", client_id=" << client_id_;
         return;
-    } else if (health_state_.status == ClientStatus::DISCONNECTION) {
+    } else if (health_state_.status == P2PClientStatus::DISCONNECTION) {
         LOG(WARNING) << "heartbeat received while in DISCONNECTION state, "
                         "the state might change to HEALTH as soon as possible"
                      << ", client_id=" << client_id_;
@@ -187,10 +187,10 @@ void P2PClientMeta::InnerUpdateHeartbeat() {
     health_state_.last_heartbeat = std::chrono::steady_clock::now();
 }
 
-std::pair<ClientStatus, ClientStatus>
+std::pair<P2PClientStatus, P2PClientStatus>
 P2PClientMeta::InnerUpdateHealthStatus() {
     const auto now = std::chrono::steady_clock::now();
-    const ClientStatus old_status = health_state_.status;
+    const P2PClientStatus old_status = health_state_.status;
     const auto elapsed_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             now - health_state_.last_heartbeat)
@@ -200,24 +200,24 @@ P2PClientMeta::InnerUpdateHealthStatus() {
     const int64_t crash_timeout_ms = crash_timeout_sec_ * 1000;
 
     switch (health_state_.status) {
-        case ClientStatus::HEALTH:
+        case P2PClientStatus::HEALTH:
             if (elapsed_ms >= disconnect_timeout_ms) {
                 if (elapsed_ms >= crash_timeout_ms) {
-                    health_state_.status = ClientStatus::CRASHED;
+                    health_state_.status = P2PClientStatus::CRASHED;
                 } else {
-                    health_state_.status = ClientStatus::DISCONNECTION;
+                    health_state_.status = P2PClientStatus::DISCONNECTION;
                 }
             }
             break;
-        case ClientStatus::DISCONNECTION:
+        case P2PClientStatus::DISCONNECTION:
             if (elapsed_ms < disconnect_timeout_ms) {
-                health_state_.status = ClientStatus::HEALTH;
+                health_state_.status = P2PClientStatus::HEALTH;
             } else if (elapsed_ms >= crash_timeout_ms) {
-                health_state_.status = ClientStatus::CRASHED;
+                health_state_.status = P2PClientStatus::CRASHED;
             }
             break;
-        case ClientStatus::CRASHED:
-        case ClientStatus::UNDEFINED:
+        case P2PClientStatus::CRASHED:
+        case P2PClientStatus::UNDEFINED:
             break;
     }
 
@@ -231,7 +231,7 @@ P2PClientMeta::InnerUpdateHealthStatus() {
 }
 
 tl::expected<void, ErrorCode> P2PClientMeta::InnerStatusCheck() const {
-    if (health_state_.status != ClientStatus::HEALTH) {
+    if (health_state_.status != P2PClientStatus::HEALTH) {
         LOG(WARNING) << "Client is not HEALTH"
                      << ", client_id=" << client_id_
                      << ", status=" << HealthToString(health_state_.status);
@@ -242,14 +242,14 @@ tl::expected<void, ErrorCode> P2PClientMeta::InnerStatusCheck() const {
 
 void P2PClientMeta::OnDisconnected() {
     SharedMutexLocker lock(&client_mutex_, shared_lock);
-    if (health_state_.status == ClientStatus::HEALTH) {
+    if (health_state_.status == P2PClientStatus::HEALTH) {
         return;
-    } else if (health_state_.status != ClientStatus::DISCONNECTION) {
+    } else if (health_state_.status != P2PClientStatus::DISCONNECTION) {
         LOG(ERROR) << "unexpected hook calling"
                    << ", client_id=" << client_id_ << ", current status="
                    << HealthToString(health_state_.status)
                    << ", expected status="
-                   << HealthToString(ClientStatus::DISCONNECTION);
+                   << HealthToString(P2PClientStatus::DISCONNECTION);
         return;
     }
     LOG(INFO) << "the client is disconnected"
@@ -260,12 +260,12 @@ void P2PClientMeta::OnDisconnected() {
 
 void P2PClientMeta::OnRecovered() {
     SharedMutexLocker lock(&client_mutex_, shared_lock);
-    if (health_state_.status != ClientStatus::HEALTH) {
+    if (health_state_.status != P2PClientStatus::HEALTH) {
         LOG(ERROR) << "unexpected hook calling"
                    << ", client_id=" << client_id_ << ", current status="
                    << HealthToString(health_state_.status)
                    << ", expected status="
-                   << HealthToString(ClientStatus::HEALTH);
+                   << HealthToString(P2PClientStatus::HEALTH);
         return;
     }
     LOG(INFO) << "the client is recovered"
@@ -304,15 +304,15 @@ void P2PClientMeta::RecycleMeta() {
               << ", client_id=" << client_id_;
 }
 
-std::string P2PClientMeta::HealthToString(ClientStatus status) const {
+std::string P2PClientMeta::HealthToString(P2PClientStatus status) const {
     switch (status) {
-        case ClientStatus::HEALTH:
+        case P2PClientStatus::HEALTH:
             return "HEALTH";
-        case ClientStatus::DISCONNECTION:
+        case P2PClientStatus::DISCONNECTION:
             return "DISCONNECTION";
-        case ClientStatus::CRASHED:
+        case P2PClientStatus::CRASHED:
             return "CRASHED";
-        case ClientStatus::UNDEFINED:
+        case P2PClientStatus::UNDEFINED:
             return "UNDEFINED";
     }
     return "UNKNOWN";

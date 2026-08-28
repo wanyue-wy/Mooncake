@@ -18,7 +18,6 @@
 #include "p2p/client/heartbeat_type.h"
 #include "p2p/common/p2p_rpc_types.h"
 #include "p2p/master/p2p_client_meta.h"
-#include "rpc_types.h"
 #include "types.h"
 
 namespace mooncake {
@@ -39,13 +38,13 @@ class P2PClientManager final {
     void StopClientMonitor();
 
     auto RegisterClient(const P2PRegisterClientRequest& req)
-        -> tl::expected<RegisterClientResponse, ErrorCode>;
-    auto UnregisterClient(const UnregisterClientRequest& req)
-        -> tl::expected<UnregisterClientResponse, ErrorCode>;
-    auto Heartbeat(const HeartbeatRequest& req)
-        -> tl::expected<HeartbeatResponse, ErrorCode>;
-    auto QueryClientStatus(const QueryClientStatusRequest& req)
-        -> tl::expected<QueryClientStatusResponse, ErrorCode>;
+        -> tl::expected<P2PRegisterClientResponse, ErrorCode>;
+    auto UnregisterClient(const P2PUnregisterClientRequest& req)
+        -> tl::expected<P2PUnregisterClientResponse, ErrorCode>;
+    auto Heartbeat(const P2PHeartbeatRequest& req)
+        -> tl::expected<P2PHeartbeatResponse, ErrorCode>;
+    auto QueryClientStatus(const P2PQueryClientStatusRequest& req)
+        -> tl::expected<P2PQueryClientStatusResponse, ErrorCode>;
 
     auto GetAllSegments() -> tl::expected<std::vector<std::string>, ErrorCode>;
     auto GetClientSegments(const UUID& client_id)

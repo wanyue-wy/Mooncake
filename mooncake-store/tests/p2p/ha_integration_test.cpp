@@ -180,7 +180,7 @@ class HAIntegrationTest : public ::testing::Test {
     }
 
     static void SendManualHeartbeat(std::shared_ptr<P2PClientService>& client) {
-        HeartbeatRequest req;
+        P2PHeartbeatRequest req;
         req.client_id = client->GetClientID();
         auto result = client->GetMasterClient().Heartbeat(req);
         ASSERT_TRUE(result.has_value()) << "Manual heartbeat failed";
@@ -498,7 +498,7 @@ TEST_F(HAIntegrationTest, ReRegisterReportsCurrentTierSegments) {
     ASSERT_FALSE(expected_segments.empty());
 
     auto& svc = master_.GetWrapped().GetMasterService();
-    UnregisterClientRequest unreg;
+    P2PUnregisterClientRequest unreg;
     unreg.client_id = client1_->GetClientID();
     unreg.deployment_mode = DeploymentMode::P2P;
     auto unreg_result = svc.UnregisterClient(unreg);
@@ -522,8 +522,7 @@ TEST_F(HAIntegrationTest, ReRegisterReportsCurrentTierSegments) {
             << "Missing registered segment: " << segment.name;
         EXPECT_EQ(registered.value()->name, segment.name);
         EXPECT_EQ(registered.value()->size, segment.size);
-        EXPECT_EQ(registered.value()->GetP2PExtra().memory_type,
-                  segment.GetP2PExtra().memory_type);
+        EXPECT_EQ(registered.value()->memory_type, segment.memory_type);
     }
 
     ForceRecover(client1_);
@@ -618,13 +617,13 @@ TEST_F(HAIntegrationTest, ClientDisconnectAndRecover) {
 
     // Verify both are HEALTH initially
     {
-        QueryClientStatusRequest req;
+        P2PQueryClientStatusRequest req;
         req.client_id = tmp1->GetClientID();
         auto res =
             short_ttl_master.GetWrapped().GetMasterService().QueryClientStatus(
                 req);
         ASSERT_TRUE(res.has_value());
-        ASSERT_EQ(res.value().status, ClientStatus::HEALTH);
+        ASSERT_EQ(res.value().status, P2PClientStatus::HEALTH);
     }
 
     // Simulate client1 network failure: stop its heartbeat
@@ -635,46 +634,46 @@ TEST_F(HAIntegrationTest, ClientDisconnectAndRecover) {
 
     // Verify master side: tmp1 is DISCONNECTION
     {
-        QueryClientStatusRequest req;
+        P2PQueryClientStatusRequest req;
         req.client_id = tmp1->GetClientID();
         auto res =
             short_ttl_master.GetWrapped().GetMasterService().QueryClientStatus(
                 req);
         ASSERT_TRUE(res.has_value());
-        EXPECT_EQ(res.value().status, ClientStatus::DISCONNECTION)
+        EXPECT_EQ(res.value().status, P2PClientStatus::DISCONNECTION)
             << "Master should have marked disconnected client";
     }
 
     // Verify tmp2 is still HEALTH
     {
-        QueryClientStatusRequest req;
+        P2PQueryClientStatusRequest req;
         req.client_id = tmp2->GetClientID();
         auto res =
             short_ttl_master.GetWrapped().GetMasterService().QueryClientStatus(
                 req);
         ASSERT_TRUE(res.has_value());
-        EXPECT_EQ(res.value().status, ClientStatus::HEALTH);
+        EXPECT_EQ(res.value().status, P2PClientStatus::HEALTH);
     }
 
     // Recover: manually send heartbeat from tmp1
     {
-        HeartbeatRequest req;
+        P2PHeartbeatRequest req;
         req.client_id = tmp1->GetClientID();
         auto hb_res = tmp1->GetMasterClient().Heartbeat(req);
         ASSERT_TRUE(hb_res.has_value()) << "Recovery heartbeat failed";
-        EXPECT_EQ(hb_res.value().status, ClientStatus::HEALTH)
+        EXPECT_EQ(hb_res.value().status, P2PClientStatus::HEALTH)
             << "Client should recover to HEALTH after heartbeat";
     }
 
     // Verify master side: tmp1 is HEALTH again
     {
-        QueryClientStatusRequest req;
+        P2PQueryClientStatusRequest req;
         req.client_id = tmp1->GetClientID();
         auto res =
             short_ttl_master.GetWrapped().GetMasterService().QueryClientStatus(
                 req);
         ASSERT_TRUE(res.has_value());
-        EXPECT_EQ(res.value().status, ClientStatus::HEALTH)
+        EXPECT_EQ(res.value().status, P2PClientStatus::HEALTH)
             << "Client should be HEALTH after recovery heartbeat";
     }
 

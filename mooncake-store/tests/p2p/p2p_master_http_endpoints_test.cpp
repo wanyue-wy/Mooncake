@@ -99,27 +99,23 @@ class P2PMasterHttpEndpointsTest : public ::testing::Test {
 
         // Register one client owning two P2P segments so tests can also
         // exercise keys with replicas on multiple segments.
-        Segment segment_a;
+        P2PSegment segment_a;
         segment_a.id = generate_uuid();
         segment_a.name = "p2p_master_http_segment_a";
         segment_a.size = kSegmentSize;
-        segment_a.extra = P2PSegmentExtraData{
-            .priority = 0,
-            .tags = {},
-            .memory_type = MemoryType::DRAM,
-        };
-        Segment segment_b = segment_a;
+        segment_a.priority = 0;
+        segment_a.memory_type = MemoryType::DRAM;
+        P2PSegment segment_b = segment_a;
         segment_b.id = generate_uuid();
         segment_b.name = "p2p_master_http_segment_b";
         segment_id_a_ = segment_a.id;
         segment_id_b_ = segment_b.id;
 
-        RegisterClientRequest reg_req;
+        P2PRegisterClientRequest reg_req;
         reg_req.client_id = generate_uuid();
         reg_req.ip_address = "127.0.0.1";
         reg_req.rpc_port = 50051;
         reg_req.segments = {segment_a, segment_b};
-        reg_req.deployment_mode = DeploymentMode::P2P;
         client_id_ = reg_req.client_id;
 
         auto reg_res = wrapped_->RegisterClient(reg_req);
