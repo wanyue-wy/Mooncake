@@ -89,7 +89,7 @@ class InProcP2PMaster {
                     /*thread_num=*/hb_threads, /*port=*/heartbeat_rpc_port_,
                     /*address=*/"0.0.0.0", std::chrono::seconds(0),
                     /*tcp_no_delay=*/true);
-                RegisterHeartbeatRpcService(*heartbeat_server_, *wrapped_);
+                RegisterP2PHeartbeatRpcService(*heartbeat_server_, *wrapped_);
             }
 
             auto ec = server_->async_start();

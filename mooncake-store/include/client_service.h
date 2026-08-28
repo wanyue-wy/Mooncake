@@ -22,7 +22,7 @@
 #include "p2p/common/p2p_rpc_types.h"
 #include "rpc_types.h"
 #include "replica.h"
-#include "master_client.h"
+#include "master_metric_manager.h"
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include <ylt/coro_http/coro_http_server.hpp>
 #include "client_config_builder.h"
@@ -379,7 +379,7 @@ class ClientService {
             LOG(ERROR) << "client is shutting down";
             return tl::unexpected(ErrorCode::SHUTTING_DOWN);
         }
-        return GetMasterClient().CalcCacheStats();
+        return CalcCacheStatsFromMaster();
     }
 
     // For Prometheus-style metrics
@@ -482,16 +482,29 @@ class ClientService {
                   const std::map<std::string, std::string>& labels = {});
 
     /**
-     * @brief Get the RPC Client for Master service calls
-     * @return Reference to MasterClient
-     */
-    virtual MasterClient& GetMasterClient() = 0;
-
-    /**
      * @brief Get the metrics object for this client.
      * @return Pointer to ClientMetric, or nullptr if metrics are disabled.
      */
     virtual ClientMetric* GetMetrics() = 0;
+
+    virtual ErrorCode ConnectMasterClient(const std::string& master_address) =
+        0;
+
+    virtual tl::expected<
+        std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+        ErrorCode>
+    BatchQueryIpFromMaster(const std::vector<UUID>& client_ids) = 0;
+
+    virtual tl::expected<
+        std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+        ErrorCode>
+    QueryByRegexFromMaster(const std::string& regex) = 0;
+
+    virtual tl::expected<HeartbeatResponse, ErrorCode> SendHeartbeat(
+        const HeartbeatRequest& request) = 0;
+
+    virtual tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
+    CalcCacheStatsFromMaster() = 0;
 
     /**
      * @brief Connects to the master server.

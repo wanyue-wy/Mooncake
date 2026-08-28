@@ -317,7 +317,7 @@ ErrorCode ClientService::ConnectToMaster(
             return err;
         }
 
-        err = GetMasterClient().Connect(master_address);
+        err = ConnectMasterClient(master_address);
         if (err != ErrorCode::OK) {
             LOG(ERROR) << "Failed to connect to master";
             return err;
@@ -325,7 +325,7 @@ ErrorCode ClientService::ConnectToMaster(
 
         return ErrorCode::OK;
     } else {
-        auto err = GetMasterClient().Connect(master_server_entry);
+        auto err = ConnectMasterClient(master_server_entry);
         if (err != ErrorCode::OK) {
             return err;
         }
@@ -648,7 +648,7 @@ ClientService::BatchQueryIp(const std::vector<UUID>& client_ids) {
         LOG(ERROR) << "client is shutting down";
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
     }
-    return GetMasterClient().BatchQueryIp(client_ids);
+    return BatchQueryIpFromMaster(client_ids);
 }
 
 tl::expected<std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
@@ -659,7 +659,7 @@ ClientService::QueryByRegex(const std::string& str) {
         LOG(ERROR) << "client is shutting down";
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
     }
-    return GetMasterClient().GetReplicaListByRegex(str);
+    return QueryByRegexFromMaster(str);
 }
 
 tl::expected<void, ErrorCode> ClientService::RegisterLocalMemory(
@@ -721,7 +721,7 @@ void ClientService::HeartbeatThreadMain(
 
         // Send heartbeat to master
         HeartbeatRequest req = build_heartbeat_request();
-        auto heartbeat_result = GetMasterClient().Heartbeat(req);
+        auto heartbeat_result = SendHeartbeat(req);
         if (heartbeat_result) {  // Heartbeat success
             heartbeat_fail_count = 0;
             HandleHeartbeatResponse(heartbeat_result.value(),
@@ -866,7 +866,7 @@ bool ClientService::ReconnectToMaster(bool is_ha_mode,
             return false;
         }
 
-        err = GetMasterClient().Connect(master_address);
+        err = ConnectMasterClient(master_address);
         if (err != ErrorCode::OK) {
             LOG(ERROR) << "Failed to connect to master " << master_address
                        << ": " << toString(err);
@@ -879,7 +879,7 @@ bool ClientService::ReconnectToMaster(bool is_ha_mode,
     } else {
         LOG(ERROR) << "Heartbeat failure threshold exceeded (non-HA);"
                    << " reconnecting to " << current_master_address;
-        auto err = GetMasterClient().Connect(current_master_address);
+        auto err = ConnectMasterClient(current_master_address);
         if (err != ErrorCode::OK) {
             LOG(ERROR) << "Reconnect failed to " << current_master_address
                        << ": " << toString(err);

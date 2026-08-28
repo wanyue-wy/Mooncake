@@ -357,25 +357,24 @@ int MasterServiceSupervisor::Start() {
         // == 0).
         const bool dedicated_heartbeat = config_.heartbeat_rpc_port > 0;
         const bool main_includes_heartbeat = !dedicated_heartbeat;
-        std::unique_ptr<WrappedMasterService> wrapped_master_service;
+        std::unique_ptr<WrappedCentralizedMasterService>
+            centralized_wrapped_service;
+        std::unique_ptr<WrappedP2PMasterService> p2p_wrapped_service;
         if (config_.deployment_mode == DeploymentMode::CENTRALIZATION) {
-            wrapped_master_service =
+            centralized_wrapped_service =
                 std::make_unique<WrappedCentralizedMasterService>(
                     WrappedMasterServiceConfig(config_, view_version));
-            wrapped_master_service->init();
-            RegisterCentralizedRpcService(
-                server,
-                static_cast<WrappedCentralizedMasterService&>(
-                    *wrapped_master_service),
-                /*include_heartbeat=*/main_includes_heartbeat);
+            centralized_wrapped_service->init();
+            RegisterCentralizedRpcService(server, *centralized_wrapped_service,
+                                          /*include_heartbeat=*/
+                                          main_includes_heartbeat);
         } else {
-            auto p2p_wrapped_service =
-                std::make_unique<WrappedP2PMasterService>(
-                    WrappedMasterServiceConfig(config_, view_version));
+            p2p_wrapped_service = std::make_unique<WrappedP2PMasterService>(
+                WrappedMasterServiceConfig(config_, view_version));
             p2p_wrapped_service->init();
             if (p2p_promoted_metadata.has_value()) {
-                auto& p2p_master_service = static_cast<P2PMasterService&>(
-                    p2p_wrapped_service->GetMasterService());
+                auto& p2p_master_service =
+                    p2p_wrapped_service->GetMasterService();
                 auto restore_err =
                     p2p_master_service.RestoreFromStandbyMetadata(
                         p2p_promoted_metadata.value(),
@@ -391,7 +390,6 @@ int MasterServiceSupervisor::Start() {
             RegisterP2PRpcService(
                 server, *p2p_wrapped_service,
                 /*include_heartbeat=*/main_includes_heartbeat);
-            wrapped_master_service = std::move(p2p_wrapped_service);
         }
 #ifdef STORE_USE_REDIS
         if (master_registry_heartbeat) {
@@ -401,7 +399,7 @@ int MasterServiceSupervisor::Start() {
         // Metric reporting is now handled by WrappedMasterService.
 
         // Start the dedicated heartbeat server alongside the main server. It
-        // shares the wrapped_master_service, so it must be stopped before that
+        // shares the active wrapped service, so it must be stopped before that
         // service object is destroyed (below, after the main server stops).
         std::optional<coro_rpc::coro_rpc_server> heartbeat_server;
         if (dedicated_heartbeat) {
@@ -409,8 +407,13 @@ int MasterServiceSupervisor::Start() {
                 std::max<size_t>(1, config_.heartbeat_rpc_thread_num),
                 config_.heartbeat_rpc_port, config_.rpc_address,
                 config_.rpc_conn_timeout, config_.rpc_enable_tcp_no_delay);
-            RegisterHeartbeatRpcService(*heartbeat_server,
-                                        *wrapped_master_service);
+            if (centralized_wrapped_service) {
+                RegisterHeartbeatRpcService(*heartbeat_server,
+                                            *centralized_wrapped_service);
+            } else {
+                RegisterP2PHeartbeatRpcService(*heartbeat_server,
+                                               *p2p_wrapped_service);
+            }
             LOG(INFO) << "Starting dedicated heartbeat RPC server on port "
                       << config_.heartbeat_rpc_port;
             auto heartbeat_ec = heartbeat_server->async_start();

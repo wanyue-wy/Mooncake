@@ -293,7 +293,35 @@ class CentralizedClientService
    protected:
     HeartbeatRequest build_heartbeat_request() override;
 
-    MasterClient& GetMasterClient() override { return master_client_; }
+    CentralizedMasterClient& GetMasterClient() { return master_client_; }
+
+    ErrorCode ConnectMasterClient(const std::string& master_address) override {
+        return master_client_.Connect(master_address);
+    }
+
+    tl::expected<
+        std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+        ErrorCode>
+    BatchQueryIpFromMaster(const std::vector<UUID>& client_ids) override {
+        return master_client_.BatchQueryIp(client_ids);
+    }
+
+    tl::expected<
+        std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+        ErrorCode>
+    QueryByRegexFromMaster(const std::string& regex) override {
+        return master_client_.GetReplicaListByRegex(regex);
+    }
+
+    tl::expected<HeartbeatResponse, ErrorCode> SendHeartbeat(
+        const HeartbeatRequest& request) override {
+        return master_client_.Heartbeat(request);
+    }
+
+    tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
+    CalcCacheStatsFromMaster() override {
+        return master_client_.CalcCacheStats();
+    }
 
     ClientMetric* GetMetrics() override { return metrics_.get(); }
 
