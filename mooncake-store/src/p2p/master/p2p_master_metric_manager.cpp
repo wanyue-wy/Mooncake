@@ -4,7 +4,6 @@
 #include <iomanip>  // For std::fixed, std::setprecision
 #include <sstream>  // For string building during serialization
 #include <vector>   // Required by histogram serialization
-#include <cmath>
 #include <new>
 
 #include "utils.h"
@@ -159,18 +158,6 @@ P2PMasterMetricManager::P2PMasterMetricManager()
       batch_get_replica_list_failed_items_(
           "master_batch_get_replica_list_failed_items_total",
           "Total number of failed items in BatchGetReplicaList requests"),
-      // Initialize cache hit rate metrics
-      mem_cache_hit_nums_("mem_cache_hit_nums_",
-                          "Total number of cache hits in the memory pool"),
-      file_cache_hit_nums_("file_cache_hit_nums_",
-                           "Total number of cache hits in the ssd"),
-      mem_cache_nums_("mem_cache_nums_",
-                      "Total number of cached values in the memory pool"),
-      file_cache_nums_("file_cache_nums_",
-                       "Total number of cached values in the ssd"),
-      valid_get_nums_("valid_get_nums_",
-                      "Total number of valid get operations"),
-      total_get_nums_("total_get_nums_", "Total number of get operations"),
       get_write_route_requests_("master_get_write_route_requests_total",
                                 "Total number of get write route requests"),
       get_write_route_failures_(
@@ -233,8 +220,6 @@ void P2PMasterMetricManager::update_metrics_for_zero_output() {
     file_total_capacity_.update(0);
     key_count_.update(0);
     active_clients_.update(0);
-    mem_cache_nums_.update(0);
-    file_cache_nums_.update(0);
 
     // Update Counters (use inc(0) to mark as changed)
     register_client_requests_.inc(0);
@@ -279,12 +264,6 @@ void P2PMasterMetricManager::update_metrics_for_zero_output() {
     batch_get_replica_list_partial_successes_.inc(0);
     batch_get_replica_list_items_.inc(0);
     batch_get_replica_list_failed_items_.inc(0);
-
-    // Update cache hit rate metrics
-    mem_cache_hit_nums_.inc(0);
-    file_cache_hit_nums_.inc(0);
-    valid_get_nums_.inc(0);
-    total_get_nums_.inc(0);
 
     // Update Histogram (use observe(0) to mark as changed)
     value_size_distribution_.observe(0);
@@ -467,32 +446,6 @@ int64_t P2PMasterMetricManager::get_clients_recovered_total() {
 }
 int64_t P2PMasterMetricManager::get_clients_crashed_total() {
     return clients_crashed_total_.value();
-}
-
-// cache hit rate metrics
-void P2PMasterMetricManager::inc_mem_cache_hit_nums(int64_t val) {
-    mem_cache_hit_nums_.inc(val);
-}
-void P2PMasterMetricManager::inc_file_cache_hit_nums(int64_t val) {
-    file_cache_hit_nums_.inc(val);
-}
-void P2PMasterMetricManager::inc_mem_cache_nums(int64_t val) {
-    mem_cache_nums_.inc(val);
-}
-void P2PMasterMetricManager::inc_file_cache_nums(int64_t val) {
-    file_cache_nums_.inc(val);
-}
-void P2PMasterMetricManager::dec_mem_cache_nums(int64_t val) {
-    mem_cache_nums_.dec(val);
-}
-void P2PMasterMetricManager::dec_file_cache_nums(int64_t val) {
-    file_cache_nums_.dec(val);
-}
-void P2PMasterMetricManager::inc_valid_get_nums(int64_t val) {
-    valid_get_nums_.inc(val);
-}
-void P2PMasterMetricManager::inc_total_get_nums(int64_t val) {
-    total_get_nums_.inc(val);
 }
 
 // Operation Statistics (Counters)
@@ -829,69 +782,6 @@ std::string P2PMasterMetricManager::serialize_metrics() {
     ss << cluster_part;
 
     return ss.str();
-}
-
-P2PMasterMetricManager::CacheHitStatDict
-P2PMasterMetricManager::calculate_cache_stats() {
-    P2PMasterMetricManager::CacheHitStatDict stats_dict;
-    int64_t mem_cache_hits = mem_cache_hit_nums_.value();
-    int64_t ssd_cache_hits = file_cache_hit_nums_.value();
-    int64_t mem_total_cache = mem_cache_nums_.value();
-    int64_t ssd_total_cache = file_cache_nums_.value();
-
-    int64_t total_hits = mem_cache_hits + ssd_cache_hits;
-    int64_t total_cache = mem_total_cache + ssd_total_cache;
-
-    int64_t valid_get_nums = valid_get_nums_.value();
-    int64_t total_get_nums = total_get_nums_.value();
-
-    double mem_hit_rate = 0.0;
-    if (mem_total_cache > 0) {
-        mem_hit_rate = static_cast<double>(mem_cache_hits) /
-                       static_cast<double>(mem_total_cache);
-        mem_hit_rate = std::round(mem_hit_rate * 100.0) / 100.0;
-    }
-
-    double ssd_hit_rate = 0.0;
-    if (ssd_total_cache > 0) {
-        ssd_hit_rate = static_cast<double>(ssd_cache_hits) /
-                       static_cast<double>(ssd_total_cache);
-        ssd_hit_rate = std::round(ssd_hit_rate * 100.0) / 100.0;
-    }
-
-    double total_hit_rate = 0.0;
-    if (total_cache > 0) {
-        total_hit_rate =
-            static_cast<double>(total_hits) / static_cast<double>(total_cache);
-        total_hit_rate = std::round(total_hit_rate * 100.0) / 100.0;
-    }
-
-    double valid_get_rate = 0.0;
-    if (total_get_nums > 0) {
-        valid_get_rate = static_cast<double>(valid_get_nums) /
-                         static_cast<double>(total_get_nums);
-        valid_get_rate = std::round(valid_get_rate * 100.0) / 100.0;
-    }
-
-    add_stat_to_dict(stats_dict, CacheHitStat::MEMORY_HITS, mem_cache_hits);
-    add_stat_to_dict(stats_dict, CacheHitStat::SSD_HITS, ssd_cache_hits);
-    add_stat_to_dict(stats_dict, CacheHitStat::MEMORY_TOTAL, mem_total_cache);
-    add_stat_to_dict(stats_dict, CacheHitStat::SSD_TOTAL, ssd_total_cache);
-    add_stat_to_dict(stats_dict, CacheHitStat::MEMORY_HIT_RATE, mem_hit_rate);
-    add_stat_to_dict(stats_dict, CacheHitStat::SSD_HIT_RATE, ssd_hit_rate);
-    add_stat_to_dict(stats_dict, CacheHitStat::OVERALL_HIT_RATE,
-                     total_hit_rate);
-    add_stat_to_dict(stats_dict, CacheHitStat::VALID_GET_RATE, valid_get_rate);
-    return stats_dict;
-}
-
-void P2PMasterMetricManager::add_stat_to_dict(
-    P2PMasterMetricManager::CacheHitStatDict& dict,
-    P2PMasterMetricManager::CacheHitStat type, double value) {
-    auto it = stat_names_.find(type);
-    if (it != stat_names_.end()) {
-        dict[it->first] = value;
-    }
 }
 
 // --- Human-Readable Summary ---

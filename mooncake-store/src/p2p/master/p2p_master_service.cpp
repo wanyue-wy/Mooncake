@@ -872,41 +872,16 @@ void P2PMasterService::OnObjectAccessed(const ObjectMetadata& metadata) {
     // do nothing
 }
 
-// TODO: wanyue-wy
-// For P2P structure, if a object has multiple replicas,
-// we don't know which replica is hit.
-// The detailed hit statistic of replica should be synced from
-// client to master.
-void P2PMasterService::OnObjectHit(const ObjectMetadata& metadata) {
-    P2PMasterMetricManager::instance().inc_valid_get_nums();
+void P2PMasterService::OnObjectHit(const ObjectMetadata&) {
+    // Data-plane hit statistics are synced by ClientMetricsAggregator.
 }
 
-void P2PMasterService::OnReplicaRemoved(const Replica& replica) {
-    if (replica.is_p2p_proxy_replica()) {
-        auto type = replica.get_p2p_memory_type();
-        if (!type) {
-            LOG(ERROR) << "invalid memory type"
-                       << ", replica: " << replica;
-        } else if (*type == MemoryType::DRAM) {
-            P2PMasterMetricManager::instance().dec_mem_cache_nums();
-        } else if (*type == MemoryType::NVME) {
-            P2PMasterMetricManager::instance().dec_file_cache_nums();
-        }
-    }
+void P2PMasterService::OnReplicaRemoved(const Replica&) {
+    // Replica inventory is independent from client-reported hit metrics.
 }
 
-void P2PMasterService::OnReplicaAdded(const Replica& replica) {
-    if (replica.is_p2p_proxy_replica()) {
-        auto type = replica.get_p2p_memory_type();
-        if (!type) {
-            LOG(ERROR) << "invalid memory type"
-                       << ", replica: " << replica;
-        } else if (*type == MemoryType::DRAM) {
-            P2PMasterMetricManager::instance().inc_mem_cache_nums();
-        } else if (*type == MemoryType::NVME) {
-            P2PMasterMetricManager::instance().inc_file_cache_nums();
-        }
-    }
+void P2PMasterService::OnReplicaAdded(const Replica&) {
+    // Replica inventory is independent from client-reported hit metrics.
 }
 
 }  // namespace mooncake
