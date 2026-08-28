@@ -97,28 +97,24 @@ class P2PRecordOplogTest : public ::testing::Test {
             .build();
     }
 
-    Segment MakeSegment(const UUID& segment_id) const {
-        Segment segment;
+    P2PSegment MakeSegment(const UUID& segment_id) const {
+        P2PSegment segment;
         segment.id = segment_id;
         segment.name = "segment-" + std::to_string(segment_id.first) + "-" +
                        std::to_string(segment_id.second);
         segment.size = 1024 * 1024;
-        segment.extra = P2PSegmentExtraData{
-            .priority = 1,
-            .tags = {},
-            .memory_type = MemoryType::DRAM,
-        };
+        segment.priority = 1;
+        segment.memory_type = MemoryType::DRAM;
         return segment;
     }
 
     void RegisterClient(P2PMasterService& service, const UUID& client_id,
-                        const Segment& segment) const {
-        RegisterClientRequest req;
+                        const P2PSegment& segment) const {
+        P2PRegisterClientRequest req;
         req.client_id = client_id;
         req.ip_address = "127.0.0.1";
         req.rpc_port = 50051;
         req.segments = {segment};
-        req.deployment_mode = DeploymentMode::P2P;
         auto result = service.RegisterClient(req);
         ASSERT_TRUE(result.has_value()) << toString(result.error());
     }
@@ -132,7 +128,7 @@ class P2PRecordOplogTest : public ::testing::Test {
         ASSERT_TRUE(result.has_value()) << toString(result.error());
     }
 
-    void MountSegment(P2PMasterService& service, const Segment& segment,
+    void MountSegment(P2PMasterService& service, const P2PSegment& segment,
                       const UUID& client_id) const {
         auto result = service.MountSegment(segment, client_id);
         ASSERT_TRUE(result.has_value()) << toString(result.error());
@@ -199,7 +195,7 @@ TEST_F(P2PRecordOplogTest, RegisterClientRecordsOplog) {
     P2PMasterService service(MakeConfig());
     const UUID client_id{1, 1};
     const UUID segment_id{2, 2};
-    Segment segment = MakeSegment(segment_id);
+    P2PSegment segment = MakeSegment(segment_id);
     RegisterClient(service, client_id, segment);
 
     auto* manager = service.GetOpLogManager();
@@ -226,12 +222,11 @@ TEST_F(P2PRecordOplogTest, DuplicateRegisterClientDoesNotRecordOplog) {
     const UUID segment_id{2, 2};
     RegisterClient(service, client_id, MakeSegment(segment_id));
 
-    RegisterClientRequest req;
+    P2PRegisterClientRequest req;
     req.client_id = client_id;
     req.ip_address = "127.0.0.1";
     req.rpc_port = 50051;
     req.segments = {MakeSegment({3, 3})};
-    req.deployment_mode = DeploymentMode::P2P;
 
     auto duplicate_result = service.RegisterClient(req);
     ASSERT_TRUE(duplicate_result.has_value())
@@ -246,20 +241,18 @@ TEST_F(P2PRecordOplogTest, RegisterClientRejectsMissingEndpoint) {
     P2PMasterService service(MakeConfig());
     const UUID segment_id{2, 2};
 
-    RegisterClientRequest missing_ip;
+    P2PRegisterClientRequest missing_ip;
     missing_ip.client_id = {1, 1};
     missing_ip.rpc_port = 50051;
     missing_ip.segments = {MakeSegment(segment_id)};
-    missing_ip.deployment_mode = DeploymentMode::P2P;
     auto missing_ip_result = service.RegisterClient(missing_ip);
     ASSERT_FALSE(missing_ip_result.has_value());
     EXPECT_EQ(missing_ip_result.error(), ErrorCode::INVALID_PARAMS);
 
-    RegisterClientRequest missing_port;
+    P2PRegisterClientRequest missing_port;
     missing_port.client_id = {3, 3};
     missing_port.ip_address = "127.0.0.1";
     missing_port.segments = {MakeSegment(segment_id)};
-    missing_port.deployment_mode = DeploymentMode::P2P;
     auto missing_port_result = service.RegisterClient(missing_port);
     ASSERT_FALSE(missing_port_result.has_value());
     EXPECT_EQ(missing_port_result.error(), ErrorCode::INVALID_PARAMS);
@@ -276,7 +269,7 @@ TEST_F(P2PRecordOplogTest, MountAndUnmountSegmentRecordOplog) {
     const UUID extra_segment_id{5, 5};
     RegisterClient(service, client_id, MakeSegment(initial_segment_id));
 
-    Segment extra_segment = MakeSegment(extra_segment_id);
+    P2PSegment extra_segment = MakeSegment(extra_segment_id);
     MountSegment(service, extra_segment, client_id);
     UnmountSegment(service, extra_segment_id, client_id);
 
@@ -415,12 +408,11 @@ TEST_F(P2PRecordOplogTest,
     P2PMasterService service(MakeConfig());
     InjectFailingOpLogStore(service);
 
-    RegisterClientRequest req;
+    P2PRegisterClientRequest req;
     req.client_id = {30, 30};
     req.ip_address = "127.0.0.1";
     req.rpc_port = 50051;
     req.segments = {MakeSegment({31, 31})};
-    req.deployment_mode = DeploymentMode::P2P;
 
     auto result = service.RegisterClient(req);
     ASSERT_FALSE(result.has_value());

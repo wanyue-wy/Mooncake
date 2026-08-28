@@ -31,19 +31,18 @@ class P2PMasterServiceTest : public ::testing::Test {
     static constexpr size_t kDefaultSegmentSize = 1024 * 1024 * 16;  // 16MB
 
     /// Create a P2P segment with tags and priority
-    Segment MakeP2PSegment(std::string name = "p2p_segment",
-                           size_t size = kDefaultSegmentSize,
-                           std::vector<std::string> tags = {}, int priority = 0,
-                           MemoryType memory_type = MemoryType::DRAM) {
-        Segment segment;
+    P2PSegment MakeP2PSegment(std::string name = "p2p_segment",
+                              size_t size = kDefaultSegmentSize,
+                              std::vector<std::string> tags = {},
+                              int priority = 0,
+                              MemoryType memory_type = MemoryType::DRAM) {
+        P2PSegment segment;
         segment.id = generate_uuid();
         segment.name = std::move(name);
         segment.size = size;
-        segment.extra = P2PSegmentExtraData{
-            .priority = priority,
-            .tags = std::move(tags),
-            .memory_type = memory_type,
-        };
+        segment.priority = priority;
+        segment.tags = std::move(tags);
+        segment.memory_type = memory_type;
         return segment;
     }
 
@@ -58,15 +57,14 @@ class P2PMasterServiceTest : public ::testing::Test {
 
     /// Register a client with given segments, returns client_id
     UUID RegisterP2PClient(P2PMasterService& service, const UUID& client_id,
-                           const std::vector<Segment>& segments,
+                           const std::vector<P2PSegment>& segments,
                            const std::string& ip = "127.0.0.1",
                            uint16_t port = 50051) {
-        RegisterClientRequest req;
+        P2PRegisterClientRequest req;
         req.client_id = client_id;
         req.ip_address = ip;
         req.rpc_port = port;
         req.segments = segments;
-        req.deployment_mode = DeploymentMode::P2P;
         auto res = service.RegisterClient(req);
         EXPECT_TRUE(res.has_value())
             << "Failed to register client: " << res.error();
@@ -110,10 +108,9 @@ TEST_F(P2PMasterServiceTest, RegisterClientDuplicate) {
     RegisterP2PClient(*service, client_id, {seg}, "127.0.0.1", 50051);
 
     // HA re-registering the same client_id is idempotent.
-    RegisterClientRequest req;
+    P2PRegisterClientRequest req;
     req.client_id = client_id;
     req.segments = {MakeP2PSegment("seg2")};
-    req.deployment_mode = DeploymentMode::P2P;
     req.ip_address = "127.0.0.1";
     req.rpc_port = 50051;
     auto res = service->RegisterClient(req);

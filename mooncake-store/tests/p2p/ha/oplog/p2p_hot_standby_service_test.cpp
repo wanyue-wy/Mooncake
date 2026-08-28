@@ -153,17 +153,14 @@ class P2PHotStandbyServiceTest : public ::testing::Test {
         return config;
     }
 
-    Segment MakeSegment(const UUID& segment_id) const {
-        Segment segment;
+    P2PSegment MakeSegment(const UUID& segment_id) const {
+        P2PSegment segment;
         segment.id = segment_id;
         segment.name = "segment-" + std::to_string(segment_id.first) + "-" +
                        std::to_string(segment_id.second);
         segment.size = 1024 * 1024;
-        segment.extra = P2PSegmentExtraData{
-            .priority = 1,
-            .tags = {},
-            .memory_type = MemoryType::DRAM,
-        };
+        segment.priority = 1;
+        segment.memory_type = MemoryType::DRAM;
         return segment;
     }
 
@@ -185,13 +182,12 @@ class P2PHotStandbyServiceTest : public ::testing::Test {
     }
 
     void RegisterClient(P2PMasterService& service, const UUID& client_id,
-                        const Segment& segment) const {
-        RegisterClientRequest req;
+                        const P2PSegment& segment) const {
+        P2PRegisterClientRequest req;
         req.client_id = client_id;
         req.ip_address = "127.0.0.1";
         req.rpc_port = 50051;
         req.segments = {segment};
-        req.deployment_mode = DeploymentMode::P2P;
         auto result = service.RegisterClient(req);
         ASSERT_TRUE(result.has_value()) << toString(result.error());
     }
