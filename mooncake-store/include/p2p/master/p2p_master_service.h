@@ -29,8 +29,7 @@ namespace mooncake {
  * @brief Standalone P2P master service.
  *
  * P2PMasterService owns P2P object metadata and delegates client and segment
- * metadata to P2PClientManager. It does not share state or lifecycle hooks
- * with the centralized master service.
+ * metadata to P2PClientManager.
  *
  * Lock order:
  * 1. MetadataShard::mutex
@@ -99,28 +98,57 @@ class P2PMasterService {
 
     auto GetWriteRoute(const WriteRouteRequest& req)
         -> tl::expected<WriteRouteResponse, ErrorCode>;
+
+    /**
+     * @brief Batch get write routes for multiple keys.
+     *        Reuses GetWriteRoute logic per key.
+     */
     auto BatchGetWriteRoute(const BatchGetWriteRouteRequest& req)
         -> BatchGetWriteRouteResponse;
+
+    /**
+     * @brief Add a route replica to master
+     */
     auto AddReplica(const AddReplicaRequest& req)
         -> tl::expected<void, ErrorCode>;
+
+    /**
+     * @brief Remove a route replica from master
+     */
     auto RemoveReplica(const RemoveReplicaRequest& req)
         -> tl::expected<void, ErrorCode>;
+
+    /**
+     * @brief Remove replicas from multiple segments in one call
+     */
     auto BatchRemoveReplica(const BatchRemoveReplicaRequest& req)
         -> std::vector<tl::expected<void, ErrorCode>>;
+
+    /**
+     * @brief Batch sync replicas with mixed ADD and REMOVE ops
+     */
     auto BatchSyncReplica(const BatchSyncReplicaRequest& req)
         -> BatchSyncReplicaResponse;
+
+    /**
+     * @brief Client notifies Master that metadata sync is complete
+     */
     auto SetSyncCompleted(UUID client_id) -> tl::expected<void, ErrorCode>;
 
+    /**
+     * @brief Restore P2P metadata exported by P2PHotStandbyService promotion.
+     *
+     * The target service must be empty. Restore registers clients/segments and
+     * rebuilds object metadata plus segment reverse indexes without recording
+     * new OpLog entries. If last_applied_sequence_id is provided, the target
+     * OpLogManager starts future writes after that sequence.
+     */
     ErrorCode RestoreFromStandbyMetadata(
         const P2PStandbyMetadataStore::ExportedMetadata& metadata,
         uint64_t last_applied_sequence_id = 0);
 
     ErrorCode RecordOplog(OpType type, const std::string& key,
                           const std::string& payload = std::string());
-
-    std::vector<Replica::Descriptor> FilterReplicas(
-        const GetReplicaListRequestConfig& config,
-        const ObjectMetadata& metadata);
 
    protected:
     struct ObjectMetadata {
@@ -136,73 +164,9 @@ class P2PMasterService {
 
         bool IsValid() const { return CountReplicas() > 0 && size_ > 0; }
 
-        void AddReplicas(std::vector<Replica>&& replicas) {
-            replicas_.insert(replicas_.end(),
-                             std::move_iterator(replicas.begin()),
-                             std::move_iterator(replicas.end()));
-        }
-
-        std::vector<Replica> PopReplicas(
-            const std::function<bool(const Replica&)>& pred_fn) {
-            auto partition_point =
-                std::partition(replicas_.begin(), replicas_.end(),
-                               [&pred_fn](const Replica& replica) {
-                                   return !pred_fn(replica);
-                               });
-
-            std::vector<Replica> popped_replicas;
-            if (partition_point != replicas_.end()) {
-                popped_replicas.reserve(
-                    std::distance(partition_point, replicas_.end()));
-                std::move(partition_point, replicas_.end(),
-                          std::back_inserter(popped_replicas));
-                replicas_.erase(partition_point, replicas_.end());
-            }
-            return popped_replicas;
-        }
-
-        std::vector<Replica> PopReplicas() { return std::move(replicas_); }
-
-        size_t EraseReplicas(
-            const std::function<bool(const Replica&)>& pred_fn) {
-            return PopReplicas(pred_fn).size();
-        }
-
-        size_t EraseReplicas() { return PopReplicas().size(); }
-
-        size_t VisitReplicas(const std::function<bool(const Replica&)>& pred_fn,
-                             const std::function<void(Replica&)>& visit_fn) {
-            size_t num_visited = 0;
-            for (auto& replica : replicas_) {
-                if (pred_fn(replica)) {
-                    visit_fn(replica);
-                    ++num_visited;
-                }
-            }
-            return num_visited;
-        }
-
-        size_t VisitReplicas(
-            const std::function<bool(const Replica&)>& pred_fn,
-            const std::function<void(const Replica&)>& visit_fn) const {
-            size_t num_visited = 0;
-            for (const auto& replica : replicas_) {
-                if (pred_fn(replica)) {
-                    visit_fn(replica);
-                    ++num_visited;
-                }
-            }
-            return num_visited;
-        }
-
         bool HasReplica(
             const std::function<bool(const Replica&)>& pred_fn) const {
             return std::any_of(replicas_.begin(), replicas_.end(), pred_fn);
-        }
-
-        bool AllReplicas(
-            const std::function<bool(const Replica&)>& pred_fn) const {
-            return std::all_of(replicas_.begin(), replicas_.end(), pred_fn);
         }
 
         size_t CountReplicas(
@@ -212,50 +176,8 @@ class P2PMasterService {
 
         size_t CountReplicas() const { return replicas_.size(); }
 
-        Replica* GetFirstReplica(
-            const std::function<bool(const Replica&)>& pred_fn) {
-            const auto it =
-                std::find_if(replicas_.begin(), replicas_.end(), pred_fn);
-            return it != replicas_.end() ? &(*it) : nullptr;
-        }
-
-        Replica* GetReplicaByID(const ReplicaID& id) {
-            return GetFirstReplica(
-                [&id](const Replica& replica) { return replica.id() == id; });
-        }
-
-        bool EraseReplicaByID(const ReplicaID& id) {
-            return EraseReplicas(
-                       [&id](const Replica& replica) {
-                           return replica.id() == id;
-                       }) > 0;
-        }
-
-        Replica* GetReplicaBySegmentName(const std::string& segment_name) {
-            return GetFirstReplica([&segment_name](const Replica& replica) {
-                auto names = replica.get_segment_names();
-                return std::any_of(
-                    names.begin(), names.end(),
-                    [&segment_name](const auto& name) {
-                        return name == segment_name;
-                    });
-            });
-        }
-
         bool IsObjectAccessible() const {
             return HasReplica(&Replica::fn_is_completed);
-        }
-
-        tl::expected<void, ErrorCode> IsObjectRemovable(
-            bool force = false) const {
-            return {};
-        }
-
-        bool IsReplicaAccessible(const Replica& replica) const { return true; }
-
-        tl::expected<void, ErrorCode> IsReplicaRemovable(
-            const Replica& replica) const {
-            return {};
         }
 
         std::vector<Replica> replicas_;
@@ -331,17 +253,12 @@ class P2PMasterService {
        public:
         MetadataAccessorRW(P2PMasterService* service, std::string_view key)
             : service_(service),
-              shard_idx_(service_->GetShardIndex(key)),
-              shard_guard_(service_, shard_idx_),
+              shard_guard_(service_, service_->GetShardIndex(key)),
               it_(shard_guard_->metadata.find(key)) {}
 
         bool Exists() const NO_THREAD_SAFETY_ANALYSIS {
             return it_ != shard_guard_->metadata.end() &&
                    it_->second->IsValid();
-        }
-
-        const std::string& GetKey() const NO_THREAD_SAFETY_ANALYSIS {
-            return it_->first;
         }
 
         ObjectMetadata& Get() NO_THREAD_SAFETY_ANALYSIS { return *it_->second; }
@@ -362,7 +279,6 @@ class P2PMasterService {
 
        private:
         P2PMasterService* service_;
-        size_t shard_idx_;
         MetadataShardAccessorRW shard_guard_;
         using MetadataMap =
             std::unordered_map<std::string, std::unique_ptr<ObjectMetadata>,
@@ -374,9 +290,7 @@ class P2PMasterService {
        public:
         MetadataAccessorRO(const P2PMasterService* service,
                            std::string_view key)
-            : service_(service),
-              shard_idx_(service_->GetShardIndex(key)),
-              shard_guard_(service_, shard_idx_),
+            : shard_guard_(service, service->GetShardIndex(key)),
               it_(shard_guard_->metadata.find(key)) {}
 
         bool Exists() const NO_THREAD_SAFETY_ANALYSIS {
@@ -388,13 +302,7 @@ class P2PMasterService {
             return *it_->second;
         }
 
-        const std::string& GetKey() const NO_THREAD_SAFETY_ANALYSIS {
-            return it_->first;
-        }
-
        private:
-        const P2PMasterService* service_;
-        const size_t shard_idx_;
         MetadataShardAccessorRO shard_guard_;
         using MetadataMap =
             std::unordered_map<std::string, std::unique_ptr<ObjectMetadata>,
@@ -411,6 +319,10 @@ class P2PMasterService {
     static auto CollectReplicaOwnerClients(const ObjectMetadata& metadata,
                                            std::string_view key)
         -> tl::expected<OwnerClientSet, ErrorCode>;
+
+    std::vector<Replica::Descriptor> FilterReplicas(
+        const GetReplicaListRequestConfig& config,
+        const ObjectMetadata& metadata);
 
     tl::expected<void, ErrorCode> InnerAddReplica(
         MetadataShard& shard, std::string_view key, const UUID& client_id,

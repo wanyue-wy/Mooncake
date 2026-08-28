@@ -202,9 +202,7 @@ auto P2PMasterService::GetReplicaListByRegex(
             std::vector<Replica::Descriptor> replica_list;
             replica_list.reserve(metadata->replicas_.size());
             for (const auto& replica : metadata->replicas_) {
-                if (metadata->IsReplicaAccessible(replica)) {
-                    replica_list.emplace_back(replica.get_descriptor());
-                }
+                replica_list.emplace_back(replica.get_descriptor());
             }
             if (replica_list.empty()) {
                 LOG(WARNING)
@@ -240,15 +238,11 @@ auto P2PMasterService::GetReplicaList(
 
 auto P2PMasterService::Remove(std::string_view key, bool force)
     -> tl::expected<void, ErrorCode> {
+    (void)force;
     MetadataAccessorRW accessor(this, key);
     if (!accessor.Exists()) {
         VLOG(1) << "key=" << key << ", error=object_not_found";
         return tl::make_unexpected(ErrorCode::OBJECT_NOT_FOUND);
-    }
-
-    if (auto result = accessor.Get().IsObjectRemovable(force); !result) {
-        VLOG(1) << "key=" << key << ", error=" << result.error();
-        return tl::make_unexpected(result.error());
     }
 
     accessor.Erase();
@@ -257,6 +251,7 @@ auto P2PMasterService::Remove(std::string_view key, bool force)
 
 auto P2PMasterService::RemoveByRegex(std::string_view regex_pattern, bool force)
     -> tl::expected<long, ErrorCode> {
+    (void)force;
     long removed_count = 0;
     std::regex pattern;
 
@@ -277,13 +272,6 @@ auto P2PMasterService::RemoveByRegex(std::string_view regex_pattern, bool force)
                 ++it;
                 continue;
             }
-            if (!it->second->IsObjectRemovable(force)) {
-                VLOG(1) << "key=" << it->first
-                        << " matched by regex, but object is not removable";
-                ++it;
-                continue;
-            }
-
             VLOG(1) << "key=" << it->first
                     << " matched by regex. Removing.";
             RemoveReplicaFromSegmentIndex(shard.GetRef(), it->first,
@@ -299,6 +287,7 @@ auto P2PMasterService::RemoveByRegex(std::string_view regex_pattern, bool force)
 }
 
 long P2PMasterService::RemoveAll(bool force) {
+    (void)force;
     long removed_count = 0;
     uint64_t total_freed_size = 0;
 
@@ -306,11 +295,6 @@ long P2PMasterService::RemoveAll(bool force) {
         MetadataShardAccessorRW shard(this, i);
         auto it = shard->metadata.begin();
         while (it != shard->metadata.end()) {
-            if (!it->second->IsObjectRemovable(force)) {
-                ++it;
-                continue;
-            }
-
             auto mem_rep_count =
                 it->second->CountReplicas(&Replica::fn_is_memory_replica);
             total_freed_size += it->second->size_ * mem_rep_count;
