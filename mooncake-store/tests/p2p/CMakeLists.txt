@@ -55,6 +55,8 @@ if(USE_ASCEND_CACHE_TIER)
 endif()
 
 # HA
+add_p2p_store_test(heartbeat_dedicated_port_test
+                   heartbeat_dedicated_port_test.cpp)
 add_p2p_store_test(ha_integration_test ha_integration_test.cpp)
 add_p2p_store_test(ha_recovery_manager_test ha_recovery_manager_test.cpp)
 add_p2p_store_test(oplog_manager_test ha/oplog/oplog_manager_test.cpp)
