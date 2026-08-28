@@ -10,7 +10,6 @@ set(MOONCAKE_STORE_SOURCES
     client_metric.cpp
     types.cpp
     master_client.cpp
-    centralized_master_client.cpp
     utils.cpp
     master_metric_manager.cpp
     storage_backend.cpp
@@ -22,7 +21,6 @@ set(MOONCAKE_STORE_SOURCES
     etcd_helper.cpp
     ha_helper.cpp
     rpc_service.cpp
-    centralized_rpc_service.cpp
     offset_allocator.cpp
     posix_file.cpp
     client_buffer.cpp
