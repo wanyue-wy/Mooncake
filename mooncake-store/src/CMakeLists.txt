@@ -5,7 +5,6 @@ set(MOONCAKE_STORE_SOURCES
     replica.cpp
     allocator.cpp
     master_service.cpp
-    centralized_master_service.cpp
     client_service.cpp
     centralized_client_service.cpp
     client_metric.cpp
