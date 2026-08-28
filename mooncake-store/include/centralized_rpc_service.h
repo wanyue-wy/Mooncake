@@ -1,7 +1,7 @@
 #pragma once
 
 #include "rpc_service.h"
-#include "centralized_master_service.h"
+#include "master_service.h"
 
 namespace mooncake {
 
@@ -97,7 +97,7 @@ class WrappedCentralizedMasterService final : public WrappedMasterService {
     void init_http_handlers() override;
 
    private:
-    CentralizedMasterService master_service_;
+    MasterService master_service_;
 };
 
 void RegisterCentralizedRpcService(
