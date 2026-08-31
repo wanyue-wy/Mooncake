@@ -10,9 +10,9 @@
 namespace mooncake {
 
 /*
- * @brief Redis-based leader election backend for MasterViewHelper.
- *        Overrides the etcd-based virtual methods to use Redis
- *        for leader election, leader keep-alive, and master view queries.
+ * @brief Redis-backed master-view adapter used by the current mixed client
+ *        discovery boundary. Master lifecycle code uses RedisElectionHelper
+ *        directly.
  *
  * NOTE: This class is introduced temporarily to minimize divergence
  * from the community mainline. It may be refactored or removed once
@@ -30,13 +30,13 @@ class RedisMasterViewHelper : public MasterViewHelper {
     ErrorCode Connect();
 
     void ElectLeader(const std::string& master_address, ViewVersionId& version,
-                     EtcdLeaseId& lease_id) override;
+                     EtcdLeaseId& lease_id);
 
-    void KeepLeader(EtcdLeaseId lease_id) override;
+    void KeepLeader(EtcdLeaseId lease_id);
 
-    void CancelKeepAlive(EtcdLeaseId lease_id) override;
+    void CancelKeepAlive(EtcdLeaseId lease_id);
 
-    int GetLeaderLeaseTTLSeconds() const override;
+    int GetLeaderLeaseTTLSeconds() const;
 
     void CancelElection();
 

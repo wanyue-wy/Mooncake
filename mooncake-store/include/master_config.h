@@ -75,9 +75,9 @@ struct MasterConfig {
     std::string cxl_path;
     size_t cxl_size;
     bool enable_cxl = false;
-    uint64_t max_client_per_key;
+    uint64_t max_client_per_key = 1;
 
-    std::string deployment_mode;
+    std::string deployment_mode = "Centralization";
 
     // Redis election backend configuration (used when election_backend ==
     // "redis")

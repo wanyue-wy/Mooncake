@@ -25,6 +25,7 @@ class MasterViewHelper {
     MasterViewHelper(const MasterViewHelper&) = delete;
     MasterViewHelper& operator=(const MasterViewHelper&) = delete;
     MasterViewHelper();
+    virtual ~MasterViewHelper() = default;
 
     /*
      * @brief Connect to the etcd cluster. This function should be called at
@@ -57,8 +58,10 @@ class MasterViewHelper {
      * @param version: Output param, the version of the master view.
      * @return: Error code.
      */
-    ErrorCode GetMasterView(std::string& master_address,
-                            ViewVersionId& version);
+    // TODO(C3): replace mixed discovery inheritance with
+    // architecture-specific master-view transport ownership.
+    virtual ErrorCode GetMasterView(std::string& master_address,
+                                    ViewVersionId& version);
 
    private:
     std::string master_view_key_;
