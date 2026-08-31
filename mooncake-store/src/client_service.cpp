@@ -16,85 +16,9 @@
 #include "types.h"
 #include "p2p/client/p2p_client_service.h"
 #include "centralized_client_service.h"
-#ifdef STORE_USE_REDIS
-#include "p2p/ha/redis_master_view_reader.h"
-#endif
 #include <ylt/coro_http/coro_http_client.hpp>
 
 namespace mooncake {
-
-namespace {
-
-constexpr const char* kEtcdPrefix = "etcd://";
-constexpr const char* kRedisPrefix = "redis://";
-
-bool StartsWith(const std::string& value, const char* prefix) {
-    return value.find(prefix) == 0;
-}
-
-tl::expected<std::unique_ptr<MasterViewReader>, ErrorCode>
-CreateClientMasterViewReader(const std::string& master_server_entry,
-                             const ClientMasterDiscoveryConfig& config) {
-    if (StartsWith(master_server_entry, kEtcdPrefix)) {
-        auto helper = std::make_unique<MasterViewHelper>();
-        std::string etcd_entry =
-            master_server_entry.substr(strlen(kEtcdPrefix));
-        auto err = helper->ConnectToEtcd(etcd_entry);
-        if (err != ErrorCode::OK) {
-            LOG(ERROR) << "Failed to connect to etcd";
-            return tl::make_unexpected(err);
-        }
-        return helper;
-    }
-
-    if (StartsWith(master_server_entry, kRedisPrefix)) {
-        if (config.redis_db_index < 0) {
-            LOG(ERROR) << "Invalid Redis DB index: " << config.redis_db_index;
-            return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-        }
-        if (config.redis_master_view_ttl_sec <= 0) {
-            LOG(ERROR) << "Invalid Redis master view TTL seconds: "
-                       << config.redis_master_view_ttl_sec;
-            return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-        }
-        if (config.redis_heartbeat_interval_sec <= 0) {
-            LOG(ERROR) << "Invalid Redis heartbeat interval seconds: "
-                       << config.redis_heartbeat_interval_sec;
-            return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-        }
-        if (config.redis_heartbeat_interval_sec >=
-            config.redis_master_view_ttl_sec) {
-            LOG(ERROR) << "Redis heartbeat interval must be smaller than "
-                          "master view TTL"
-                       << ", heartbeat_interval_sec="
-                       << config.redis_heartbeat_interval_sec
-                       << ", ttl_sec=" << config.redis_master_view_ttl_sec;
-            return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-        }
-#ifdef STORE_USE_REDIS
-        std::string redis_entry =
-            master_server_entry.substr(strlen(kRedisPrefix));
-        auto helper = std::make_unique<RedisMasterViewReader>(
-            config.redis_cluster_id, redis_entry, config.redis_password,
-            config.redis_db_index, config.redis_master_view_ttl_sec,
-            config.redis_heartbeat_interval_sec, config.redis_username);
-        auto err = helper->Connect();
-        if (err != ErrorCode::OK) {
-            LOG(ERROR) << "Failed to connect to Redis at: " << redis_entry;
-            return tl::make_unexpected(err);
-        }
-        return helper;
-#else
-        LOG(ERROR) << "Redis election backend requested but STORE_USE_REDIS "
-                      "is not enabled at compile time";
-        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-#endif
-    }
-
-    return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-}
-
-}  // namespace
 
 void ClientService::initTeEndpoint() {
     // For P2PHANDSHAKE the TE picks a random port and updates
@@ -213,54 +137,6 @@ void ClientService::InnerStopHeartbeat() {
 }
 
 void ClientService::Destroy() {}
-
-bool ClientService::IsHAMode(const std::string& master_server_entry) const {
-    return StartsWith(master_server_entry, kEtcdPrefix) ||
-           StartsWith(master_server_entry, kRedisPrefix);
-}
-
-void ClientService::SetMasterDiscoveryConfig(
-    const RealClientConfigBase& config) {
-    master_view_reader_.reset();
-    master_view_reader_entry_.clear();
-    master_discovery_config_.redis_cluster_id = config.redis_cluster_id.empty()
-                                                    ? DEFAULT_CLUSTER_ID
-                                                    : config.redis_cluster_id;
-    master_discovery_config_.redis_username = config.redis_username;
-    master_discovery_config_.redis_password = config.redis_password;
-    master_discovery_config_.redis_db_index = config.redis_db_index;
-    master_discovery_config_.redis_master_view_ttl_sec =
-        config.redis_master_view_ttl_sec;
-    master_discovery_config_.redis_heartbeat_interval_sec =
-        config.redis_heartbeat_interval_sec;
-}
-
-ErrorCode ClientService::ResolveMasterAddress(
-    const std::string& master_server_entry, std::string& master_address) {
-    if (!master_view_reader_ ||
-        master_view_reader_entry_ != master_server_entry) {
-        auto helper = CreateClientMasterViewReader(master_server_entry,
-                                                   master_discovery_config_);
-        if (!helper) {
-            LOG(ERROR) << "Failed to create master view reader for "
-                       << master_server_entry << ": "
-                       << toString(helper.error());
-            return helper.error();
-        }
-        master_view_reader_ = std::move(helper.value());
-        master_view_reader_entry_ = master_server_entry;
-    }
-
-    ViewVersionId version = 0;
-    auto err = master_view_reader_->GetMasterView(master_address, version);
-    if (err != ErrorCode::OK) {
-        LOG(ERROR) << "Failed to resolve master address from "
-                   << master_server_entry << ": " << toString(err);
-        master_view_reader_.reset();
-        master_view_reader_entry_.clear();
-    }
-    return err;
-}
 
 tl::expected<ViewVersionId, ErrorCode>
 ClientService::RegisterClient() {

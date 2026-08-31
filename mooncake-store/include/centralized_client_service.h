@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client_service.h"
+#include "ha_helper.h"
 #include "master_client.h"
 #include "storage_backend.h"
 #include "file_storage.h"
@@ -310,6 +311,8 @@ class CentralizedClientService
     ClientMetric* GetMetrics() override { return metrics_.get(); }
 
    private:
+    bool IsHAMode(const std::string& master_server_entry) const;
+    ErrorCode ResolveMasterAddress(std::string& master_address);
     ErrorCode ConnectToMaster(const std::string& master_server_entry);
     bool ReconnectToMaster(bool is_ha_mode,
                            std::string& current_master_address);
@@ -404,6 +407,7 @@ class CentralizedClientService
         hugepage_segment_ptrs_;
 
     MasterClient master_client_;
+    MasterViewHelper master_view_helper_;
     std::unique_ptr<TransferSubmitter> transfer_submitter_;
 
     // Mutex to protect mounted_segments_

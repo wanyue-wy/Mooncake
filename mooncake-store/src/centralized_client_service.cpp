@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <vector>
 #include <memory>
@@ -21,6 +22,11 @@
 #include "file_storage.h"
 
 namespace mooncake {
+
+namespace {
+constexpr const char* kEtcdPrefix = "etcd://";
+constexpr const char* kRedisPrefix = "redis://";
+}  // namespace
 
 namespace {
 
@@ -165,8 +171,6 @@ ErrorCode CentralizedClientService::Init(
     }
     auto master_server_entry = config.master_server_entry;
     master_server_entry_ = master_server_entry;
-    SetMasterDiscoveryConfig(config);
-
     ErrorCode err = ConnectToMaster(master_server_entry);
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "Failed to connect to master: " << err;
@@ -2093,11 +2097,33 @@ ErrorCode CentralizedClientService::TransferRead(
     return TransferData(replica_descriptor, slices, TransferRequest::READ);
 }
 
+bool CentralizedClientService::IsHAMode(
+    const std::string& master_server_entry) const {
+    return master_server_entry.rfind(kEtcdPrefix, 0) == 0;
+}
+
+ErrorCode CentralizedClientService::ResolveMasterAddress(
+    std::string& master_address) {
+    ViewVersionId version = 0;
+    return master_view_helper_.GetMasterView(master_address, version);
+}
+
 ErrorCode CentralizedClientService::ConnectToMaster(
     const std::string& master_server_entry) {
+    if (master_server_entry.rfind(kRedisPrefix, 0) == 0) {
+        LOG(ERROR) << "Centralized master discovery does not support Redis";
+        return ErrorCode::INVALID_PARAMS;
+    }
     if (IsHAMode(master_server_entry)) {
+        const std::string etcd_endpoints =
+            master_server_entry.substr(std::strlen(kEtcdPrefix));
+        auto err = master_view_helper_.ConnectToEtcd(etcd_endpoints);
+        if (err != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to connect to etcd";
+            return err;
+        }
         std::string master_address;
-        auto err = ResolveMasterAddress(master_server_entry, master_address);
+        err = ResolveMasterAddress(master_address);
         if (err != ErrorCode::OK) {
             LOG(ERROR) << "Failed to resolve centralized master address";
             return err;
@@ -2117,7 +2143,7 @@ bool CentralizedClientService::ReconnectToMaster(
         LOG(ERROR) << "Ping failure threshold exceeded; fetching latest "
                       "centralized master view and reconnecting";
         std::string master_address;
-        auto err = ResolveMasterAddress(master_server_entry_, master_address);
+        auto err = ResolveMasterAddress(master_address);
         if (err != ErrorCode::OK) {
             LOG(ERROR) << "Failed to get new centralized master view: "
                        << toString(err);
@@ -2158,7 +2184,7 @@ void CentralizedClientService::StartPing(
     std::string current_master_address = master_server_entry;
     if (is_ha_mode) {
         auto err =
-            ResolveMasterAddress(master_server_entry, current_master_address);
+            ResolveMasterAddress(current_master_address);
         if (err != ErrorCode::OK) {
             LOG(WARNING) << "Failed to resolve master before starting ping; "
                             "the ping loop will retry"

@@ -21,6 +21,7 @@
 #include "p2p/client/data_manager.h"
 #include "p2p/client/client_rpc_service.h"
 #include "p2p/ha/ha_recovery_manager.h"
+#include "p2p/ha/p2p_master_view.h"
 #include "p2p/client/peer_client.h"
 #include "p2p/client/p2p_client_metric.h"
 #include "p2p/master/p2p_master_client.h"
@@ -289,6 +290,13 @@ class P2PClientService final : public ClientService {
     tl::expected<void, ErrorCode> InnerUnregisterClient()
         REQUIRES(registration_mutex_);
 
+   protected:
+    bool IsHAMode(const std::string& master_server_entry) const;
+    void SetMasterDiscoveryConfig(const P2PClientConfig& config);
+    ErrorCode ResolveMasterAddress(const std::string& master_server_entry,
+                                   std::string& master_address);
+
+   private:
     ErrorCode ConnectToMaster(const std::string& master_server_entry);
     void StartHeartbeat(const std::string& master_server_entry);
     void HeartbeatThreadMain(bool is_ha_mode,
@@ -566,6 +574,19 @@ class P2PClientService final : public ClientService {
     tl::expected<size_t, ErrorCode> GetLocalKeyCount();
     tl::expected<std::vector<std::string>, ErrorCode> GetLocalKeys(
         size_t limit = 0);
+
+   protected:
+    struct MasterDiscoveryConfig {
+        std::string redis_cluster_id = DEFAULT_CLUSTER_ID;
+        std::string redis_username;
+        std::string redis_password;
+        int redis_db_index = 0;
+        int redis_master_view_ttl_sec = 4;
+        int redis_heartbeat_interval_sec = 1;
+    };
+    std::unique_ptr<P2PMasterView> master_view_;
+    std::string master_view_entry_;
+    MasterDiscoveryConfig master_discovery_config_;
 
    private:
     std::shared_ptr<P2PClientMetric> metrics_;

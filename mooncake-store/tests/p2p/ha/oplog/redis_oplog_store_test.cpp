@@ -543,14 +543,14 @@ TEST_F(RedisOpLogStoreTest, RejectsInvalidDatabaseIndex) {
 }
 
 TEST_F(RedisOpLogStoreTest, MasterServiceUsesRedisEndpointForRedisOpLog) {
-    P2PMasterServiceConfig config;
-    config.enable_oplog = true;
-    config.oplog_store_type = "redis";
+    P2PMasterConfig config;
+    config.oplog.enabled = true;
+    config.oplog.store_type = "redis";
     config.cluster_id = cluster_id_;
-    config.redis_endpoint = redis_endpoint_;
-    config.redis_username = redis_username_;
-    config.redis_password = redis_password_;
-    config.oplog_data_dir = "127.0.0.1:notaport";
+    config.redis.endpoint = redis_endpoint_;
+    config.redis.username = redis_username_;
+    config.redis.password = redis_password_;
+    config.oplog.data_dir = "127.0.0.1:notaport";
 
     EXPECT_NO_THROW({ P2PMasterService service(config); });
 }

@@ -48,8 +48,8 @@ class P2PMasterServiceTest : public ::testing::Test {
     /// Create the service with given max_replicas config
     std::unique_ptr<P2PMasterService> CreateService(
         uint64_t max_client_per_key = 0) {
-        P2PMasterServiceConfig config;
-        config.max_client_per_key = max_client_per_key;
+        P2PMasterConfig config;
+        config.routes.max_clients_per_key = max_client_per_key;
         return std::make_unique<P2PMasterService>(config);
     }
 

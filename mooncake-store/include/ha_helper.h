@@ -13,13 +13,6 @@
 
 namespace mooncake {
 
-class MasterViewReader {
-   public:
-    virtual ~MasterViewReader() = default;
-    virtual ErrorCode GetMasterView(std::string& master_address,
-                                    ViewVersionId& version) = 0;
-};
-
 /*
  * @brief A helper class for maintain and monitor the master view change.
  *        The cluster is assumed to have multiple master servers, but only
@@ -27,7 +20,7 @@ class MasterViewReader {
  *        Each master view is associated with a unique version id, which
  *        is incremented monotonically each time the master view is changed.
  */
-class MasterViewHelper final : public MasterViewReader {
+class MasterViewHelper {
    public:
     MasterViewHelper(const MasterViewHelper&) = delete;
     MasterViewHelper& operator=(const MasterViewHelper&) = delete;
@@ -65,7 +58,7 @@ class MasterViewHelper final : public MasterViewReader {
      * @return: Error code.
      */
     ErrorCode GetMasterView(std::string& master_address,
-                            ViewVersionId& version) override;
+                            ViewVersionId& version);
 
    private:
     std::string master_view_key_;

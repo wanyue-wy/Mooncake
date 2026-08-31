@@ -40,7 +40,8 @@ class P2PMasterService {
     struct ObjectMetadata;
 
    public:
-    explicit P2PMasterService(const P2PMasterServiceConfig& config);
+    explicit P2PMasterService(const P2PMasterConfig& config,
+                              ViewVersionId view_version = 0);
     ~P2PMasterService() = default;
 
     P2PClientManager& GetClientManager() { return *client_manager_; }

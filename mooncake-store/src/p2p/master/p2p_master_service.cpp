@@ -16,32 +16,33 @@
 
 namespace mooncake {
 
-P2PMasterService::P2PMasterService(const P2PMasterServiceConfig& config)
-    : max_client_per_key_(config.max_client_per_key),
-      enable_async_oplog_write_(ParseOpLogStoreType(config.oplog_store_type) ==
+P2PMasterService::P2PMasterService(const P2PMasterConfig& config,
+                                   ViewVersionId view_version)
+    : max_client_per_key_(config.routes.max_clients_per_key),
+      enable_async_oplog_write_(ParseOpLogStoreType(config.oplog.store_type) ==
                                 OpLogStoreType::REDIS),
-      view_version_(config.view_version) {
-    if (config.enable_oplog) {
-        auto store_type = ParseOpLogStoreType(config.oplog_store_type);
+      view_version_(view_version) {
+    if (config.oplog.enabled) {
+        auto store_type = ParseOpLogStoreType(config.oplog.store_type);
         const std::string& store_location =
-            store_type == OpLogStoreType::REDIS ? config.redis_endpoint
-                                                : config.oplog_data_dir;
+            store_type == OpLogStoreType::REDIS ? config.redis.endpoint
+                                                : config.oplog.data_dir;
         auto store = OpLogStoreFactory::Create(
             store_type, config.cluster_id, OpLogStoreRole::WRITER,
-            store_location, kDefaultOpLogPollIntervalMs, config.redis_password,
-            config.redis_username, config.redis_db_index,
-            config.oplog_async_queue_max_entries,
-            config.oplog_async_queue_overflow_mode,
-            config.oplog_best_effort_max_retries);
+            store_location, kDefaultOpLogPollIntervalMs, config.redis.password,
+            config.redis.username, config.redis.db_index,
+            config.oplog.async_queue_max_entries,
+            config.oplog.async_queue_overflow_mode,
+            config.oplog.best_effort_max_retries);
         if (!store) {
             LOG(ERROR) << "P2PMasterService: failed to initialize OpLogStore"
-                       << ", type=" << config.oplog_store_type
+                       << ", type=" << config.oplog.store_type
                        << ", location=" << store_location
                        << ", cluster_id=" << config.cluster_id;
             throw std::runtime_error(
                 "failed to initialize OpLogStore while oplog is enabled: "
                 "type=" +
-                config.oplog_store_type + ", location=" + store_location +
+                config.oplog.store_type + ", location=" + store_location +
                 ", cluster_id=" + config.cluster_id);
         }
 
@@ -52,8 +53,8 @@ P2PMasterService::P2PMasterService(const P2PMasterServiceConfig& config)
 
     P2PMasterMetricManager::instance();
     client_manager_ = std::make_shared<P2PClientManager>(
-        config.client_live_ttl_sec, config.client_crashed_ttl_sec,
-        config.view_version);
+        config.client_lifecycle.live_ttl_seconds,
+        config.client_lifecycle.crashed_ttl_seconds, view_version);
     InitializeClientManager();
     client_manager_->Start();
 }

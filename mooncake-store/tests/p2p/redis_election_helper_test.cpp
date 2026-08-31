@@ -7,12 +7,11 @@
 #include <string>
 #include <thread>
 
-#include "p2p/common/p2p_master_config.h"
 #include "types.h"
 
 #ifdef STORE_USE_REDIS
 #include "p2p/ha/redis_election_helper.h"
-#include "p2p/ha/redis_master_view_reader.h"
+#include "p2p/ha/p2p_master_view.h"
 #include "redis_test_utils.h"
 #include <hiredis/hiredis.h>
 
@@ -95,6 +94,15 @@ TEST_F(RedisElectionHelperTest, Connect) {
     ASSERT_EQ(ErrorCode::OK, helper2.Connect());
 }
 
+TEST_F(RedisElectionHelperTest, FactoryCreatesRedisMasterView) {
+    auto view = CreateP2PRedisMasterView(
+        FLAGS_cluster_id, FLAGS_redis_endpoint, FLAGS_redis_password,
+        /*db_index=*/0, FLAGS_redis_ttl_sec,
+        /*heartbeat_interval_seconds=*/1, FLAGS_redis_username);
+    ASSERT_TRUE(view.has_value());
+    EXPECT_NE(dynamic_cast<P2PRedisMasterView*>(view.value().get()), nullptr);
+}
+
 // === Test 2: ElectLeader + GetMasterView ===
 
 TEST_F(RedisElectionHelperTest, ElectLeaderAndGetMasterView) {
@@ -111,8 +119,7 @@ TEST_F(RedisElectionHelperTest, ElectLeaderAndGetMasterView) {
     ASSERT_GT(version, 0);
     ASSERT_GT(lease_id, 0);
 
-    // Read back through the client-discovery adapter.
-    RedisMasterViewReader reader(
+    P2PRedisMasterView reader(
         FLAGS_cluster_id, FLAGS_redis_endpoint, FLAGS_redis_password, 0,
         FLAGS_redis_ttl_sec, 1, FLAGS_redis_username);
     ASSERT_EQ(ErrorCode::OK, reader.Connect());
@@ -442,22 +449,6 @@ TEST(RedisUtilTest, RejectsEndpointWithoutExplicitPort) {
         EXPECT_FALSE(RedisUtil::ParseEndpoint(endpoint, host, port))
             << endpoint;
     }
-}
-
-TEST(RedisConfigTest, AppliesDefaultEndpointPort) {
-    P2PMasterConfig config;
-
-    config.service.redis_endpoint = "redis.example.com";
-    config.ApplyRedisEndpointDefaults();
-    EXPECT_EQ("redis.example.com:6379", config.service.redis_endpoint);
-
-    config.service.redis_endpoint = "[::1]";
-    config.ApplyRedisEndpointDefaults();
-    EXPECT_EQ("[::1]:6379", config.service.redis_endpoint);
-
-    config.service.redis_endpoint = "redis.example.com:6380";
-    config.ApplyRedisEndpointDefaults();
-    EXPECT_EQ("redis.example.com:6380", config.service.redis_endpoint);
 }
 
 TEST_F(RedisElectionHelperTest, CreateConnectionUnreachable) {

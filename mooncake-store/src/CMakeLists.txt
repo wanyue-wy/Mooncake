@@ -40,7 +40,6 @@ if(STORE_USE_REDIS)
     message(STATUS "Found hiredis: include=${HIREDIS_INCLUDE_DIR} lib=${HIREDIS_LIB}")
     list(APPEND MOONCAKE_STORE_P2P_SOURCES p2p/ha/redis_util.cpp)
     list(APPEND MOONCAKE_STORE_P2P_SOURCES p2p/ha/redis_election_helper.cpp)
-    list(APPEND MOONCAKE_STORE_P2P_SOURCES p2p/ha/redis_master_view_reader.cpp)
     list(APPEND MOONCAKE_STORE_P2P_SOURCES p2p/ha/oplog/redis_oplog_store.cpp)
     list(APPEND EXTRA_LIBS ${HIREDIS_LIB})
 endif()
@@ -120,7 +119,7 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/master/p2p_master_metric_manager.cpp
     p2p/master/p2p_segment_manager.cpp
     p2p/master/p2p_rpc_service.cpp
-    p2p/master/p2p_master_server.cpp
+    p2p/master/p2p_master.cpp
     p2p/master/p2p_client_meta.cpp
     p2p/master/p2p_client_manager.cpp
     p2p/client/p2p_client_service.cpp
@@ -158,7 +157,7 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/ha/oplog/p2p_hot_standby_service.cpp
     p2p/ha/oplog/p2p_standby_snapshot_service.cpp
     p2p/ha/standby_state_machine.cpp
-    p2p/ha/p2p_master_ha_runner.cpp
+    p2p/ha/p2p_master_view.cpp
     p2p/ha/ha_metric_manager.cpp
     p2p/ha/ha_recovery_manager.cpp
 )
@@ -256,7 +255,9 @@ endif()
 
 # Master binary
 add_executable(mooncake_master master.cpp)
-add_executable(mooncake_master_p2p p2p/master/p2p_master_main.cpp)
+add_executable(mooncake_master_p2p
+    p2p/master/p2p_master_main.cpp
+    p2p/master/p2p_master_config_loader.cpp)
 
 set(MASTER_EXTRA_INCS)
 set(MASTER_EXTRA_LIBS)

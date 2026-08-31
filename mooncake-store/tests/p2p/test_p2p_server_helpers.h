@@ -79,24 +79,25 @@ class InProcP2PMaster {
                 /*thread_num=*/4, /*port=*/rpc_port_, /*address=*/"0.0.0.0",
                 std::chrono::seconds(0), /*tcp_no_delay=*/true);
 
-            P2PMasterRpcConfig wms_cfg;
-            wms_cfg.enable_metric_reporting = false;
-            wms_cfg.heartbeat_rpc_port = config.heartbeat_rpc_port.value_or(0);
-            wms_cfg.service.max_client_per_key = 0;  // no limit for P2P
+            P2PMasterConfig wms_cfg;
+            wms_cfg.metrics.enable_reporting = false;
+            wms_cfg.rpc.heartbeat_port =
+                config.heartbeat_rpc_port.value_or(0);
+            wms_cfg.routes.max_clients_per_key = 0;  // no limit for P2P
 
             if (config.client_live_ttl_sec.has_value()) {
-                wms_cfg.service.client_live_ttl_sec =
+                wms_cfg.client_lifecycle.live_ttl_seconds =
                     config.client_live_ttl_sec.value();
             } else {
-                wms_cfg.service.client_live_ttl_sec =
+                wms_cfg.client_lifecycle.live_ttl_seconds =
                     DEFAULT_CLIENT_LIVE_TTL_SEC;
             }
 
             if (config.client_crashed_ttl_sec.has_value()) {
-                wms_cfg.service.client_crashed_ttl_sec =
+                wms_cfg.client_lifecycle.crashed_ttl_seconds =
                     config.client_crashed_ttl_sec.value();
             } else {
-                wms_cfg.service.client_crashed_ttl_sec =
+                wms_cfg.client_lifecycle.crashed_ttl_seconds =
                     DEFAULT_CLIENT_CRASHED_TTL_SEC;
             }
 

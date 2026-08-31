@@ -85,13 +85,13 @@ class P2PRecordOplogTest : public ::testing::Test {
 
     void TearDown() override { std::filesystem::remove_all(test_dir_); }
 
-    P2PMasterServiceConfig MakeConfig(bool enable_oplog = true) const {
-        P2PMasterServiceConfig config;
-        config.enable_oplog = enable_oplog;
+    P2PMasterConfig MakeConfig(bool enable_oplog = true) const {
+        P2PMasterConfig config;
+        config.oplog.enabled = enable_oplog;
         config.cluster_id = kClusterId;
-        config.oplog_store_type = "localfs";
-        config.oplog_data_dir = test_dir_.string();
-        config.max_client_per_key = 0;
+        config.oplog.store_type = "localfs";
+        config.oplog.data_dir = test_dir_.string();
+        config.routes.max_clients_per_key = 0;
         return config;
     }
 
@@ -474,7 +474,7 @@ TEST_F(P2PRecordOplogTest, EnabledOplogFailsFastWhenStoreInitFails) {
     ASSERT_TRUE(std::filesystem::is_regular_file(invalid_root));
 
     auto config = MakeConfig();
-    config.oplog_data_dir = invalid_root.string();
+    config.oplog.data_dir = invalid_root.string();
 
     EXPECT_THROW(P2PMasterService service(config), std::runtime_error);
 }

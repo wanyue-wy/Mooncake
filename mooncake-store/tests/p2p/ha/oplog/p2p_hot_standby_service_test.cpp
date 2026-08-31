@@ -116,20 +116,19 @@ class P2PHotStandbyServiceTest : public ::testing::Test {
 
     void TearDown() override { std::filesystem::remove_all(test_dir_); }
 
-    P2PMasterServiceConfig MakeMasterConfig() const {
-        P2PMasterServiceConfig config;
-        config.enable_oplog = true;
+    P2PMasterConfig MakeMasterConfig() const {
+        P2PMasterConfig config;
+        config.oplog.enabled = true;
         config.cluster_id = kClusterId;
-        config.oplog_store_type = "localfs";
-        config.oplog_data_dir = test_dir_.string();
-        config.max_client_per_key = 0;
+        config.oplog.store_type = "localfs";
+        config.oplog.data_dir = test_dir_.string();
+        config.routes.max_clients_per_key = 0;
         return config;
     }
 
-    P2PMasterRpcConfig MakeWrappedMasterConfig() const {
-        P2PMasterRpcConfig config;
-        config.service = MakeMasterConfig();
-        config.enable_metric_reporting = false;
+    P2PMasterConfig MakeWrappedMasterConfig() const {
+        auto config = MakeMasterConfig();
+        config.metrics.enable_reporting = false;
         return config;
     }
 

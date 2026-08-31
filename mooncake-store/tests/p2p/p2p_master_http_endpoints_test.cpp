@@ -69,10 +69,10 @@ class P2PMasterHttpEndpointsTest : public ::testing::Test {
 
         const uint16_t http_port = static_cast<uint16_t>(getFreeTcpPort());
 
-        P2PMasterRpcConfig wms_cfg;
-        wms_cfg.enable_metric_reporting = false;
-        wms_cfg.service.max_client_per_key = 0;  // no limit for P2P
-        wms_cfg.http_port = http_port;
+        P2PMasterConfig wms_cfg;
+        wms_cfg.metrics.enable_reporting = false;
+        wms_cfg.routes.max_clients_per_key = 0;  // no limit for P2P
+        wms_cfg.metrics.http_port = http_port;
 
         wrapped_ = std::make_unique<WrappedP2PMasterService>(wms_cfg);
         wrapped_->init();

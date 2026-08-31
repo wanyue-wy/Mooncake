@@ -33,7 +33,8 @@ inline constexpr uint64_t kP2PMetricReportIntervalSeconds = 10;
  */
 class WrappedP2PMasterService final {
    public:
-    explicit WrappedP2PMasterService(const P2PMasterRpcConfig& config);
+    explicit WrappedP2PMasterService(const P2PMasterConfig& config,
+                                     ViewVersionId view_version = 0);
     ~WrappedP2PMasterService();
 
     WrappedP2PMasterService(const WrappedP2PMasterService&) = delete;

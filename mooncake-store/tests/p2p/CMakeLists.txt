@@ -20,6 +20,10 @@ endfunction()
 add_p2p_store_test(p2p_master_service_test p2p_master_service_test.cpp)
 add_p2p_store_test(p2p_master_http_endpoints_test p2p_master_http_endpoints_test.cpp)
 add_p2p_store_test(p2p_master_metrics_test p2p_master_metrics_test.cpp)
+add_p2p_store_test(
+    p2p_master_config_test
+    p2p_master_config_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/p2p/master/p2p_master_config_loader.cpp)
 add_p2p_store_test(p2p_segment_manager_test p2p_segment_manager_test.cpp)
 
 # client side

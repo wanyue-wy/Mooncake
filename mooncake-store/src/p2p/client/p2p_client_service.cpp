@@ -24,6 +24,9 @@ namespace mooncake {
 
 namespace {
 
+constexpr const char* kEtcdPrefix = "etcd://";
+constexpr const char* kRedisPrefix = "redis://";
+
 // Max retries when AsyncWriteRevoke or AsyncUnPinKey fails on the forward path
 // (e.g. after TE write failure, or read cleanup). LEASE_EXPIRED is treated as
 // success; a missing owner record is already OK (idempotent).
@@ -54,6 +57,73 @@ P2PClientService::P2PClientService(
                      metrics_ ? &metrics_->master_client_metric : nullptr) {
     runtime_config_store_ =
         std::make_unique<RuntimeConfigStore>(DeploymentMode::P2P);
+}
+
+bool P2PClientService::IsHAMode(
+    const std::string& master_server_entry) const {
+    return master_server_entry.rfind(kEtcdPrefix, 0) == 0 ||
+           master_server_entry.rfind(kRedisPrefix, 0) == 0;
+}
+
+void P2PClientService::SetMasterDiscoveryConfig(
+    const P2PClientConfig& config) {
+    master_view_.reset();
+    master_view_entry_.clear();
+    master_discovery_config_.redis_cluster_id =
+        config.redis_cluster_id.empty() ? DEFAULT_CLUSTER_ID
+                                        : config.redis_cluster_id;
+    master_discovery_config_.redis_username = config.redis_username;
+    master_discovery_config_.redis_password = config.redis_password;
+    master_discovery_config_.redis_db_index = config.redis_db_index;
+    master_discovery_config_.redis_master_view_ttl_sec =
+        config.redis_master_view_ttl_sec;
+    master_discovery_config_.redis_heartbeat_interval_sec =
+        config.redis_heartbeat_interval_sec;
+}
+
+ErrorCode P2PClientService::ResolveMasterAddress(
+    const std::string& master_server_entry, std::string& master_address) {
+    if (!master_view_ || master_view_entry_ != master_server_entry) {
+        tl::expected<std::unique_ptr<P2PMasterView>, ErrorCode> view =
+            tl::make_unexpected(ErrorCode::INVALID_PARAMS);
+        if (master_server_entry.rfind(kEtcdPrefix, 0) == 0) {
+            view = CreateP2PEtcdMasterView(
+                master_server_entry.substr(std::strlen(kEtcdPrefix)));
+        } else if (master_server_entry.rfind(kRedisPrefix, 0) == 0) {
+            if (master_discovery_config_.redis_db_index < 0 ||
+                master_discovery_config_.redis_master_view_ttl_sec <= 0 ||
+                master_discovery_config_.redis_heartbeat_interval_sec <= 0 ||
+                master_discovery_config_.redis_heartbeat_interval_sec >=
+                    master_discovery_config_.redis_master_view_ttl_sec) {
+                LOG(ERROR) << "Invalid Redis master discovery config";
+                return ErrorCode::INVALID_PARAMS;
+            }
+            view = CreateP2PRedisMasterView(
+                master_discovery_config_.redis_cluster_id,
+                master_server_entry.substr(std::strlen(kRedisPrefix)),
+                master_discovery_config_.redis_password,
+                master_discovery_config_.redis_db_index,
+                master_discovery_config_.redis_master_view_ttl_sec,
+                master_discovery_config_.redis_heartbeat_interval_sec,
+                master_discovery_config_.redis_username);
+        }
+        if (!view) {
+            LOG(ERROR) << "Failed to create P2P master view for "
+                       << master_server_entry << ": "
+                       << toString(view.error());
+            return view.error();
+        }
+        master_view_ = std::move(view.value());
+        master_view_entry_ = master_server_entry;
+    }
+
+    ViewVersionId version = 0;
+    auto result = master_view_->GetMasterView(master_address, version);
+    if (result != ErrorCode::OK) {
+        master_view_.reset();
+        master_view_entry_.clear();
+    }
+    return result;
 }
 
 ErrorCode P2PClientService::ConnectToMaster(

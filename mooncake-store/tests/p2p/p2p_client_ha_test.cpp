@@ -18,8 +18,18 @@ P2PClientService MakeClient() {
                             /*enable_http_server=*/false);
 }
 
-class FailingMasterViewReader : public MasterViewReader {
+class FailingP2PMasterView : public P2PMasterView {
    public:
+    void ElectLeader(const std::string& master_address,
+                     ViewVersionId& version,
+                     EtcdLeaseId& lease_id) override {
+        (void)master_address;
+        (void)version;
+        (void)lease_id;
+    }
+    void KeepLeader(EtcdLeaseId lease_id) override { (void)lease_id; }
+    void CancelKeepAlive(EtcdLeaseId lease_id) override { (void)lease_id; }
+    int GetLeaderLeaseTTLSeconds() const override { return 1; }
     ErrorCode GetMasterView(std::string& master_address,
                             ViewVersionId& version) override {
         (void)master_address;
@@ -168,7 +178,7 @@ TEST(P2PClientHATest, RedisDiscoveryInvalidEndpointReturnsError) {
 }
 
 #ifdef STORE_USE_REDIS
-TEST(P2PClientHATest, RecreatesMasterViewReaderAfterResolveFailure) {
+TEST(P2PClientHATest, RecreatesMasterViewAfterResolveFailure) {
     auto client = MakeClient();
     P2PClientConfig config;
     config.redis_cluster_id = "p2p-client-ha-reconnect-test";
@@ -178,16 +188,16 @@ TEST(P2PClientHATest, RecreatesMasterViewReaderAfterResolveFailure) {
     const std::string expected_master_address = "127.0.0.1:51051";
     DeleteRedisMasterView(config.redis_cluster_id);
 
-    client.master_view_reader_ = std::make_unique<FailingMasterViewReader>();
-    client.master_view_reader_entry_ = master_server_entry;
+    client.master_view_ = std::make_unique<FailingP2PMasterView>();
+    client.master_view_entry_ = master_server_entry;
 
     std::string master_address;
     auto err = client.ResolveMasterAddress(master_server_entry, master_address);
 
     EXPECT_EQ(err, ErrorCode::INTERNAL_ERROR);
     EXPECT_TRUE(master_address.empty());
-    EXPECT_EQ(client.master_view_reader_, nullptr);
-    EXPECT_TRUE(client.master_view_reader_entry_.empty());
+    EXPECT_EQ(client.master_view_, nullptr);
+    EXPECT_TRUE(client.master_view_entry_.empty());
 
     WriteRedisMasterViewOrSkip(config.redis_cluster_id, expected_master_address,
                                7);
@@ -195,8 +205,8 @@ TEST(P2PClientHATest, RecreatesMasterViewReaderAfterResolveFailure) {
 
     EXPECT_EQ(err, ErrorCode::OK);
     EXPECT_EQ(master_address, expected_master_address);
-    EXPECT_NE(client.master_view_reader_, nullptr);
-    EXPECT_EQ(client.master_view_reader_entry_, master_server_entry);
+    EXPECT_NE(client.master_view_, nullptr);
+    EXPECT_EQ(client.master_view_entry_, master_server_entry);
 
     DeleteRedisMasterView(config.redis_cluster_id);
 }

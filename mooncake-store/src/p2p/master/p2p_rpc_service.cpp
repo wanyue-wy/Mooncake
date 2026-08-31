@@ -19,11 +19,11 @@
 namespace mooncake {
 
 WrappedP2PMasterService::WrappedP2PMasterService(
-    const P2PMasterRpcConfig& config)
-    : master_service_(config.service),
-      http_server_(4, config.http_port),
-      metric_report_running_(config.enable_metric_reporting),
-      heartbeat_rpc_port_(config.heartbeat_rpc_port) {}
+    const P2PMasterConfig& config, ViewVersionId view_version)
+    : master_service_(config, view_version),
+      http_server_(4, static_cast<uint16_t>(config.metrics.http_port)),
+      metric_report_running_(config.metrics.enable_reporting),
+      heartbeat_rpc_port_(config.rpc.heartbeat_port) {}
 
 WrappedP2PMasterService::~WrappedP2PMasterService() {
     metric_report_running_ = false;
