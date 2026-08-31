@@ -128,11 +128,9 @@ bool MasterProcessHandler::start() {
             rpc_address_arg,
             rpc_port_arg};
 
-        // The executable selects the architecture. Centralized intentionally
-        // does not expose P2P-only flags.
-        if (config_.deployment_mode == "P2P") {
+        if (config_.max_client_per_key.has_value()) {
             args.emplace_back("--max-client-per-key=" +
-                              std::to_string(config_.max_client_per_key));
+                              std::to_string(*config_.max_client_per_key));
         }
 
         if (config_.enable_oplog) {
@@ -179,7 +177,6 @@ bool MasterProcessHandler::start() {
         LOG(INFO) << "[m" << index_ << "] Exec master " << rpc_address_arg
                   << " " << rpc_port_arg
                   << " backend=" << config_.election_backend
-                  << " deployment=" << config_.deployment_mode
                   << " enable_oplog=" << config_.enable_oplog;
         std::vector<char*> argv;
         argv.reserve(args.size() + 1);

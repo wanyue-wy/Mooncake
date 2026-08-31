@@ -194,7 +194,7 @@ class HAIntegrationTest : public ::testing::Test {
 
         // Start master with long TTL so it won't mark clients as
         // DISCONNECTION when heartbeat is stopped.
-        InProcMasterConfigBuilder builder;
+        InProcP2PMasterConfigBuilder builder;
         builder.set_client_live_ttl_sec(3600);
         builder.set_client_crashed_ttl_sec(7200);
         auto master_config = builder.build();
@@ -548,7 +548,7 @@ TEST_F(HAIntegrationTest, MasterRestartRecovery) {
     ForceDegraded(client2_);
 
     // Restart master on the same port
-    InProcMasterConfigBuilder builder;
+    InProcP2PMasterConfigBuilder builder;
     builder.set_rpc_port(port);
     builder.set_client_live_ttl_sec(3600);
     builder.set_client_crashed_ttl_sec(7200);
@@ -602,7 +602,7 @@ TEST_F(HAIntegrationTest, MasterRestartRecovery) {
 TEST_F(HAIntegrationTest, ClientDisconnectAndRecover) {
     // Start an independent master with short TTL
     InProcP2PMaster short_ttl_master;
-    InProcMasterConfigBuilder builder;
+    InProcP2PMasterConfigBuilder builder;
     builder.set_client_live_ttl_sec(2);
     builder.set_client_crashed_ttl_sec(20);
     ASSERT_TRUE(short_ttl_master.Start(builder.build()));

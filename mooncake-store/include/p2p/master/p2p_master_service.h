@@ -12,8 +12,8 @@
 #include <vector>
 #include <ylt/util/tl/expected.hpp>
 
-#include "master_config.h"
 #include "mutex.h"
+#include "p2p/common/p2p_master_config.h"
 #include "p2p/common/p2p_rpc_types.h"
 #include "p2p/ha/oplog/oplog_manager.h"
 #include "p2p/ha/oplog/p2p_standby_metadata_store.h"
@@ -40,7 +40,7 @@ class P2PMasterService {
     struct ObjectMetadata;
 
    public:
-    explicit P2PMasterService(const MasterServiceConfig& config);
+    explicit P2PMasterService(const P2PMasterServiceConfig& config);
     ~P2PMasterService() = default;
 
     P2PClientManager& GetClientManager() { return *client_manager_; }

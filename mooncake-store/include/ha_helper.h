@@ -13,6 +13,13 @@
 
 namespace mooncake {
 
+class MasterViewReader {
+   public:
+    virtual ~MasterViewReader() = default;
+    virtual ErrorCode GetMasterView(std::string& master_address,
+                                    ViewVersionId& version) = 0;
+};
+
 /*
  * @brief A helper class for maintain and monitor the master view change.
  *        The cluster is assumed to have multiple master servers, but only
@@ -20,12 +27,11 @@ namespace mooncake {
  *        Each master view is associated with a unique version id, which
  *        is incremented monotonically each time the master view is changed.
  */
-class MasterViewHelper {
+class MasterViewHelper final : public MasterViewReader {
    public:
     MasterViewHelper(const MasterViewHelper&) = delete;
     MasterViewHelper& operator=(const MasterViewHelper&) = delete;
     MasterViewHelper();
-    virtual ~MasterViewHelper() = default;
 
     /*
      * @brief Connect to the etcd cluster. This function should be called at
@@ -58,10 +64,8 @@ class MasterViewHelper {
      * @param version: Output param, the version of the master view.
      * @return: Error code.
      */
-    // TODO(C3): replace mixed discovery inheritance with
-    // architecture-specific master-view transport ownership.
-    virtual ErrorCode GetMasterView(std::string& master_address,
-                                    ViewVersionId& version);
+    ErrorCode GetMasterView(std::string& master_address,
+                            ViewVersionId& version) override;
 
    private:
     std::string master_view_key_;

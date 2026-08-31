@@ -13,7 +13,7 @@
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include <ylt/util/tl/expected.hpp>
 
-#include "master_config.h"
+#include "p2p/common/p2p_master_config.h"
 #include "p2p/common/p2p_rpc_types.h"
 #include "p2p/master/p2p_master_metric_manager.h"
 #include "p2p/master/p2p_master_service.h"
@@ -33,8 +33,7 @@ inline constexpr uint64_t kP2PMetricReportIntervalSeconds = 10;
  */
 class WrappedP2PMasterService final {
    public:
-    explicit WrappedP2PMasterService(
-        const WrappedMasterServiceConfig& config);
+    explicit WrappedP2PMasterService(const P2PMasterRpcConfig& config);
     ~WrappedP2PMasterService();
 
     WrappedP2PMasterService(const WrappedP2PMasterService&) = delete;

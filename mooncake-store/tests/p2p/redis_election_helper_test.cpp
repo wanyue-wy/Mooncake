@@ -7,12 +7,12 @@
 #include <string>
 #include <thread>
 
-#include "master_config.h"
+#include "p2p/common/p2p_master_config.h"
 #include "types.h"
 
 #ifdef STORE_USE_REDIS
 #include "p2p/ha/redis_election_helper.h"
-#include "p2p/ha/redis_master_view_helper.h"
+#include "p2p/ha/redis_master_view_reader.h"
 #include "redis_test_utils.h"
 #include <hiredis/hiredis.h>
 
@@ -112,7 +112,7 @@ TEST_F(RedisElectionHelperTest, ElectLeaderAndGetMasterView) {
     ASSERT_GT(lease_id, 0);
 
     // Read back through the client-discovery adapter.
-    RedisMasterViewHelper reader(
+    RedisMasterViewReader reader(
         FLAGS_cluster_id, FLAGS_redis_endpoint, FLAGS_redis_password, 0,
         FLAGS_redis_ttl_sec, 1, FLAGS_redis_username);
     ASSERT_EQ(ErrorCode::OK, reader.Connect());
@@ -445,19 +445,19 @@ TEST(RedisUtilTest, RejectsEndpointWithoutExplicitPort) {
 }
 
 TEST(RedisConfigTest, AppliesDefaultEndpointPort) {
-    MasterConfig config;
+    P2PMasterConfig config;
 
-    config.redis_endpoint = "redis.example.com";
+    config.service.redis_endpoint = "redis.example.com";
     config.ApplyRedisEndpointDefaults();
-    EXPECT_EQ("redis.example.com:6379", config.redis_endpoint);
+    EXPECT_EQ("redis.example.com:6379", config.service.redis_endpoint);
 
-    config.redis_endpoint = "[::1]";
+    config.service.redis_endpoint = "[::1]";
     config.ApplyRedisEndpointDefaults();
-    EXPECT_EQ("[::1]:6379", config.redis_endpoint);
+    EXPECT_EQ("[::1]:6379", config.service.redis_endpoint);
 
-    config.redis_endpoint = "redis.example.com:6380";
+    config.service.redis_endpoint = "redis.example.com:6380";
     config.ApplyRedisEndpointDefaults();
-    EXPECT_EQ("redis.example.com:6380", config.redis_endpoint);
+    EXPECT_EQ("redis.example.com:6380", config.service.redis_endpoint);
 }
 
 TEST_F(RedisElectionHelperTest, CreateConnectionUnreachable) {

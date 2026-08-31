@@ -29,7 +29,6 @@
 #include <ylt/reflection/user_reflect_macro.hpp>
 #include <ylt/struct_json/json_reader.h>
 
-#include "master_config.h"
 #include "p2p/master/p2p_rpc_service.h"
 #include "types.h"
 #include "utils.h"
@@ -70,22 +69,9 @@ class P2PMasterHttpEndpointsTest : public ::testing::Test {
 
         const uint16_t http_port = static_cast<uint16_t>(getFreeTcpPort());
 
-        WrappedMasterServiceConfig wms_cfg;
-        wms_cfg.default_kv_lease_ttl = DEFAULT_DEFAULT_KV_LEASE_TTL;
-        wms_cfg.default_kv_soft_pin_ttl = DEFAULT_KV_SOFT_PIN_TTL_MS;
-        wms_cfg.allow_evict_soft_pinned_objects = true;
+        P2PMasterRpcConfig wms_cfg;
         wms_cfg.enable_metric_reporting = false;
-        wms_cfg.eviction_ratio = DEFAULT_EVICTION_RATIO;
-        wms_cfg.eviction_high_watermark_ratio =
-            DEFAULT_EVICTION_HIGH_WATERMARK_RATIO;
-        wms_cfg.view_version = 0;
-        wms_cfg.enable_ha = false;
-        wms_cfg.cluster_id = DEFAULT_CLUSTER_ID;
-        wms_cfg.root_fs_dir = DEFAULT_ROOT_FS_DIR;
-        wms_cfg.memory_allocator = BufferAllocatorType::OFFSET;
-        wms_cfg.max_client_per_key = 0;  // no limit for P2P
-        wms_cfg.client_live_ttl_sec = DEFAULT_CLIENT_LIVE_TTL_SEC;
-        wms_cfg.client_crashed_ttl_sec = DEFAULT_CLIENT_CRASHED_TTL_SEC;
+        wms_cfg.service.max_client_per_key = 0;  // no limit for P2P
         wms_cfg.http_port = http_port;
 
         wrapped_ = std::make_unique<WrappedP2PMasterService>(wms_cfg);

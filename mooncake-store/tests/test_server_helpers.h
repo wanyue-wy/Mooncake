@@ -30,11 +30,6 @@ class InProcMaster {
 
     bool Start(InProcMasterConfig config) {
         try {
-            if (config.heartbeat_rpc_port.value_or(0) != 0) {
-                LOG(ERROR) << "Dedicated heartbeat RPC is not supported by "
-                              "the centralized Ping protocol";
-                return false;
-            }
             // Choose ports if not provided
             rpc_port_ = config.rpc_port.has_value() ? config.rpc_port.value()
                                                     : getFreeTcpPort();
@@ -85,7 +80,6 @@ class InProcMaster {
             wms_cfg.eviction_high_watermark_ratio =
                 DEFAULT_EVICTION_HIGH_WATERMARK_RATIO;
             wms_cfg.view_version = 0;
-            wms_cfg.heartbeat_rpc_port = config.heartbeat_rpc_port.value_or(0);
             wms_cfg.root_fs_dir = DEFAULT_ROOT_FS_DIR;
             wms_cfg.memory_allocator = BufferAllocatorType::OFFSET;
 
@@ -116,13 +110,6 @@ class InProcMaster {
                     config.client_live_ttl_sec.value();
             } else {
                 wms_cfg.client_live_ttl_sec = DEFAULT_CLIENT_LIVE_TTL_SEC;
-            }
-
-            if (config.client_crashed_ttl_sec.has_value()) {
-                wms_cfg.client_crashed_ttl_sec =
-                    config.client_crashed_ttl_sec.value();
-            } else {
-                wms_cfg.client_crashed_ttl_sec = DEFAULT_CLIENT_CRASHED_TTL_SEC;
             }
 
             wrapped_ = std::make_unique<WrappedMasterService>(wms_cfg);

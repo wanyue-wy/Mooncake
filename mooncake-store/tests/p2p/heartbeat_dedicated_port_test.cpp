@@ -39,7 +39,6 @@
 #include <thread>
 #include <utility>
 
-#include "master_config.h"
 #include "p2p/master/p2p_master_client.h"
 #include "rpc_types.h"
 #include "test_p2p_server_helpers.h"
@@ -66,7 +65,7 @@ class HeartbeatTestMaster {
     // `hb_port` let a restart pin the same ports the previous instance used.
     bool Start(bool dedicated, std::optional<int> rpc_port = std::nullopt,
                std::optional<int> hb_port = std::nullopt) {
-        InProcMasterConfigBuilder builder;
+        InProcP2PMasterConfigBuilder builder;
         rpc_port_ = rpc_port.value_or(getFreeTcpPort());
         builder.set_rpc_port(rpc_port_);
         if (dedicated) {

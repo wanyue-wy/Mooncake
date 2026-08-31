@@ -17,7 +17,6 @@
 #include "p2p/ha/oplog/localfs_oplog_store.h"
 #include "p2p/ha/oplog/oplog_store.h"
 #include "p2p/ha/oplog/p2p_oplog_types.h"
-#include "master_config.h"
 #include "p2p/common/p2p_rpc_types.h"
 #include "types.h"
 
@@ -86,15 +85,14 @@ class P2PRecordOplogTest : public ::testing::Test {
 
     void TearDown() override { std::filesystem::remove_all(test_dir_); }
 
-    MasterServiceConfig MakeConfig(bool enable_oplog = true) const {
-        return MasterServiceConfig::builder()
-            .set_enable_ha(enable_oplog)
-            .set_enable_oplog(enable_oplog)
-            .set_cluster_id(kClusterId)
-            .set_oplog_store_type("localfs")
-            .set_oplog_data_dir(test_dir_.string())
-            .set_max_client_per_key(0)
-            .build();
+    P2PMasterServiceConfig MakeConfig(bool enable_oplog = true) const {
+        P2PMasterServiceConfig config;
+        config.enable_oplog = enable_oplog;
+        config.cluster_id = kClusterId;
+        config.oplog_store_type = "localfs";
+        config.oplog_data_dir = test_dir_.string();
+        config.max_client_per_key = 0;
+        return config;
     }
 
     P2PSegment MakeSegment(const UUID& segment_id) const {

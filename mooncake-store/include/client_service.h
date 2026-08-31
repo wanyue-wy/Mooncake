@@ -604,8 +604,8 @@ class ClientService {
 
     const std::string metadata_connstring_;
     // For high availability. Created lazily in ResolveMasterAddress().
-    std::unique_ptr<MasterViewHelper> master_view_helper_;
-    std::string master_view_helper_entry_;
+    std::unique_ptr<MasterViewReader> master_view_reader_;
+    std::string master_view_reader_entry_;
     ClientMasterDiscoveryConfig master_discovery_config_;
     std::thread heartbeat_thread_;
     std::atomic<bool> heartbeat_running_{false};

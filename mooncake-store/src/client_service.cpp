@@ -17,7 +17,7 @@
 #include "p2p/client/p2p_client_service.h"
 #include "centralized_client_service.h"
 #ifdef STORE_USE_REDIS
-#include "p2p/ha/redis_master_view_helper.h"
+#include "p2p/ha/redis_master_view_reader.h"
 #endif
 #include <ylt/coro_http/coro_http_client.hpp>
 
@@ -32,8 +32,8 @@ bool StartsWith(const std::string& value, const char* prefix) {
     return value.find(prefix) == 0;
 }
 
-tl::expected<std::unique_ptr<MasterViewHelper>, ErrorCode>
-CreateClientMasterViewHelper(const std::string& master_server_entry,
+tl::expected<std::unique_ptr<MasterViewReader>, ErrorCode>
+CreateClientMasterViewReader(const std::string& master_server_entry,
                              const ClientMasterDiscoveryConfig& config) {
     if (StartsWith(master_server_entry, kEtcdPrefix)) {
         auto helper = std::make_unique<MasterViewHelper>();
@@ -74,7 +74,7 @@ CreateClientMasterViewHelper(const std::string& master_server_entry,
 #ifdef STORE_USE_REDIS
         std::string redis_entry =
             master_server_entry.substr(strlen(kRedisPrefix));
-        auto helper = std::make_unique<RedisMasterViewHelper>(
+        auto helper = std::make_unique<RedisMasterViewReader>(
             config.redis_cluster_id, redis_entry, config.redis_password,
             config.redis_db_index, config.redis_master_view_ttl_sec,
             config.redis_heartbeat_interval_sec, config.redis_username);
@@ -221,8 +221,8 @@ bool ClientService::IsHAMode(const std::string& master_server_entry) const {
 
 void ClientService::SetMasterDiscoveryConfig(
     const RealClientConfigBase& config) {
-    master_view_helper_.reset();
-    master_view_helper_entry_.clear();
+    master_view_reader_.reset();
+    master_view_reader_entry_.clear();
     master_discovery_config_.redis_cluster_id = config.redis_cluster_id.empty()
                                                     ? DEFAULT_CLUSTER_ID
                                                     : config.redis_cluster_id;
@@ -237,27 +237,27 @@ void ClientService::SetMasterDiscoveryConfig(
 
 ErrorCode ClientService::ResolveMasterAddress(
     const std::string& master_server_entry, std::string& master_address) {
-    if (!master_view_helper_ ||
-        master_view_helper_entry_ != master_server_entry) {
-        auto helper = CreateClientMasterViewHelper(master_server_entry,
+    if (!master_view_reader_ ||
+        master_view_reader_entry_ != master_server_entry) {
+        auto helper = CreateClientMasterViewReader(master_server_entry,
                                                    master_discovery_config_);
         if (!helper) {
-            LOG(ERROR) << "Failed to create master view helper for "
+            LOG(ERROR) << "Failed to create master view reader for "
                        << master_server_entry << ": "
                        << toString(helper.error());
             return helper.error();
         }
-        master_view_helper_ = std::move(helper.value());
-        master_view_helper_entry_ = master_server_entry;
+        master_view_reader_ = std::move(helper.value());
+        master_view_reader_entry_ = master_server_entry;
     }
 
     ViewVersionId version = 0;
-    auto err = master_view_helper_->GetMasterView(master_address, version);
+    auto err = master_view_reader_->GetMasterView(master_address, version);
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "Failed to resolve master address from "
                    << master_server_entry << ": " << toString(err);
-        master_view_helper_.reset();
-        master_view_helper_entry_.clear();
+        master_view_reader_.reset();
+        master_view_reader_entry_.clear();
     }
     return err;
 }

@@ -26,7 +26,7 @@
 #include "p2p/ha/oplog/p2p_standby_snapshot_service.h"
 #include "p2p/ha/oplog/redis_oplog_store.h"
 #include "process_handler.h"
-#include "p2p/ha/redis_master_view_helper.h"
+#include "p2p/ha/redis_master_view_reader.h"
 #include "../p2p/redis_test_utils.h"
 #include "types.h"
 
@@ -388,11 +388,11 @@ class RedisChaosTest : public ::testing::Test {
 
     void SetUp() override {
         CleanupRedisKeys();
-        master_view_helper_ = std::make_unique<RedisMasterViewHelper>(
+        master_view_reader_ = std::make_unique<RedisMasterViewReader>(
             FLAGS_redis_cluster_id, FLAGS_redis_endpoint, FLAGS_redis_password,
             /*db_index=*/0, FLAGS_redis_master_view_ttl_sec,
             FLAGS_redis_heartbeat_interval_sec, FLAGS_redis_username);
-        ASSERT_EQ(master_view_helper_->Connect(), ErrorCode::OK);
+        ASSERT_EQ(master_view_reader_->Connect(), ErrorCode::OK);
 
         MasterRunnerConfig config;
         config.election_backend = "redis";
@@ -404,7 +404,6 @@ class RedisChaosTest : public ::testing::Test {
             FLAGS_redis_heartbeat_interval_sec;
         config.cluster_id = FLAGS_redis_cluster_id;
         config.rpc_address = "127.0.0.1";
-        config.deployment_mode = "P2P";
         config.enable_oplog = true;
         config.oplog_store_type = "redis";
         config.oplog_data_dir = FLAGS_redis_endpoint;
@@ -421,7 +420,7 @@ class RedisChaosTest : public ::testing::Test {
 
     void TearDown() override {
         masters_.clear();
-        master_view_helper_.reset();
+        master_view_reader_.reset();
         CleanupRedisKeys();
     }
 
@@ -431,7 +430,7 @@ class RedisChaosTest : public ::testing::Test {
         while (std::chrono::steady_clock::now() < deadline) {
             std::string master_address;
             ViewVersionId next_version = 0;
-            auto err = master_view_helper_->GetMasterView(master_address,
+            auto err = master_view_reader_->GetMasterView(master_address,
                                                           next_version);
             if (err == ErrorCode::OK) {
                 int index = MasterIndexFromAddress(master_address);
@@ -489,7 +488,7 @@ class RedisChaosTest : public ::testing::Test {
         while (std::chrono::steady_clock::now() < deadline) {
             std::string master_address;
             ViewVersionId version = 0;
-            if (master_view_helper_->GetMasterView(master_address, version) ==
+            if (master_view_reader_->GetMasterView(master_address, version) ==
                     ErrorCode::OK &&
                 MasterIndexFromAddress(master_address) >= 0 &&
                 TcpPortAccepting(master_address)) {
@@ -608,7 +607,7 @@ class RedisChaosTest : public ::testing::Test {
     }
 
     std::vector<std::unique_ptr<MasterProcessHandler>> masters_;
-    std::unique_ptr<RedisMasterViewHelper> master_view_helper_;
+    std::unique_ptr<RedisMasterViewReader> master_view_reader_;
     inline static struct sigaction old_sigpipe_action_ = {};
 };
 

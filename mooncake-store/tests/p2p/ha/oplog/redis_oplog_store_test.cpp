@@ -543,7 +543,7 @@ TEST_F(RedisOpLogStoreTest, RejectsInvalidDatabaseIndex) {
 }
 
 TEST_F(RedisOpLogStoreTest, MasterServiceUsesRedisEndpointForRedisOpLog) {
-    MasterServiceConfig config;
+    P2PMasterServiceConfig config;
     config.enable_oplog = true;
     config.oplog_store_type = "redis";
     config.cluster_id = cluster_id_;

@@ -11,7 +11,6 @@
 #undef protected
 #undef private
 
-#include "master_config.h"
 #include "p2p/master/p2p_client_meta.h"
 #include "p2p/common/p2p_rpc_types.h"
 #include "rpc_types.h"
@@ -49,9 +48,8 @@ class P2PMasterServiceTest : public ::testing::Test {
     /// Create the service with given max_replicas config
     std::unique_ptr<P2PMasterService> CreateService(
         uint64_t max_client_per_key = 0) {
-        auto config = MasterServiceConfig::builder()
-                          .set_max_client_per_key(max_client_per_key)
-                          .build();
+        P2PMasterServiceConfig config;
+        config.max_client_per_key = max_client_per_key;
         return std::make_unique<P2PMasterService>(config);
     }
 

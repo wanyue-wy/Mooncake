@@ -9,14 +9,54 @@
 #include <csignal>
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 
-#include "master_config.h"
 #include "p2p/master/p2p_rpc_service.h"
-#include "rpc_service.h"
 #include "types.h"
 #include "utils.h"
 
 namespace mooncake {
 namespace testing {
+
+struct InProcP2PMasterConfig {
+    std::optional<int> rpc_port;
+    std::optional<int64_t> client_live_ttl_sec;
+    std::optional<int64_t> client_crashed_ttl_sec;
+    std::optional<int> heartbeat_rpc_port;
+    std::optional<uint32_t> heartbeat_rpc_thread_num;
+};
+
+class InProcP2PMasterConfigBuilder {
+   public:
+    InProcP2PMasterConfigBuilder& set_rpc_port(int value) {
+        config_.rpc_port = value;
+        return *this;
+    }
+
+    InProcP2PMasterConfigBuilder& set_client_live_ttl_sec(int64_t value) {
+        config_.client_live_ttl_sec = value;
+        return *this;
+    }
+
+    InProcP2PMasterConfigBuilder& set_client_crashed_ttl_sec(int64_t value) {
+        config_.client_crashed_ttl_sec = value;
+        return *this;
+    }
+
+    InProcP2PMasterConfigBuilder& set_heartbeat_rpc_port(int value) {
+        config_.heartbeat_rpc_port = value;
+        return *this;
+    }
+
+    InProcP2PMasterConfigBuilder& set_heartbeat_rpc_thread_num(
+        uint32_t value) {
+        config_.heartbeat_rpc_thread_num = value;
+        return *this;
+    }
+
+    InProcP2PMasterConfig build() const { return config_; }
+
+   private:
+    InProcP2PMasterConfig config_;
+};
 
 /**
  * @brief Lightweight in-process P2P master server for tests (non-HA).
@@ -30,7 +70,7 @@ class InProcP2PMaster {
     InProcP2PMaster() = default;
     ~InProcP2PMaster() { Stop(); }
 
-    bool Start(InProcMasterConfig config = {}) {
+    bool Start(InProcP2PMasterConfig config = {}) {
         try {
             rpc_port_ = config.rpc_port.has_value() ? config.rpc_port.value()
                                                     : getFreeTcpPort();
@@ -39,34 +79,25 @@ class InProcP2PMaster {
                 /*thread_num=*/4, /*port=*/rpc_port_, /*address=*/"0.0.0.0",
                 std::chrono::seconds(0), /*tcp_no_delay=*/true);
 
-            WrappedMasterServiceConfig wms_cfg;
-            wms_cfg.default_kv_lease_ttl = DEFAULT_DEFAULT_KV_LEASE_TTL;
-            wms_cfg.default_kv_soft_pin_ttl = DEFAULT_KV_SOFT_PIN_TTL_MS;
-            wms_cfg.allow_evict_soft_pinned_objects = true;
+            P2PMasterRpcConfig wms_cfg;
             wms_cfg.enable_metric_reporting = false;
-            wms_cfg.eviction_ratio = DEFAULT_EVICTION_RATIO;
-            wms_cfg.eviction_high_watermark_ratio =
-                DEFAULT_EVICTION_HIGH_WATERMARK_RATIO;
-            wms_cfg.view_version = 0;
             wms_cfg.heartbeat_rpc_port = config.heartbeat_rpc_port.value_or(0);
-            wms_cfg.enable_ha = false;
-            wms_cfg.cluster_id = DEFAULT_CLUSTER_ID;
-            wms_cfg.root_fs_dir = DEFAULT_ROOT_FS_DIR;
-            wms_cfg.memory_allocator = BufferAllocatorType::OFFSET;
-            wms_cfg.max_client_per_key = 0;  // no limit for P2P
+            wms_cfg.service.max_client_per_key = 0;  // no limit for P2P
 
             if (config.client_live_ttl_sec.has_value()) {
-                wms_cfg.client_live_ttl_sec =
+                wms_cfg.service.client_live_ttl_sec =
                     config.client_live_ttl_sec.value();
             } else {
-                wms_cfg.client_live_ttl_sec = DEFAULT_CLIENT_LIVE_TTL_SEC;
+                wms_cfg.service.client_live_ttl_sec =
+                    DEFAULT_CLIENT_LIVE_TTL_SEC;
             }
 
             if (config.client_crashed_ttl_sec.has_value()) {
-                wms_cfg.client_crashed_ttl_sec =
+                wms_cfg.service.client_crashed_ttl_sec =
                     config.client_crashed_ttl_sec.value();
             } else {
-                wms_cfg.client_crashed_ttl_sec = DEFAULT_CLIENT_CRASHED_TTL_SEC;
+                wms_cfg.service.client_crashed_ttl_sec =
+                    DEFAULT_CLIENT_CRASHED_TTL_SEC;
             }
 
             wrapped_ = std::make_unique<WrappedP2PMasterService>(wms_cfg);

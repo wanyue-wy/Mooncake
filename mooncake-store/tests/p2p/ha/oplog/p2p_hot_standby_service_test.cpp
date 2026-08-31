@@ -116,31 +116,20 @@ class P2PHotStandbyServiceTest : public ::testing::Test {
 
     void TearDown() override { std::filesystem::remove_all(test_dir_); }
 
-    MasterServiceConfig MakeMasterConfig() const {
-        return MasterServiceConfig::builder()
-            .set_enable_ha(true)
-            .set_enable_oplog(true)
-            .set_cluster_id(kClusterId)
-            .set_oplog_store_type("localfs")
-            .set_oplog_data_dir(test_dir_.string())
-            .set_max_client_per_key(0)
-            .build();
+    P2PMasterServiceConfig MakeMasterConfig() const {
+        P2PMasterServiceConfig config;
+        config.enable_oplog = true;
+        config.cluster_id = kClusterId;
+        config.oplog_store_type = "localfs";
+        config.oplog_data_dir = test_dir_.string();
+        config.max_client_per_key = 0;
+        return config;
     }
 
-    WrappedMasterServiceConfig MakeWrappedMasterConfig() const {
-        auto master_config = MakeMasterConfig();
-        WrappedMasterServiceConfig config;
-        config.default_kv_lease_ttl = master_config.default_kv_lease_ttl;
-        config.default_kv_soft_pin_ttl = master_config.default_kv_soft_pin_ttl;
-        config.allow_evict_soft_pinned_objects =
-            master_config.allow_evict_soft_pinned_objects;
+    P2PMasterRpcConfig MakeWrappedMasterConfig() const {
+        P2PMasterRpcConfig config;
+        config.service = MakeMasterConfig();
         config.enable_metric_reporting = false;
-        config.enable_ha = master_config.enable_ha;
-        config.enable_oplog = master_config.enable_oplog;
-        config.oplog_store_type = master_config.oplog_store_type;
-        config.oplog_data_dir = master_config.oplog_data_dir;
-        config.cluster_id = master_config.cluster_id;
-        config.max_client_per_key = master_config.max_client_per_key;
         return config;
     }
 

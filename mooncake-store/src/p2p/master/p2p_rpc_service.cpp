@@ -19,8 +19,8 @@
 namespace mooncake {
 
 WrappedP2PMasterService::WrappedP2PMasterService(
-    const WrappedMasterServiceConfig& config)
-    : master_service_(config),
+    const P2PMasterRpcConfig& config)
+    : master_service_(config.service),
       http_server_(4, config.http_port),
       metric_report_running_(config.enable_metric_reporting),
       heartbeat_rpc_port_(config.heartbeat_rpc_port) {}
