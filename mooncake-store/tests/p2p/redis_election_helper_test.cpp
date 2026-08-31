@@ -94,15 +94,6 @@ TEST_F(RedisElectionHelperTest, Connect) {
     ASSERT_EQ(ErrorCode::OK, helper2.Connect());
 }
 
-TEST_F(RedisElectionHelperTest, FactoryCreatesRedisMasterView) {
-    auto view = CreateP2PRedisMasterView(
-        FLAGS_cluster_id, FLAGS_redis_endpoint, FLAGS_redis_password,
-        /*db_index=*/0, FLAGS_redis_ttl_sec,
-        /*heartbeat_interval_seconds=*/1, FLAGS_redis_username);
-    ASSERT_TRUE(view.has_value());
-    EXPECT_NE(dynamic_cast<P2PRedisMasterView*>(view.value().get()), nullptr);
-}
-
 // === Test 2: ElectLeader + GetMasterView ===
 
 TEST_F(RedisElectionHelperTest, ElectLeaderAndGetMasterView) {

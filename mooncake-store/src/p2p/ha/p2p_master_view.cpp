@@ -4,7 +4,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <thread>
-#include <utility>
 
 #include <glog/logging.h>
 
@@ -35,9 +34,9 @@ void P2PEtcdMasterView::ElectLeader(const std::string& master_address,
     while (true) {
         ViewVersionId current_version = 0;
         std::string current_master;
-        auto result = EtcdHelper::Get(master_view_key_.c_str(),
-                                      master_view_key_.size(), current_master,
-                                      current_version);
+        auto result =
+            EtcdHelper::Get(master_view_key_.c_str(), master_view_key_.size(),
+                            current_master, current_version);
         if (result != ErrorCode::OK &&
             result != ErrorCode::ETCD_KEY_NOT_EXIST) {
             LOG(ERROR) << "Failed to get current P2P leader: " << result;
@@ -58,8 +57,7 @@ void P2PEtcdMasterView::ElectLeader(const std::string& master_address,
             }
         }
 
-        result =
-            EtcdHelper::GrantLease(ETCD_MASTER_VIEW_LEASE_TTL, lease_id);
+        result = EtcdHelper::GrantLease(ETCD_MASTER_VIEW_LEASE_TTL, lease_id);
         if (result != ErrorCode::OK) {
             LOG(ERROR) << "Failed to grant P2P leader lease: " << result;
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -104,13 +102,14 @@ ErrorCode P2PEtcdMasterView::GetMasterView(std::string& master_address,
 }
 
 #ifdef STORE_USE_REDIS
-P2PRedisMasterView::P2PRedisMasterView(
-    const std::string& cluster_id, const std::string& redis_endpoint,
-    const std::string& password, int db_index, int ttl_seconds,
-    int heartbeat_interval_seconds, const std::string& username)
+P2PRedisMasterView::P2PRedisMasterView(const std::string& cluster_id,
+                                       const std::string& redis_endpoint,
+                                       const std::string& password,
+                                       int db_index, int ttl_seconds,
+                                       int heartbeat_interval_seconds,
+                                       const std::string& username)
     : redis_election_helper_(cluster_id, redis_endpoint, password, db_index,
-                             ttl_seconds, heartbeat_interval_seconds,
-                             username),
+                             ttl_seconds, heartbeat_interval_seconds, username),
       ttl_seconds_(ttl_seconds) {}
 
 ErrorCode P2PRedisMasterView::Connect() {
@@ -121,8 +120,7 @@ void P2PRedisMasterView::ElectLeader(const std::string& master_address,
                                      ViewVersionId& version,
                                      EtcdLeaseId& lease_id) {
     int redis_lease_id = 0;
-    redis_election_helper_.ElectLeader(master_address, version,
-                                       redis_lease_id);
+    redis_election_helper_.ElectLeader(master_address, version, redis_lease_id);
     lease_id = static_cast<EtcdLeaseId>(redis_lease_id);
 }
 
@@ -144,42 +142,5 @@ ErrorCode P2PRedisMasterView::GetMasterView(std::string& master_address,
     return redis_election_helper_.GetMasterView(master_address, version);
 }
 #endif
-
-tl::expected<std::unique_ptr<P2PMasterView>, ErrorCode>
-CreateP2PEtcdMasterView(const std::string& etcd_endpoints) {
-    auto view = std::make_unique<P2PEtcdMasterView>();
-    auto result = view->Connect(etcd_endpoints);
-    if (result != ErrorCode::OK) {
-        return tl::make_unexpected(result);
-    }
-    return std::unique_ptr<P2PMasterView>(std::move(view));
-}
-
-tl::expected<std::unique_ptr<P2PMasterView>, ErrorCode>
-CreateP2PRedisMasterView(const std::string& cluster_id,
-                         const std::string& redis_endpoint,
-                         const std::string& password, int db_index,
-                         int ttl_seconds, int heartbeat_interval_seconds,
-                         const std::string& username) {
-#ifdef STORE_USE_REDIS
-    auto view = std::make_unique<P2PRedisMasterView>(
-        cluster_id, redis_endpoint, password, db_index, ttl_seconds,
-        heartbeat_interval_seconds, username);
-    auto result = view->Connect();
-    if (result != ErrorCode::OK) {
-        return tl::make_unexpected(result);
-    }
-    return std::unique_ptr<P2PMasterView>(std::move(view));
-#else
-    (void)cluster_id;
-    (void)redis_endpoint;
-    (void)password;
-    (void)db_index;
-    (void)ttl_seconds;
-    (void)heartbeat_interval_seconds;
-    (void)username;
-    return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-#endif
-}
 
 }  // namespace mooncake

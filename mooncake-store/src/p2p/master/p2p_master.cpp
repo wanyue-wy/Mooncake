@@ -42,17 +42,6 @@ std::unique_ptr<coro_rpc::coro_rpc_server> CreateRpcServer(
     return server;
 }
 
-tl::expected<std::unique_ptr<P2PMasterView>, ErrorCode> CreateMasterView(
-    const P2PMasterConfig& config) {
-    if (config.ha.election_backend == ElectionBackend::REDIS) {
-        return CreateP2PRedisMasterView(
-            config.cluster_id, config.redis.endpoint, config.redis.password,
-            config.redis.db_index, config.redis.master_view_ttl_seconds,
-            config.redis.heartbeat_interval_seconds, config.redis.username);
-    }
-    return CreateP2PEtcdMasterView(config.ha.etcd_endpoints);
-}
-
 #ifdef STORE_USE_REDIS
 std::string GenerateMasterInstanceId() {
     std::random_device random;
@@ -92,246 +81,245 @@ std::string BuildSnapshotEndpoint(const std::string& master_endpoint,
 }
 #endif
 
-}  // namespace
+std::unique_ptr<WrappedP2PMasterService> CreateActiveService(
+    const P2PMasterConfig& config, ViewVersionId view_version) {
+    auto service =
+        std::make_unique<WrappedP2PMasterService>(config, view_version);
+    service->init();
+    return service;
+}
 
-class P2PMaster::Impl {
-   public:
-    explicit Impl(const P2PMasterConfig& config) : config_(config) {}
-
-    int Run() { return config_.ha.enabled ? RunWithHA() : RunStandalone(); }
-
-   private:
-    std::unique_ptr<WrappedP2PMasterService> CreateActiveService(
-        ViewVersionId view_version) {
-        auto service = std::make_unique<WrappedP2PMasterService>(
-            config_, view_version);
-        service->init();
-        return service;
+int RunActiveRpcServers(const P2PMasterConfig& config,
+                        coro_rpc::coro_rpc_server& server,
+                        WrappedP2PMasterService& wrapped_service,
+                        std::function<void()> before_start = {}) {
+    const bool dedicated_heartbeat = config.rpc.heartbeat_port > 0;
+    RegisterP2PRpcService(server, wrapped_service,
+                          /*include_heartbeat=*/!dedicated_heartbeat);
+    if (before_start) {
+        before_start();
     }
 
-    int RunActiveRpcServers(
-        coro_rpc::coro_rpc_server& server,
-        WrappedP2PMasterService& wrapped_service,
-        std::function<void()> before_start = {}) {
-        const bool dedicated_heartbeat = config_.rpc.heartbeat_port > 0;
-        RegisterP2PRpcService(server, wrapped_service,
-                              /*include_heartbeat=*/!dedicated_heartbeat);
-        if (before_start) {
-            before_start();
-        }
-
-        std::optional<coro_rpc::coro_rpc_server> heartbeat_server;
-        if (dedicated_heartbeat) {
-            heartbeat_server.emplace(
-                std::max<uint32_t>(1u, config_.rpc.heartbeat_thread_num),
-                config_.rpc.heartbeat_port, config_.rpc.address,
-                std::chrono::seconds(
-                    config_.rpc.connection_timeout_seconds),
-                config_.rpc.enable_tcp_no_delay);
-            RegisterP2PHeartbeatRpcService(*heartbeat_server,
-                                           wrapped_service);
-            auto heartbeat_result = heartbeat_server->async_start();
-            if (heartbeat_result.hasResult()) {
-                LOG(ERROR) << "Failed to start heartbeat RPC server: "
-                           << heartbeat_result.result().value();
-                return -1;
-            }
-        }
-
-        auto server_result = server.async_start();
-        if (server_result.hasResult()) {
-            LOG(ERROR) << "Failed to start P2P master RPC server: "
-                       << server_result.result().value();
-            heartbeat_server.reset();
+    std::optional<coro_rpc::coro_rpc_server> heartbeat_server;
+    if (dedicated_heartbeat) {
+        heartbeat_server.emplace(
+            std::max<uint32_t>(1u, config.rpc.heartbeat_thread_num),
+            config.rpc.heartbeat_port, config.rpc.address,
+            std::chrono::seconds(config.rpc.connection_timeout_seconds),
+            config.rpc.enable_tcp_no_delay);
+        RegisterP2PHeartbeatRpcService(*heartbeat_server, wrapped_service);
+        auto heartbeat_result = heartbeat_server->async_start();
+        if (heartbeat_result.hasResult()) {
+            LOG(ERROR) << "Failed to start heartbeat RPC server: "
+                       << heartbeat_result.result().value();
             return -1;
         }
-        auto error = std::move(server_result).get();
-        LOG(ERROR) << "P2P master RPC server stopped: " << error;
+    }
+
+    auto server_result = server.async_start();
+    if (server_result.hasResult()) {
+        LOG(ERROR) << "Failed to start P2P master RPC server: "
+                   << server_result.result().value();
         heartbeat_server.reset();
-        return 0;
+        return -1;
     }
+    auto error = std::move(server_result).get();
+    LOG(ERROR) << "P2P master RPC server stopped: " << error;
+    heartbeat_server.reset();
+    return 0;
+}
 
-    int RunStandalone() {
+}  // namespace
+
+int P2PMaster::RunStandalone() {
+    auto server = CreateRpcServer(config_);
+    auto active_service = CreateActiveService(config_, /*view_version=*/0);
+    return RunActiveRpcServers(config_, *server, *active_service);
+}
+
+int P2PMaster::RunWithHA() {
+    const std::string local_endpoint =
+        config_.rpc.address + ":" + std::to_string(config_.rpc.port);
+    while (true) {
         auto server = CreateRpcServer(config_);
-        auto active_service = CreateActiveService(/*view_version=*/0);
-        return RunActiveRpcServers(*server, *active_service);
-    }
-
-    int RunWithHA() {
-        const std::string local_endpoint =
-            config_.rpc.address + ":" + std::to_string(config_.rpc.port);
-        while (true) {
-            auto server = CreateRpcServer(config_);
-            auto master_view_result = CreateMasterView(config_);
-            if (!master_view_result) {
-                LOG(ERROR) << "Failed to initialize P2P master view: "
-                           << toString(master_view_result.error());
-                return -1;
-            }
-            auto master_view = std::move(master_view_result.value());
-
+        std::unique_ptr<P2PMasterView> master_view;
+        ErrorCode connect_result = ErrorCode::INVALID_PARAMS;
+        if (config_.ha.election_backend == ElectionBackend::REDIS) {
 #ifdef STORE_USE_REDIS
-            std::unique_ptr<RedisMasterRegistryHeartbeat>
-                master_registry_heartbeat;
-            std::string master_instance_id;
-            if (config_.oplog.enabled &&
-                config_.ha.election_backend == ElectionBackend::REDIS) {
-                master_instance_id = GenerateMasterInstanceId();
-                RedisMasterRegistryEntry entry;
-                entry.instance_id = master_instance_id;
-                entry.master_endpoint = local_endpoint;
-                entry.snapshot_endpoint = BuildSnapshotEndpoint(
-                    local_endpoint, config_.ha.snapshot_service_port,
-                    config_.ha.snapshot_service_endpoint);
-                entry.role = "starting";
-                entry.snapshot_ready = false;
-                master_registry_heartbeat =
-                    std::make_unique<RedisMasterRegistryHeartbeat>(
-                        std::make_unique<RedisMasterRegistry>(
-                            config_.cluster_id, config_.redis.endpoint,
-                            config_.redis.username, config_.redis.password,
-                            config_.redis.db_index),
-                        std::move(entry));
-                if (master_registry_heartbeat->Start() != ErrorCode::OK) {
-                    LOG(WARNING)
-                        << "Initial Redis master registration failed; "
-                           "heartbeat will retry";
-                }
-            }
-#endif
-
-            std::unique_ptr<P2PHotStandbyService> standby;
-            if (config_.oplog.enabled) {
-                P2PHotStandbyConfig standby_config;
-                standby_config.cluster_id = config_.cluster_id;
-                standby_config.oplog_store_type =
-                    ParseOpLogStoreType(config_.oplog.store_type);
-                standby_config.oplog_store_root_dir = config_.oplog.data_dir;
-                standby_config.redis_endpoint = config_.redis.endpoint;
-                standby_config.redis_username = config_.redis.username;
-                standby_config.redis_password = config_.redis.password;
-                standby_config.redis_db_index = config_.redis.db_index;
-                standby_config.snapshot_service_port =
-                    static_cast<uint16_t>(
-                        config_.ha.snapshot_service_port);
-#ifdef STORE_USE_REDIS
-                standby_config.master_instance_id = master_instance_id;
-#endif
-                standby_config.snapshot_chunk_size =
-                    config_.ha.snapshot_chunk_size;
-                if (!config_.ha.snapshot_sources.empty()) {
-                    standby_config.snapshot_source_endpoints = splitString(
-                        config_.ha.snapshot_sources, ',', /*trim=*/true);
-                }
-                standby =
-                    std::make_unique<P2PHotStandbyService>(standby_config);
-                auto start_result = standby->Start();
-                if (start_result != ErrorCode::OK) {
-                    LOG(ERROR) << "Failed to start P2P standby: "
-                               << toString(start_result);
-                    return -1;
-                }
-#ifdef STORE_USE_REDIS
-                if (master_registry_heartbeat) {
-                    master_registry_heartbeat->SetAppliedSequenceProvider(
-                        [service = standby.get()] {
-                            return service->GetLatestAppliedSequenceId();
-                        });
-                    master_registry_heartbeat->SetSnapshotReadyProvider(
-                        [service = standby.get()] {
-                            return service->IsReadyForSnapshot();
-                        });
-                    master_registry_heartbeat->UpdateRole(
-                        "standby", standby->IsReadyForSnapshot());
-                }
-#endif
-            }
-
-            EtcdLeaseId lease_id = 0;
-            ViewVersionId view_version = 0;
-            master_view->ElectLeader(local_endpoint, view_version, lease_id);
-            auto keep_leader_thread = std::thread(
-                [server = server.get(), view = master_view.get(), lease_id] {
-                    view->KeepLeader(lease_id);
-                    server->stop();
-                });
-            std::this_thread::sleep_for(std::chrono::seconds(
-                master_view->GetLeaderLeaseTTLSeconds()));
-
-#ifdef STORE_USE_REDIS
-            if (master_registry_heartbeat) {
-                master_registry_heartbeat->UpdateRole("promoting", false);
-            }
-#endif
-
-            std::optional<P2PStandbyMetadataStore::ExportedMetadata>
-                promoted_metadata;
-            uint64_t promoted_sequence_id = 0;
-            if (standby) {
-                auto promote_result = standby->Promote();
-                if (promote_result != ErrorCode::OK) {
-                    LOG(ERROR) << "Failed to promote P2P standby: "
-                               << toString(promote_result);
-                    master_view->CancelKeepAlive(lease_id);
-                    keep_leader_thread.join();
-                    return -1;
-                }
-                promoted_sequence_id =
-                    standby->GetLatestAppliedSequenceId();
-                promoted_metadata = standby->ExportMetadata();
-#ifdef STORE_USE_REDIS
-                if (master_registry_heartbeat) {
-                    master_registry_heartbeat->SetAppliedSequenceProvider({});
-                    master_registry_heartbeat->SetSnapshotReadyProvider({});
-                }
-#endif
-                standby.reset();
-            }
-
-            auto active_service = CreateActiveService(view_version);
-            if (promoted_metadata.has_value()) {
-                auto restore_result =
-                    active_service->GetMasterService()
-                        .RestoreFromStandbyMetadata(promoted_metadata.value(),
-                                                    promoted_sequence_id);
-                if (restore_result != ErrorCode::OK) {
-                    LOG(ERROR) << "Failed to restore promoted metadata: "
-                               << toString(restore_result);
-                    master_view->CancelKeepAlive(lease_id);
-                    keep_leader_thread.join();
-                    return -1;
-                }
-            }
-
-#ifdef STORE_USE_REDIS
-            auto mark_primary = [&master_registry_heartbeat] {
-                if (master_registry_heartbeat) {
-                    master_registry_heartbeat->UpdateRole("primary", false);
-                }
-            };
-            const int run_result = RunActiveRpcServers(
-                *server, *active_service, std::move(mark_primary));
+            auto redis_view = std::make_unique<P2PRedisMasterView>(
+                config_.cluster_id, config_.redis.endpoint,
+                config_.redis.password, config_.redis.db_index,
+                config_.redis.master_view_ttl_seconds,
+                config_.redis.heartbeat_interval_seconds,
+                config_.redis.username);
+            connect_result = redis_view->Connect();
+            master_view = std::move(redis_view);
 #else
-            const int run_result =
-                RunActiveRpcServers(*server, *active_service);
+            LOG(ERROR) << "Redis election requires STORE_USE_REDIS";
+            return -1;
 #endif
-            master_view->CancelKeepAlive(lease_id);
-            keep_leader_thread.join();
-            if (run_result != 0) {
-                return run_result;
+        } else {
+            auto etcd_view = std::make_unique<P2PEtcdMasterView>();
+            connect_result = etcd_view->Connect(config_.ha.etcd_endpoints);
+            master_view = std::move(etcd_view);
+        }
+        if (connect_result != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to initialize P2P master view: "
+                       << toString(connect_result);
+            return -1;
+        }
+
+#ifdef STORE_USE_REDIS
+        std::unique_ptr<RedisMasterRegistryHeartbeat> master_registry_heartbeat;
+        std::string master_instance_id;
+        if (config_.oplog.enabled &&
+            config_.ha.election_backend == ElectionBackend::REDIS) {
+            master_instance_id = GenerateMasterInstanceId();
+            RedisMasterRegistryEntry entry;
+            entry.instance_id = master_instance_id;
+            entry.master_endpoint = local_endpoint;
+            entry.snapshot_endpoint = BuildSnapshotEndpoint(
+                local_endpoint, config_.ha.snapshot_service_port,
+                config_.ha.snapshot_service_endpoint);
+            entry.role = "starting";
+            entry.snapshot_ready = false;
+            master_registry_heartbeat =
+                std::make_unique<RedisMasterRegistryHeartbeat>(
+                    std::make_unique<RedisMasterRegistry>(
+                        config_.cluster_id, config_.redis.endpoint,
+                        config_.redis.username, config_.redis.password,
+                        config_.redis.db_index),
+                    std::move(entry));
+            if (master_registry_heartbeat->Start() != ErrorCode::OK) {
+                LOG(WARNING) << "Initial Redis master registration failed; "
+                                "heartbeat will retry";
             }
         }
-        return 0;
+#endif
+
+        std::unique_ptr<P2PHotStandbyService> standby;
+        if (config_.oplog.enabled) {
+            P2PHotStandbyConfig standby_config;
+            standby_config.cluster_id = config_.cluster_id;
+            standby_config.oplog_store_type =
+                ParseOpLogStoreType(config_.oplog.store_type);
+            standby_config.oplog_store_root_dir = config_.oplog.data_dir;
+            standby_config.redis_endpoint = config_.redis.endpoint;
+            standby_config.redis_username = config_.redis.username;
+            standby_config.redis_password = config_.redis.password;
+            standby_config.redis_db_index = config_.redis.db_index;
+            standby_config.snapshot_service_port =
+                static_cast<uint16_t>(config_.ha.snapshot_service_port);
+#ifdef STORE_USE_REDIS
+            standby_config.master_instance_id = master_instance_id;
+#endif
+            standby_config.snapshot_chunk_size = config_.ha.snapshot_chunk_size;
+            if (!config_.ha.snapshot_sources.empty()) {
+                standby_config.snapshot_source_endpoints = splitString(
+                    config_.ha.snapshot_sources, ',', /*trim=*/true);
+            }
+            standby = std::make_unique<P2PHotStandbyService>(standby_config);
+            auto start_result = standby->Start();
+            if (start_result != ErrorCode::OK) {
+                LOG(ERROR) << "Failed to start P2P standby: "
+                           << toString(start_result);
+                return -1;
+            }
+#ifdef STORE_USE_REDIS
+            if (master_registry_heartbeat) {
+                master_registry_heartbeat->SetAppliedSequenceProvider(
+                    [service = standby.get()] {
+                        return service->GetLatestAppliedSequenceId();
+                    });
+                master_registry_heartbeat->SetSnapshotReadyProvider(
+                    [service = standby.get()] {
+                        return service->IsReadyForSnapshot();
+                    });
+                master_registry_heartbeat->UpdateRole(
+                    "standby", standby->IsReadyForSnapshot());
+            }
+#endif
+        }
+
+        EtcdLeaseId lease_id = 0;
+        ViewVersionId view_version = 0;
+        master_view->ElectLeader(local_endpoint, view_version, lease_id);
+        auto keep_leader_thread = std::thread(
+            [server = server.get(), view = master_view.get(), lease_id] {
+                view->KeepLeader(lease_id);
+                server->stop();
+            });
+        std::this_thread::sleep_for(
+            std::chrono::seconds(master_view->GetLeaderLeaseTTLSeconds()));
+
+#ifdef STORE_USE_REDIS
+        if (master_registry_heartbeat) {
+            master_registry_heartbeat->UpdateRole("promoting", false);
+        }
+#endif
+
+        std::optional<P2PStandbyMetadataStore::ExportedMetadata>
+            promoted_metadata;
+        uint64_t promoted_sequence_id = 0;
+        if (standby) {
+            auto promote_result = standby->Promote();
+            if (promote_result != ErrorCode::OK) {
+                LOG(ERROR) << "Failed to promote P2P standby: "
+                           << toString(promote_result);
+                master_view->CancelKeepAlive(lease_id);
+                keep_leader_thread.join();
+                return -1;
+            }
+            promoted_sequence_id = standby->GetLatestAppliedSequenceId();
+            promoted_metadata = standby->ExportMetadata();
+#ifdef STORE_USE_REDIS
+            if (master_registry_heartbeat) {
+                master_registry_heartbeat->SetAppliedSequenceProvider({});
+                master_registry_heartbeat->SetSnapshotReadyProvider({});
+            }
+#endif
+            standby.reset();
+        }
+
+        auto active_service = CreateActiveService(config_, view_version);
+        if (promoted_metadata.has_value()) {
+            auto restore_result =
+                active_service->GetMasterService().RestoreFromStandbyMetadata(
+                    promoted_metadata.value(), promoted_sequence_id);
+            if (restore_result != ErrorCode::OK) {
+                LOG(ERROR) << "Failed to restore promoted metadata: "
+                           << toString(restore_result);
+                master_view->CancelKeepAlive(lease_id);
+                keep_leader_thread.join();
+                return -1;
+            }
+        }
+
+#ifdef STORE_USE_REDIS
+        auto mark_primary = [&master_registry_heartbeat] {
+            if (master_registry_heartbeat) {
+                master_registry_heartbeat->UpdateRole("primary", false);
+            }
+        };
+        const int run_result = RunActiveRpcServers(
+            config_, *server, *active_service, std::move(mark_primary));
+#else
+        const int run_result =
+            RunActiveRpcServers(config_, *server, *active_service);
+#endif
+        master_view->CancelKeepAlive(lease_id);
+        keep_leader_thread.join();
+        if (run_result != 0) {
+            return run_result;
+        }
     }
+    return 0;
+}
 
-    P2PMasterConfig config_;
-};
+P2PMaster::P2PMaster(const P2PMasterConfig& config) : config_(config) {}
 
-P2PMaster::P2PMaster(const P2PMasterConfig& config)
-    : impl_(std::make_unique<Impl>(config)) {}
-
-P2PMaster::~P2PMaster() = default;
-
-int P2PMaster::Run() { return impl_->Run(); }
+int P2PMaster::Run() {
+    return config_.ha.enabled ? RunWithHA() : RunStandalone();
+}
 
 }  // namespace mooncake

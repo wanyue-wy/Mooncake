@@ -1,9 +1,6 @@
 #pragma once
 
-#include <memory>
 #include <string>
-
-#include <ylt/util/tl/expected.hpp>
 
 #include "types.h"
 #ifdef STORE_USE_REDIS
@@ -17,8 +14,7 @@ class P2PMasterView {
     virtual ~P2PMasterView() = default;
 
     virtual void ElectLeader(const std::string& master_address,
-                             ViewVersionId& version,
-                             EtcdLeaseId& lease_id) = 0;
+                             ViewVersionId& version, EtcdLeaseId& lease_id) = 0;
     virtual void KeepLeader(EtcdLeaseId lease_id) = 0;
     virtual void CancelKeepAlive(EtcdLeaseId lease_id) = 0;
     virtual int GetLeaderLeaseTTLSeconds() const = 0;
@@ -31,8 +27,7 @@ class P2PEtcdMasterView final : public P2PMasterView {
     P2PEtcdMasterView();
 
     ErrorCode Connect(const std::string& etcd_endpoints);
-    void ElectLeader(const std::string& master_address,
-                     ViewVersionId& version,
+    void ElectLeader(const std::string& master_address, ViewVersionId& version,
                      EtcdLeaseId& lease_id) override;
     void KeepLeader(EtcdLeaseId lease_id) override;
     void CancelKeepAlive(EtcdLeaseId lease_id) override;
@@ -54,8 +49,7 @@ class P2PRedisMasterView final : public P2PMasterView {
                        const std::string& username = "");
 
     ErrorCode Connect();
-    void ElectLeader(const std::string& master_address,
-                     ViewVersionId& version,
+    void ElectLeader(const std::string& master_address, ViewVersionId& version,
                      EtcdLeaseId& lease_id) override;
     void KeepLeader(EtcdLeaseId lease_id) override;
     void CancelKeepAlive(EtcdLeaseId lease_id) override;
@@ -68,15 +62,5 @@ class P2PRedisMasterView final : public P2PMasterView {
     int ttl_seconds_;
 };
 #endif
-
-tl::expected<std::unique_ptr<P2PMasterView>, ErrorCode>
-CreateP2PEtcdMasterView(const std::string& etcd_endpoints);
-
-tl::expected<std::unique_ptr<P2PMasterView>, ErrorCode>
-CreateP2PRedisMasterView(const std::string& cluster_id,
-                         const std::string& redis_endpoint,
-                         const std::string& password, int db_index,
-                         int ttl_seconds, int heartbeat_interval_seconds,
-                         const std::string& username = "");
 
 }  // namespace mooncake

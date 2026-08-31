@@ -255,9 +255,7 @@ endif()
 
 # Master binary
 add_executable(mooncake_master master.cpp)
-add_executable(mooncake_master_p2p
-    p2p/master/p2p_master_main.cpp
-    p2p/master/p2p_master_config_loader.cpp)
+add_executable(mooncake_master_p2p p2p/master/p2p_master_main.cpp)
 
 set(MASTER_EXTRA_INCS)
 set(MASTER_EXTRA_LIBS)

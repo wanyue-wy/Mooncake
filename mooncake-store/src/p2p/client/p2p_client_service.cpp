@@ -84,11 +84,13 @@ void P2PClientService::SetMasterDiscoveryConfig(
 ErrorCode P2PClientService::ResolveMasterAddress(
     const std::string& master_server_entry, std::string& master_address) {
     if (!master_view_ || master_view_entry_ != master_server_entry) {
-        tl::expected<std::unique_ptr<P2PMasterView>, ErrorCode> view =
-            tl::make_unexpected(ErrorCode::INVALID_PARAMS);
+        std::unique_ptr<P2PMasterView> view;
+        ErrorCode connect_result = ErrorCode::INVALID_PARAMS;
         if (master_server_entry.rfind(kEtcdPrefix, 0) == 0) {
-            view = CreateP2PEtcdMasterView(
+            auto etcd_view = std::make_unique<P2PEtcdMasterView>();
+            connect_result = etcd_view->Connect(
                 master_server_entry.substr(std::strlen(kEtcdPrefix)));
+            view = std::move(etcd_view);
         } else if (master_server_entry.rfind(kRedisPrefix, 0) == 0) {
             if (master_discovery_config_.redis_db_index < 0 ||
                 master_discovery_config_.redis_master_view_ttl_sec <= 0 ||
@@ -98,7 +100,8 @@ ErrorCode P2PClientService::ResolveMasterAddress(
                 LOG(ERROR) << "Invalid Redis master discovery config";
                 return ErrorCode::INVALID_PARAMS;
             }
-            view = CreateP2PRedisMasterView(
+#ifdef STORE_USE_REDIS
+            auto redis_view = std::make_unique<P2PRedisMasterView>(
                 master_discovery_config_.redis_cluster_id,
                 master_server_entry.substr(std::strlen(kRedisPrefix)),
                 master_discovery_config_.redis_password,
@@ -106,14 +109,20 @@ ErrorCode P2PClientService::ResolveMasterAddress(
                 master_discovery_config_.redis_master_view_ttl_sec,
                 master_discovery_config_.redis_heartbeat_interval_sec,
                 master_discovery_config_.redis_username);
+            connect_result = redis_view->Connect();
+            view = std::move(redis_view);
+#else
+            LOG(ERROR) << "Redis discovery requires STORE_USE_REDIS";
+            return ErrorCode::INVALID_PARAMS;
+#endif
         }
-        if (!view) {
+        if (connect_result != ErrorCode::OK) {
             LOG(ERROR) << "Failed to create P2P master view for "
                        << master_server_entry << ": "
-                       << toString(view.error());
-            return view.error();
+                       << toString(connect_result);
+            return connect_result;
         }
-        master_view_ = std::move(view.value());
+        master_view_ = std::move(view);
         master_view_entry_ = master_server_entry;
     }
 

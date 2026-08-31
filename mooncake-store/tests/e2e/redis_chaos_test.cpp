@@ -19,7 +19,6 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include "e2e_utils.h"
@@ -389,12 +388,11 @@ class RedisChaosTest : public ::testing::Test {
 
     void SetUp() override {
         CleanupRedisKeys();
-        auto master_view = CreateP2PRedisMasterView(
+        master_view_ = std::make_unique<P2PRedisMasterView>(
             FLAGS_redis_cluster_id, FLAGS_redis_endpoint, FLAGS_redis_password,
             /*db_index=*/0, FLAGS_redis_master_view_ttl_sec,
             FLAGS_redis_heartbeat_interval_sec, FLAGS_redis_username);
-        ASSERT_TRUE(master_view.has_value());
-        master_view_ = std::move(master_view.value());
+        ASSERT_EQ(master_view_->Connect(), ErrorCode::OK);
 
         MasterRunnerConfig config;
         config.election_backend = "redis";
