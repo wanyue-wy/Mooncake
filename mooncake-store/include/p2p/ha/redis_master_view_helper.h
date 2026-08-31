@@ -29,23 +29,11 @@ class RedisMasterViewHelper : public MasterViewHelper {
 
     ErrorCode Connect();
 
-    void ElectLeader(const std::string& master_address, ViewVersionId& version,
-                     EtcdLeaseId& lease_id);
-
-    void KeepLeader(EtcdLeaseId lease_id);
-
-    void CancelKeepAlive(EtcdLeaseId lease_id);
-
-    int GetLeaderLeaseTTLSeconds() const;
-
-    void CancelElection();
-
     ErrorCode GetMasterView(std::string& master_address,
                             ViewVersionId& version) override;
 
    private:
     RedisElectionHelper redis_election_helper_;
-    int ttl_sec_;
 };
 #endif  // STORE_USE_REDIS
 

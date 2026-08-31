@@ -126,10 +126,14 @@ bool MasterProcessHandler::start() {
             master_path_,
             "--enable-ha=true",
             rpc_address_arg,
-            rpc_port_arg,
-            "--deployment-mode=" + config_.deployment_mode,
-            "--max-client-per-key=" +
-                std::to_string(config_.max_client_per_key)};
+            rpc_port_arg};
+
+        // The executable selects the architecture. Centralized intentionally
+        // does not expose P2P-only flags.
+        if (config_.deployment_mode == "P2P") {
+            args.emplace_back("--max-client-per-key=" +
+                              std::to_string(config_.max_client_per_key));
+        }
 
         if (config_.enable_oplog) {
             args.emplace_back("--enable-oplog=true");
