@@ -1,0 +1,942 @@
+#include <gflags/gflags.h>
+#include <glog/logging.h>
+
+#include <chrono>  // For std::chrono
+#include <csignal>
+#include <memory>  // For std::unique_ptr
+#include <optional>
+#include <thread>  // For std::thread
+#include <ylt/coro_rpc/coro_rpc_server.hpp>
+#include <ylt/easylog/record.hpp>
+
+#include "default_config.h"
+#include "p2p/ha/p2p_master_service_supervisor.h"
+#include "http_metadata_server.h"
+#include "p2p/master/p2p_rpc_service.h"
+#include "types.h"
+
+#include "master_config.h"
+
+using namespace coro_rpc;
+using namespace async_simple;
+using namespace async_simple::coro;
+
+DEFINE_string(config_path, "", "master service config file path");
+DEFINE_int32(port, 50051,
+             "Port for master service to listen on (deprecated, use rpc_port)");
+DEFINE_int32(
+    max_threads, 4,
+    "Maximum number of threads to use (deprecated, use rpc_thread_num)");
+DEFINE_bool(enable_metric_reporting, true, "Enable periodic metric reporting");
+DEFINE_int32(metrics_port, 9003, "Port for HTTP metrics server to listen on");
+DEFINE_uint64(default_kv_lease_ttl, mooncake::DEFAULT_DEFAULT_KV_LEASE_TTL,
+              "Default lease time for kv objects");
+DEFINE_uint64(default_kv_soft_pin_ttl, mooncake::DEFAULT_KV_SOFT_PIN_TTL_MS,
+              "Default soft pin ttl for kv objects");
+DEFINE_bool(allow_evict_soft_pinned_objects,
+            mooncake::DEFAULT_ALLOW_EVICT_SOFT_PINNED_OBJECTS,
+            "Whether to allow eviction of soft pinned objects during eviction");
+DEFINE_double(eviction_ratio, mooncake::DEFAULT_EVICTION_RATIO,
+              "Ratio of objects to evict when storage space is full");
+DEFINE_double(eviction_high_watermark_ratio,
+              mooncake::DEFAULT_EVICTION_HIGH_WATERMARK_RATIO,
+              "Ratio of high watermark trigger eviction");
+// RPC server configuration parameters (new, preferred)
+// TODO: deprecate port and max_threads in the future
+DEFINE_int32(rpc_thread_num, 0,
+             "Number of threads for RPC server (0 = use max_threads, preferred "
+             "over max_threads)");
+DEFINE_int32(
+    rpc_port, 0,
+    "Port for RPC server to listen on (0 = use port, preferred over port)");
+DEFINE_string(rpc_address, "0.0.0.0",
+              "Address for RPC server to bind to, required in HA mode");
+DEFINE_int32(rpc_conn_timeout_seconds, 0,
+             "Connection timeout in seconds (0 = no timeout)");
+DEFINE_bool(rpc_enable_tcp_no_delay, true,
+            "Enable TCP_NODELAY for RPC connections");
+DEFINE_uint32(heartbeat_rpc_port, 0,
+              "Port for a dedicated heartbeat RPC server (0 = disabled, "
+              "heartbeat served on the main RPC server as a legacy fallback)");
+DEFINE_uint32(heartbeat_rpc_thread_num, 1,
+              "Thread count for the dedicated heartbeat RPC server");
+DEFINE_validator(eviction_ratio, [](const char* flagname, double value) {
+    if (value < 0.0 || value > 1.0) {
+        LOG(FATAL) << "Eviction ratio must be between 0.0 and 1.0";
+        return false;
+    }
+    return true;
+});
+DEFINE_bool(enable_ha, false,
+            "Enable high availability, which depends on etcd");
+DEFINE_bool(enable_offload, false, "Enable offload availability");
+DEFINE_string(
+    etcd_endpoints, "",
+    "Endpoints of ETCD server, separated by semicolon, required in HA mode");
+DEFINE_int64(client_ttl, mooncake::DEFAULT_CLIENT_LIVE_TTL_SEC,
+             "How long a client is considered alive after the last heartbeat");
+DEFINE_int64(
+    client_crashed_ttl, mooncake::DEFAULT_CLIENT_CRASHED_TTL_SEC,
+    "How long a client is considered crashed after the last heartbeat");
+
+DEFINE_string(root_fs_dir, mooncake::DEFAULT_ROOT_FS_DIR,
+              "Root directory for storage backend, used in HA mode");
+DEFINE_int64(global_file_segment_size,
+             mooncake::DEFAULT_GLOBAL_FILE_SEGMENT_SIZE,
+             "Size of global NFS/3FS segment in bytes");
+DEFINE_string(cluster_id, mooncake::DEFAULT_CLUSTER_ID,
+              "Cluster ID for the master service, used for kvcache persistence "
+              "in HA mode");
+
+DEFINE_string(memory_allocator, "offset",
+              "Memory allocator for global segments, cachelib | offset");
+DEFINE_bool(enable_http_metadata_server, false,
+            "Enable HTTP metadata server instead of etcd");
+DEFINE_int32(http_metadata_server_port, 8080,
+             "Port for HTTP metadata server to listen on");
+DEFINE_string(http_metadata_server_host, "0.0.0.0",
+              "Host for HTTP metadata server to bind to");
+
+DEFINE_uint64(put_start_discard_timeout_sec,
+              mooncake::DEFAULT_PUT_START_DISCARD_TIMEOUT,
+              "Timeout for discarding uncompleted PutStart operations");
+DEFINE_uint64(put_start_release_timeout_sec,
+              mooncake::DEFAULT_PUT_START_RELEASE_TIMEOUT,
+              "Timeout for releasing space allocated in uncompleted PutStart "
+              "operations");
+DEFINE_bool(enable_disk_eviction, true,
+            "Enable disk eviction feature for storage backend (default: true)");
+DEFINE_uint64(
+    quota_bytes, 0,
+    "Quota for storage backend in bytes (0 = use default 90% of capacity)");
+DEFINE_uint64(
+    max_client_per_key, 1,
+    "Maximum number of client owners per key in P2P mode (0 = no limit)");
+
+// Task manager configuration
+DEFINE_uint32(max_total_finished_tasks, 10000,
+              "Maximum number of finished tasks to keep in memory");
+DEFINE_uint32(max_total_pending_tasks, 10000,
+              "Maximum number of pending tasks to keep in memory");
+DEFINE_uint32(max_total_processing_tasks, 10000,
+              "Maximum number of processing tasks to keep in memory");
+DEFINE_uint64(pending_task_timeout_sec, 300,
+              "Timeout in seconds for pending tasks (0 = no timeout)");
+DEFINE_uint64(processing_task_timeout_sec, 300,
+              "Timeout in seconds for processing tasks (0 = no timeout)");
+
+DEFINE_string(cxl_path, mooncake::DEFAULT_CXL_PATH,
+              "DAX device path for CXL memory");
+DEFINE_uint64(cxl_size, mooncake::DEFAULT_CXL_SIZE, "CXL memory size in bytes");
+DEFINE_bool(enable_cxl, false, "Whether to enable CXL memory support");
+
+DEFINE_bool(enable_oplog, false, "Enable OpLog recording for master metadata");
+DEFINE_string(oplog_store_type, "localfs",
+              "OpLog store backend type. Currently supports localfs");
+DEFINE_string(oplog_data_dir, "/tmp/mooncake_oplog",
+              "Root directory for localfs OpLog data");
+DEFINE_uint64(oplog_async_queue_max_entries, 100000,
+              "Maximum number of queued/in-flight asynchronous OpLogs");
+DEFINE_string(oplog_async_queue_overflow_mode, "reject",
+              "Async OpLog queue overflow mode: reject or bypass");
+DEFINE_uint64(oplog_best_effort_max_retries, 3,
+              "Maximum Redis attempts for best-effort OpLogs");
+DEFINE_uint32(standby_snapshot_service_port, 0,
+              "RPC port used to serve Standby metadata snapshots; 0 disables");
+DEFINE_string(standby_snapshot_service_endpoint, "",
+              "Optional snapshot endpoint override; by default it is derived "
+              "from the Master endpoint and snapshot service port");
+DEFINE_string(standby_snapshot_sources, "",
+              "Optional comma-separated snapshot source override; by default "
+              "sources are discovered from the Redis Master registry");
+DEFINE_uint32(standby_snapshot_chunk_size, 256,
+              "Maximum metadata records per Standby snapshot RPC chunk");
+
+// Redis election backend configuration
+DEFINE_string(election_backend, "etcd",
+              "Election backend for HA leader election: 'etcd' (default) or "
+              "'redis' (P2P HA)");
+DEFINE_string(redis_endpoint, "",
+              "Redis endpoint for election (required when "
+              "election_backend=redis), e.g. '10.0.0.1:6379'");
+DEFINE_string(redis_username, "", "Redis ACL username (empty = one-arg AUTH)");
+DEFINE_string(redis_password, "", "Redis AUTH password (empty = no auth)");
+DEFINE_int32(redis_db_index, 0, "Redis database index (default: 0)");
+DEFINE_int32(
+    redis_master_view_ttl_sec, 4,
+    "TTL in seconds for the leader key in Redis election (default: 4)");
+DEFINE_int32(redis_heartbeat_interval_sec, 1,
+             "KeepLeader heartbeat interval in seconds for Redis election "
+             "(default: 1, should be < ttl)");
+void InitMasterConf(const mooncake::DefaultConfig& default_config,
+                    mooncake::MasterConfig& master_config) {
+    // Initialize the master service configuration from the default config
+    default_config.GetBool("enable_cxl", &master_config.enable_cxl,
+                           FLAGS_enable_cxl);
+    default_config.GetString("cxl_path", &master_config.cxl_path,
+                             FLAGS_cxl_path);
+    default_config.GetUInt64("cxl_size", &master_config.cxl_size,
+                             FLAGS_cxl_size);
+    default_config.GetBool("enable_metric_reporting",
+                           &master_config.enable_metric_reporting,
+                           FLAGS_enable_metric_reporting);
+    default_config.GetUInt32("metrics_port", &master_config.metrics_port,
+                             FLAGS_metrics_port);
+    default_config.GetUInt32("rpc_port", &master_config.rpc_port,
+                             FLAGS_rpc_port);
+    default_config.GetUInt32("rpc_thread_num", &master_config.rpc_thread_num,
+                             FLAGS_rpc_thread_num);
+    default_config.GetString("rpc_address", &master_config.rpc_address,
+                             FLAGS_rpc_address);
+    default_config.GetInt32("rpc_conn_timeout_seconds",
+                            &master_config.rpc_conn_timeout_seconds,
+                            FLAGS_rpc_conn_timeout_seconds);
+    default_config.GetBool("rpc_enable_tcp_no_delay",
+                           &master_config.rpc_enable_tcp_no_delay,
+                           FLAGS_rpc_enable_tcp_no_delay);
+    default_config.GetUInt32("heartbeat_rpc_port",
+                             &master_config.heartbeat_rpc_port,
+                             FLAGS_heartbeat_rpc_port);
+    default_config.GetUInt32("heartbeat_rpc_thread_num",
+                             &master_config.heartbeat_rpc_thread_num,
+                             FLAGS_heartbeat_rpc_thread_num);
+    default_config.GetUInt64("default_kv_lease_ttl",
+                             &master_config.default_kv_lease_ttl,
+                             FLAGS_default_kv_lease_ttl);
+    default_config.GetUInt64("default_kv_soft_pin_ttl",
+                             &master_config.default_kv_soft_pin_ttl,
+                             FLAGS_default_kv_soft_pin_ttl);
+    default_config.GetBool("allow_evict_soft_pinned_objects",
+                           &master_config.allow_evict_soft_pinned_objects,
+                           FLAGS_allow_evict_soft_pinned_objects);
+    default_config.GetDouble("eviction_ratio", &master_config.eviction_ratio,
+                             FLAGS_eviction_ratio);
+    default_config.GetDouble("eviction_high_watermark_ratio",
+                             &master_config.eviction_high_watermark_ratio,
+                             FLAGS_eviction_high_watermark_ratio);
+    default_config.GetInt64("client_live_ttl_sec",
+                            &master_config.client_live_ttl_sec,
+                            FLAGS_client_ttl);
+    default_config.GetInt64("client_crashed_ttl_sec",
+                            &master_config.client_crashed_ttl_sec, -1);
+
+    default_config.GetBool("enable_ha", &master_config.enable_ha,
+                           FLAGS_enable_ha);
+    default_config.GetBool("enable_oplog", &master_config.enable_oplog,
+                           FLAGS_enable_oplog);
+    default_config.GetString("oplog_store_type",
+                             &master_config.oplog_store_type,
+                             FLAGS_oplog_store_type);
+    default_config.GetString("oplog_data_dir", &master_config.oplog_data_dir,
+                             FLAGS_oplog_data_dir);
+    default_config.GetUInt64("oplog_async_queue_max_entries",
+                             &master_config.oplog_async_queue_max_entries,
+                             FLAGS_oplog_async_queue_max_entries);
+    default_config.GetString("oplog_async_queue_overflow_mode",
+                             &master_config.oplog_async_queue_overflow_mode,
+                             FLAGS_oplog_async_queue_overflow_mode);
+    default_config.GetUInt64("oplog_best_effort_max_retries",
+                             &master_config.oplog_best_effort_max_retries,
+                             FLAGS_oplog_best_effort_max_retries);
+    default_config.GetUInt32("standby_snapshot_service_port",
+                             &master_config.standby_snapshot_service_port,
+                             FLAGS_standby_snapshot_service_port);
+    default_config.GetString("standby_snapshot_service_endpoint",
+                             &master_config.standby_snapshot_service_endpoint,
+                             FLAGS_standby_snapshot_service_endpoint);
+    default_config.GetString("standby_snapshot_sources",
+                             &master_config.standby_snapshot_sources,
+                             FLAGS_standby_snapshot_sources);
+    default_config.GetUInt32("standby_snapshot_chunk_size",
+                             &master_config.standby_snapshot_chunk_size,
+                             FLAGS_standby_snapshot_chunk_size);
+    default_config.GetBool("enable_offload", &master_config.enable_offload,
+                           FLAGS_enable_offload);
+    default_config.GetString("etcd_endpoints", &master_config.etcd_endpoints,
+                             FLAGS_etcd_endpoints);
+    default_config.GetString("cluster_id", &master_config.cluster_id,
+                             FLAGS_cluster_id);
+    default_config.GetString("root_fs_dir", &master_config.root_fs_dir,
+                             FLAGS_root_fs_dir);
+    default_config.GetInt64("global_file_segment_size",
+                            &master_config.global_file_segment_size,
+                            FLAGS_global_file_segment_size);
+    default_config.GetString("memory_allocator",
+                             &master_config.memory_allocator,
+                             FLAGS_memory_allocator);
+    default_config.GetBool("enable_http_metadata_server",
+                           &master_config.enable_http_metadata_server,
+                           FLAGS_enable_http_metadata_server);
+    default_config.GetUInt32("http_metadata_server_port",
+                             &master_config.http_metadata_server_port,
+                             FLAGS_http_metadata_server_port);
+    default_config.GetString("http_metadata_server_host",
+                             &master_config.http_metadata_server_host,
+                             FLAGS_http_metadata_server_host);
+    default_config.GetUInt64("put_start_discard_timeout_sec",
+                             &master_config.put_start_discard_timeout_sec,
+                             FLAGS_put_start_discard_timeout_sec);
+    default_config.GetUInt64("put_start_release_timeout_sec",
+                             &master_config.put_start_release_timeout_sec,
+                             FLAGS_put_start_release_timeout_sec);
+    default_config.GetBool("enable_disk_eviction",
+                           &master_config.enable_disk_eviction,
+                           FLAGS_enable_disk_eviction);
+    default_config.GetUInt64("quota_bytes", &master_config.quota_bytes,
+                             FLAGS_quota_bytes);
+    default_config.GetUInt32("max_total_finished_tasks",
+                             &master_config.max_total_finished_tasks,
+                             FLAGS_max_total_finished_tasks);
+    default_config.GetUInt32("max_total_pending_tasks",
+                             &master_config.max_total_pending_tasks,
+                             FLAGS_max_total_pending_tasks);
+    default_config.GetUInt32("max_total_processing_tasks",
+                             &master_config.max_total_processing_tasks,
+                             FLAGS_max_total_processing_tasks);
+    default_config.GetUInt64("pending_task_timeout_sec",
+                             &master_config.pending_task_timeout_sec,
+                             FLAGS_pending_task_timeout_sec);
+    default_config.GetUInt64("processing_task_timeout_sec",
+                             &master_config.processing_task_timeout_sec,
+                             FLAGS_processing_task_timeout_sec);
+    default_config.GetUInt64("max_client_per_key",
+                             &master_config.max_client_per_key,
+                             FLAGS_max_client_per_key);
+
+    // Redis election backend configuration
+    default_config.GetString("election_backend",
+                             &master_config.election_backend,
+                             FLAGS_election_backend);
+    default_config.GetString("redis_endpoint", &master_config.redis_endpoint,
+                             FLAGS_redis_endpoint);
+    default_config.GetString("redis_username", &master_config.redis_username,
+                             FLAGS_redis_username);
+    default_config.GetString("redis_password", &master_config.redis_password,
+                             FLAGS_redis_password);
+    default_config.GetInt32("redis_db_index", &master_config.redis_db_index,
+                            FLAGS_redis_db_index);
+    default_config.GetInt32("redis_master_view_ttl_sec",
+                            &master_config.redis_master_view_ttl_sec,
+                            FLAGS_redis_master_view_ttl_sec);
+    default_config.GetInt32("redis_heartbeat_interval_sec",
+                            &master_config.redis_heartbeat_interval_sec,
+                            FLAGS_redis_heartbeat_interval_sec);
+}
+void LoadConfigFromCmdline(mooncake::MasterConfig& master_config,
+                           bool conf_set) {
+    if (FLAGS_max_threads != 4) {  // 4 is the default value
+        LOG(WARNING) << "max_threads is deprecated, use rpc_thread_num instead";
+    }
+    if (FLAGS_port != 50051) {  // 50051 is the default value
+        LOG(WARNING) << "port is deprecated, use rpc_port instead";
+    }
+    int server_thread_num =
+        std::min(FLAGS_max_threads,
+                 static_cast<int>(std::thread::hardware_concurrency()));
+
+    // Handle backward compatibility for RPC configuration
+    // Determine RPC server thread number with compatibility warnings
+    // TODO: remove this in the future
+    size_t rpc_thread_num;
+    if (FLAGS_rpc_thread_num > 0) {
+        rpc_thread_num = static_cast<size_t>(FLAGS_rpc_thread_num);
+        if (FLAGS_max_threads != 4) {  // 4 is the default value
+            LOG(WARNING) << "Both rpc_thread_num and max_threads are set. "
+                         << "Using rpc_thread_num=" << FLAGS_rpc_thread_num
+                         << ". Please migrate to use rpc_thread_num only.";
+        }
+        master_config.rpc_thread_num = rpc_thread_num;
+    } else {
+        if (!conf_set) {
+            master_config.rpc_thread_num = server_thread_num;
+        }
+    }
+
+    // Determine RPC server port with compatibility warnings
+    int rpc_port;
+    if (FLAGS_rpc_port > 0) {
+        rpc_port = FLAGS_rpc_port;
+        if (FLAGS_port != 50051) {  // 50051 is the default value
+            LOG(WARNING) << "Both rpc_port and port are set. "
+                         << "Using rpc_port=" << FLAGS_rpc_port
+                         << ". Please migrate to use rpc_port only.";
+        }
+        master_config.rpc_port = rpc_port;
+    } else {
+        if (!conf_set) {
+            master_config.rpc_port = FLAGS_port;
+        }
+    }
+
+    google::CommandLineFlagInfo info;
+    if ((google::GetCommandLineFlagInfo("enable_cxl", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.enable_cxl = FLAGS_enable_cxl;
+    }
+    if ((google::GetCommandLineFlagInfo("cxl_path", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.cxl_path = FLAGS_cxl_path;
+    }
+    if ((google::GetCommandLineFlagInfo("cxl_size", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.cxl_size = FLAGS_cxl_size;
+    }
+    if ((google::GetCommandLineFlagInfo("rpc_address", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.rpc_address = FLAGS_rpc_address;
+    }
+    if ((google::GetCommandLineFlagInfo("rpc_conn_timeout_seconds", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.rpc_conn_timeout_seconds = FLAGS_rpc_conn_timeout_seconds;
+    }
+    if ((google::GetCommandLineFlagInfo("rpc_enable_tcp_no_delay", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.rpc_enable_tcp_no_delay = FLAGS_rpc_enable_tcp_no_delay;
+    }
+    if ((google::GetCommandLineFlagInfo("heartbeat_rpc_port", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.heartbeat_rpc_port = FLAGS_heartbeat_rpc_port;
+    }
+    if ((google::GetCommandLineFlagInfo("heartbeat_rpc_thread_num", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.heartbeat_rpc_thread_num = FLAGS_heartbeat_rpc_thread_num;
+    }
+    if ((google::GetCommandLineFlagInfo("enable_metric_reporting", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.enable_metric_reporting = FLAGS_enable_metric_reporting;
+    }
+    if ((google::GetCommandLineFlagInfo("metrics_port", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.metrics_port = FLAGS_metrics_port;
+    }
+    if ((google::GetCommandLineFlagInfo("default_kv_lease_ttl", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.default_kv_lease_ttl = FLAGS_default_kv_lease_ttl;
+    }
+    if ((google::GetCommandLineFlagInfo("default_kv_soft_pin_ttl", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.default_kv_soft_pin_ttl = FLAGS_default_kv_soft_pin_ttl;
+    }
+    if ((google::GetCommandLineFlagInfo("allow_evict_soft_pinned_objects",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.allow_evict_soft_pinned_objects =
+            FLAGS_allow_evict_soft_pinned_objects;
+    }
+    if ((google::GetCommandLineFlagInfo("eviction_ratio", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.eviction_ratio = FLAGS_eviction_ratio;
+    }
+    if ((google::GetCommandLineFlagInfo("eviction_high_watermark_ratio",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.eviction_high_watermark_ratio =
+            FLAGS_eviction_high_watermark_ratio;
+    }
+    if ((google::GetCommandLineFlagInfo("enable_ha", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.enable_ha = FLAGS_enable_ha;
+    }
+    if ((google::GetCommandLineFlagInfo("enable_oplog", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.enable_oplog = FLAGS_enable_oplog;
+    }
+    if ((google::GetCommandLineFlagInfo("oplog_store_type", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.oplog_store_type = FLAGS_oplog_store_type;
+    }
+    if ((google::GetCommandLineFlagInfo("oplog_data_dir", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.oplog_data_dir = FLAGS_oplog_data_dir;
+    }
+    if ((google::GetCommandLineFlagInfo("oplog_async_queue_max_entries",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.oplog_async_queue_max_entries =
+            FLAGS_oplog_async_queue_max_entries;
+    }
+    if ((google::GetCommandLineFlagInfo("oplog_async_queue_overflow_mode",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.oplog_async_queue_overflow_mode =
+            FLAGS_oplog_async_queue_overflow_mode;
+    }
+    if ((google::GetCommandLineFlagInfo("oplog_best_effort_max_retries",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.oplog_best_effort_max_retries =
+            FLAGS_oplog_best_effort_max_retries;
+    }
+    if ((google::GetCommandLineFlagInfo("standby_snapshot_service_port",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.standby_snapshot_service_port =
+            FLAGS_standby_snapshot_service_port;
+    }
+    if ((google::GetCommandLineFlagInfo("standby_snapshot_service_endpoint",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.standby_snapshot_service_endpoint =
+            FLAGS_standby_snapshot_service_endpoint;
+    }
+    if ((google::GetCommandLineFlagInfo("standby_snapshot_sources", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.standby_snapshot_sources = FLAGS_standby_snapshot_sources;
+    }
+    if ((google::GetCommandLineFlagInfo("standby_snapshot_chunk_size", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.standby_snapshot_chunk_size =
+            FLAGS_standby_snapshot_chunk_size;
+    }
+    if ((google::GetCommandLineFlagInfo("enable_offload", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.enable_offload = FLAGS_enable_offload;
+    }
+    if ((google::GetCommandLineFlagInfo("etcd_endpoints", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.etcd_endpoints = FLAGS_etcd_endpoints;
+    }
+    if ((google::GetCommandLineFlagInfo("client_live_ttl_sec", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.client_live_ttl_sec = FLAGS_client_ttl;
+    }
+    if (google::GetCommandLineFlagInfo("client_crashed_ttl", &info) &&
+        !info.is_default) {
+        master_config.client_crashed_ttl_sec = FLAGS_client_crashed_ttl;
+    }
+    if ((google::GetCommandLineFlagInfo("cluster_id", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.cluster_id = FLAGS_cluster_id;
+    }
+    if ((google::GetCommandLineFlagInfo("root_fs_dir", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.root_fs_dir = FLAGS_root_fs_dir;
+    }
+    if ((google::GetCommandLineFlagInfo("global_file_segment_size", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.global_file_segment_size = FLAGS_global_file_segment_size;
+    }
+    if ((google::GetCommandLineFlagInfo("memory_allocator", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.memory_allocator = FLAGS_memory_allocator;
+    }
+    if ((google::GetCommandLineFlagInfo("enable_http_metadata_server", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.enable_http_metadata_server =
+            FLAGS_enable_http_metadata_server;
+    }
+    if ((google::GetCommandLineFlagInfo("http_metadata_server_port", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.http_metadata_server_port =
+            FLAGS_http_metadata_server_port;
+    }
+    if ((google::GetCommandLineFlagInfo("http_metadata_server_host", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.http_metadata_server_host =
+            FLAGS_http_metadata_server_host;
+    }
+    if ((google::GetCommandLineFlagInfo("put_start_discard_timeout_sec",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.put_start_discard_timeout_sec =
+            FLAGS_put_start_discard_timeout_sec;
+    }
+    if ((google::GetCommandLineFlagInfo("put_start_release_timeout_sec",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.put_start_release_timeout_sec =
+            FLAGS_put_start_release_timeout_sec;
+    }
+    if ((google::GetCommandLineFlagInfo("enable_disk_eviction", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.enable_disk_eviction = FLAGS_enable_disk_eviction;
+    }
+    if ((google::GetCommandLineFlagInfo("quota_bytes", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.quota_bytes = FLAGS_quota_bytes;
+    }
+    if ((google::GetCommandLineFlagInfo("max_total_finished_tasks", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.max_total_finished_tasks = FLAGS_max_total_finished_tasks;
+    }
+    if ((google::GetCommandLineFlagInfo("max_total_pending_tasks", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.max_total_pending_tasks = FLAGS_max_total_pending_tasks;
+    }
+    if ((google::GetCommandLineFlagInfo("max_total_processing_tasks", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.max_total_processing_tasks =
+            FLAGS_max_total_processing_tasks;
+    }
+    if ((google::GetCommandLineFlagInfo("pending_task_timeout_sec", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.pending_task_timeout_sec = FLAGS_pending_task_timeout_sec;
+    }
+    if ((google::GetCommandLineFlagInfo("processing_task_timeout_sec", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.processing_task_timeout_sec =
+            FLAGS_processing_task_timeout_sec;
+    }
+    if ((google::GetCommandLineFlagInfo("max_client_per_key", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.max_client_per_key = FLAGS_max_client_per_key;
+    }
+
+    // Redis election backend configuration
+    if ((google::GetCommandLineFlagInfo("election_backend", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.election_backend = FLAGS_election_backend;
+    }
+    if ((google::GetCommandLineFlagInfo("redis_endpoint", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.redis_endpoint = FLAGS_redis_endpoint;
+    }
+    if ((google::GetCommandLineFlagInfo("redis_password", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.redis_password = FLAGS_redis_password;
+    }
+    if ((google::GetCommandLineFlagInfo("redis_username", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.redis_username = FLAGS_redis_username;
+    }
+    if ((google::GetCommandLineFlagInfo("redis_db_index", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.redis_db_index = FLAGS_redis_db_index;
+    }
+    if ((google::GetCommandLineFlagInfo("redis_master_view_ttl_sec", &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.redis_master_view_ttl_sec =
+            FLAGS_redis_master_view_ttl_sec;
+    }
+    if ((google::GetCommandLineFlagInfo("redis_heartbeat_interval_sec",
+                                        &info) &&
+         !info.is_default) ||
+        !conf_set) {
+        master_config.redis_heartbeat_interval_sec =
+            FLAGS_redis_heartbeat_interval_sec;
+    }
+}
+
+// Function to start HTTP metadata server
+std::unique_ptr<mooncake::HttpMetadataServer> StartHttpMetadataServer(
+    int port, const std::string& host) {
+    LOG(INFO) << "Starting C++ HTTP metadata server on " << host << ":" << port;
+
+    try {
+        auto server =
+            std::make_unique<mooncake::HttpMetadataServer>(port, host);
+        server->start();
+
+        // Check if server started successfully
+        if (server->is_running()) {
+            LOG(INFO) << "C++ HTTP metadata server started successfully";
+            return server;
+        } else {
+            LOG(ERROR) << "Failed to start C++ HTTP metadata server";
+            return nullptr;
+        }
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Failed to start C++ HTTP metadata server: " << e.what();
+        return nullptr;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    mooncake::init_ylt_log_level();
+    // Initialize gflags
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+
+    if (!FLAGS_log_dir.empty()) {
+        google::InitGoogleLogging(argv[0]);
+    }
+
+    // Initialize the master configuration
+    mooncake::MasterConfig master_config;
+    std::string conf_path = FLAGS_config_path;
+    if (!conf_path.empty()) {
+        mooncake::DefaultConfig default_config;
+        default_config.SetPath(conf_path);
+        try {
+            default_config.Load();
+        } catch (const std::exception& e) {
+            LOG(FATAL) << "Failed to initialize default config: " << e.what();
+            return 1;
+        }
+        InitMasterConf(default_config, master_config);
+    }
+    LoadConfigFromCmdline(master_config, !conf_path.empty());
+    master_config.ApplyRedisEndpointDefaults();
+    master_config.deployment_mode = "P2P";
+
+    if (master_config.enable_ha) {
+        if (master_config.election_backend != "etcd" &&
+            master_config.election_backend != "redis") {
+            LOG(FATAL) << "Invalid election_backend: "
+                       << master_config.election_backend
+                       << ". Must be 'etcd' or 'redis'";
+            return 1;
+        }
+
+        if (master_config.election_backend == "etcd") {
+            if (master_config.etcd_endpoints.empty()) {
+                LOG(FATAL)
+                    << "Etcd endpoints must be set when enable_ha is true and "
+                       "election_backend is etcd";
+                return 1;
+            }
+        } else {
+#ifndef STORE_USE_REDIS
+            LOG(FATAL) << "Redis election backend requested but "
+                          "STORE_USE_REDIS is not enabled at compile time";
+            return 1;
+#endif
+            if (master_config.redis_endpoint.empty()) {
+                LOG(FATAL)
+                    << "redis_endpoint must be set when election_backend is "
+                       "redis and enable_ha is true";
+                return 1;
+            }
+            if (master_config.redis_master_view_ttl_sec <= 0) {
+                LOG(FATAL)
+                    << "redis_master_view_ttl_sec must be greater than 0";
+                return 1;
+            }
+            if (master_config.redis_heartbeat_interval_sec <= 0) {
+                LOG(FATAL)
+                    << "redis_heartbeat_interval_sec must be greater than 0";
+                return 1;
+            }
+            if (master_config.redis_heartbeat_interval_sec >=
+                master_config.redis_master_view_ttl_sec) {
+                LOG(FATAL) << "redis_heartbeat_interval_sec ("
+                           << master_config.redis_heartbeat_interval_sec
+                           << ") must be less than redis_master_view_ttl_sec ("
+                           << master_config.redis_master_view_ttl_sec << ")";
+                return 1;
+            }
+        }
+    }
+    if (!master_config.enable_ha && !master_config.etcd_endpoints.empty()) {
+        LOG(WARNING)
+            << "Etcd endpoints are set but will not be used in non-HA mode";
+    }
+    if (master_config.memory_allocator != "cachelib" &&
+        master_config.memory_allocator != "offset") {
+        LOG(FATAL) << "Invalid memory allocator: "
+                   << master_config.memory_allocator
+                   << ", must be 'cachelib' or 'offset'";
+        return 1;
+    }
+
+    const char* value = std::getenv("MC_RPC_PROTOCOL");
+    std::string protocol = "tcp";
+    if (value && std::string_view(value) == "rdma") {
+        protocol = "rdma";
+    }
+
+    // Process client_crashed_ttl_sec logic
+    if (master_config.client_crashed_ttl_sec == -1) {
+        // Not set by config file and not set by CLI -> Default to 3x live ttl
+        master_config.client_crashed_ttl_sec =
+            master_config.client_live_ttl_sec * 3;
+    } else {
+        // Explicitly set (by file or CLI) -> Validate
+        if (master_config.client_crashed_ttl_sec <
+            master_config.client_live_ttl_sec) {
+            LOG(FATAL) << "client_crashed_ttl ("
+                       << master_config.client_crashed_ttl_sec
+                       << ") must be >= client_ttl ("
+                       << master_config.client_live_ttl_sec << ")";
+            return 1;
+        }
+    }
+
+    LOG(INFO)
+        << "Master service started on port " << master_config.rpc_port
+        << ", max_threads=" << master_config.rpc_thread_num
+        << ", enable_metric_reporting=" << master_config.enable_metric_reporting
+        << ", metrics_port=" << master_config.metrics_port
+        << ", default_kv_lease_ttl=" << master_config.default_kv_lease_ttl
+        << ", default_kv_soft_pin_ttl=" << master_config.default_kv_soft_pin_ttl
+        << ", allow_evict_soft_pinned_objects="
+        << master_config.allow_evict_soft_pinned_objects
+        << ", eviction_ratio=" << master_config.eviction_ratio
+        << ", eviction_high_watermark_ratio="
+        << master_config.eviction_high_watermark_ratio
+        << ", enable_ha=" << master_config.enable_ha
+        << ", enable_oplog=" << master_config.enable_oplog
+        << ", oplog_store_type=" << master_config.oplog_store_type
+        << ", oplog_data_dir=" << master_config.oplog_data_dir
+        << ", oplog_async_queue_max_entries="
+        << master_config.oplog_async_queue_max_entries
+        << ", oplog_async_queue_overflow_mode="
+        << master_config.oplog_async_queue_overflow_mode
+        << ", oplog_best_effort_max_retries="
+        << master_config.oplog_best_effort_max_retries
+        << ", enable_offload=" << master_config.enable_offload
+        << ", etcd_endpoints=" << master_config.etcd_endpoints
+        << ", client_ttl=" << master_config.client_live_ttl_sec
+        << ", client_crashed_ttl=" << master_config.client_crashed_ttl_sec
+        << ", rpc_thread_num=" << master_config.rpc_thread_num
+        << ", rpc_port=" << master_config.rpc_port
+        << ", rpc_address=" << master_config.rpc_address
+        << ", rpc_conn_timeout_seconds="
+        << master_config.rpc_conn_timeout_seconds
+        << ", rpc_enable_tcp_no_delay=" << master_config.rpc_enable_tcp_no_delay
+        << ", heartbeat_rpc_port=" << master_config.heartbeat_rpc_port
+        << ", heartbeat_rpc_thread_num="
+        << master_config.heartbeat_rpc_thread_num
+        << ", rpc protocol=" << protocol
+        << ", cluster_id=" << master_config.cluster_id
+        << ", root_fs_dir=" << master_config.root_fs_dir
+        << ", global_file_segment_size="
+        << master_config.global_file_segment_size
+        << ", memory_allocator=" << master_config.memory_allocator
+        << ", enable_http_metadata_server="
+        << master_config.enable_http_metadata_server
+        << ", http_metadata_server_port="
+        << master_config.http_metadata_server_port
+        << ", http_metadata_server_host="
+        << master_config.http_metadata_server_host
+        << ", put_start_discard_timeout_sec="
+        << master_config.put_start_discard_timeout_sec
+        << ", put_start_release_timeout_sec="
+        << master_config.put_start_release_timeout_sec
+        << ", max_total_finished_tasks="
+        << master_config.max_total_finished_tasks
+        << ", max_total_pending_tasks=" << master_config.max_total_pending_tasks
+        << ", max_total_processing_tasks="
+        << master_config.max_total_processing_tasks
+        << ", pending_task_timeout_sec="
+        << master_config.pending_task_timeout_sec
+        << ", processing_task_timeout_sec="
+        << master_config.processing_task_timeout_sec
+        << ", enable_cxl=" << master_config.enable_cxl
+        << ", cxl_path=" << master_config.cxl_path
+        << ", cxl_size=" << master_config.cxl_size
+        << ", max_client_per_key=" << master_config.max_client_per_key
+        << ", deployment_mode=" << master_config.deployment_mode;
+
+    // Start HTTP metadata server if enabled
+    std::unique_ptr<mooncake::HttpMetadataServer> http_metadata_server;
+    if (master_config.enable_http_metadata_server) {
+        http_metadata_server =
+            StartHttpMetadataServer(master_config.http_metadata_server_port,
+                                    master_config.http_metadata_server_host);
+
+        if (!http_metadata_server) {
+            LOG(FATAL) << "Failed to start HTTP metadata server";
+            return 1;
+        }
+
+        // Give the server some time to start
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    if (master_config.enable_ha) {
+        mooncake::P2PMasterServiceSupervisor supervisor(
+            mooncake::MasterServiceSupervisorConfig{master_config});
+        return supervisor.Start();
+    } else {
+        // version is not used in non-HA mode, just pass a dummy value
+        mooncake::ViewVersionId version = 0;
+        coro_rpc::coro_rpc_server server(
+            master_config.rpc_thread_num, master_config.rpc_port,
+            master_config.rpc_address,
+            std::chrono::seconds(master_config.rpc_conn_timeout_seconds),
+            master_config.rpc_enable_tcp_no_delay);
+        const char* value = std::getenv("MC_RPC_PROTOCOL");
+        if (value && std::string_view(value) == "rdma") {
+            server.init_ibv();
+        }
+
+        // When a dedicated heartbeat port is configured, serve Heartbeat on a
+        // separate coro_rpc_server with its own thread pool so heavy metadata
+        // RPCs on the main server cannot head-of-line-block heartbeats.
+        const bool dedicated_heartbeat =
+            master_config.heartbeat_rpc_port > 0;
+        const bool main_includes_heartbeat = !dedicated_heartbeat;
+        std::optional<coro_rpc::coro_rpc_server> heartbeat_server;
+        if (dedicated_heartbeat) {
+            heartbeat_server.emplace(
+                std::max<uint32_t>(1u, master_config.heartbeat_rpc_thread_num),
+                master_config.heartbeat_rpc_port, master_config.rpc_address,
+                std::chrono::seconds(master_config.rpc_conn_timeout_seconds),
+                master_config.rpc_enable_tcp_no_delay);
+        }
+
+        auto p2p_service =
+            std::make_unique<mooncake::WrappedP2PMasterService>(
+                mooncake::WrappedMasterServiceConfig(master_config, version));
+        p2p_service->init();
+        mooncake::RegisterP2PRpcService(
+            server, *p2p_service,
+            /*include_heartbeat=*/main_includes_heartbeat);
+
+        if (dedicated_heartbeat) {
+            mooncake::RegisterP2PHeartbeatRpcService(*heartbeat_server,
+                                                     *p2p_service);
+            LOG(INFO) << "Starting dedicated heartbeat RPC server on port "
+                      << master_config.heartbeat_rpc_port;
+            auto heartbeat_ec = heartbeat_server->async_start();
+            if (heartbeat_ec.hasResult()) {
+                LOG(ERROR) << "Failed to start heartbeat RPC server: "
+                           << heartbeat_ec.result().value();
+                return -1;
+            }
+        }
+        return server.start();
+    }
+}

@@ -157,6 +157,7 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/ha/oplog/p2p_hot_standby_service.cpp
     p2p/ha/oplog/p2p_standby_snapshot_service.cpp
     p2p/ha/standby_state_machine.cpp
+    p2p/ha/p2p_master_service_supervisor.cpp
     p2p/ha/ha_metric_manager.cpp
     p2p/ha/ha_recovery_manager.cpp
 )
@@ -254,6 +255,7 @@ endif()
 
 # Master binary
 add_executable(mooncake_master master.cpp)
+add_executable(mooncake_master_p2p p2p/master/p2p_master_main.cpp)
 
 set(MASTER_EXTRA_INCS)
 set(MASTER_EXTRA_LIBS)
@@ -266,7 +268,18 @@ if (STORE_USE_JEMALLOC)
 endif()
 
 target_include_directories(mooncake_master PRIVATE ${MASTER_EXTRA_INCS})
+target_include_directories(mooncake_master_p2p PRIVATE ${MASTER_EXTRA_INCS})
 target_link_libraries(mooncake_master PRIVATE
+    ${MOONCAKE_STORE_LIBS}
+    cachelib_memory_allocator
+    pthread
+    ibverbs
+    mooncake_common
+    ${ETCD_WRAPPER_LIB}
+    ${MASTER_EXTRA_LIBS}
+    asio_shared
+)
+target_link_libraries(mooncake_master_p2p PRIVATE
     ${MOONCAKE_STORE_LIBS}
     cachelib_memory_allocator
     pthread
@@ -279,10 +292,13 @@ target_link_libraries(mooncake_master PRIVATE
 
 if (STORE_USE_ETCD)
     add_dependencies(mooncake_master build_etcd_wrapper)
+    add_dependencies(mooncake_master_p2p build_etcd_wrapper)
 endif()
 
 target_compile_options(mooncake_master PRIVATE -Os)
 target_link_options(mooncake_master PRIVATE -Os -s)
+target_compile_options(mooncake_master_p2p PRIVATE -Os)
+target_link_options(mooncake_master_p2p PRIVATE -Os -s)
 
 # Client server binary
 add_executable(mooncake_client real_client_main.cpp)
@@ -291,4 +307,5 @@ target_link_libraries(mooncake_client PRIVATE ${MOONCAKE_STORE_LIBS} transfer_en
 target_compile_options(mooncake_client PRIVATE -Os)
 target_link_options(mooncake_client PRIVATE -Os -s)
 
-install(TARGETS mooncake_master mooncake_client DESTINATION bin)
+install(TARGETS mooncake_master mooncake_master_p2p mooncake_client
+        DESTINATION bin)
