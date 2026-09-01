@@ -150,6 +150,10 @@ bool MasterProcessHandler::start() {
             }
         }
 
+        if (!config_.cluster_id.empty()) {
+            args.emplace_back("--cluster-id=" + config_.cluster_id);
+        }
+
         if (config_.election_backend == "redis") {
             args.emplace_back("--election-backend=redis");
             args.emplace_back("--redis-endpoint=" + config_.redis_endpoint);
@@ -166,9 +170,6 @@ bool MasterProcessHandler::start() {
             }
             if (!config_.redis_password.empty()) {
                 args.emplace_back("--redis-password=" + config_.redis_password);
-            }
-            if (!config_.cluster_id.empty()) {
-                args.emplace_back("--cluster-id=" + config_.cluster_id);
             }
         } else {
             args.emplace_back("--etcd-endpoints=" + config_.etcd_endpoints);

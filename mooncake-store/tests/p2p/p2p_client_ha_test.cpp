@@ -98,7 +98,7 @@ TEST(P2PClientHATest, UsesDefaultClusterIdForRedisDiscovery) {
     auto client = MakeClient();
     client.SetMasterDiscoveryConfig(config);
 
-    EXPECT_EQ(client.master_discovery_config_.redis_cluster_id,
+    EXPECT_EQ(client.master_discovery_config_.cluster_id,
               DEFAULT_CLUSTER_ID);
 }
 
@@ -109,7 +109,7 @@ TEST(P2PClientHATest, EmptyClusterIdFallsBackToDefaultClusterId) {
 
     client.SetMasterDiscoveryConfig(config);
 
-    EXPECT_EQ(client.master_discovery_config_.redis_cluster_id,
+    EXPECT_EQ(client.master_discovery_config_.cluster_id,
               DEFAULT_CLUSTER_ID);
 }
 
@@ -124,7 +124,7 @@ TEST(P2PClientHATest, StoresRedisDiscoveryConfig) {
 
     client.SetMasterDiscoveryConfig(config);
 
-    EXPECT_EQ(client.master_discovery_config_.redis_cluster_id,
+    EXPECT_EQ(client.master_discovery_config_.cluster_id,
               config.redis_cluster_id);
     EXPECT_EQ(client.master_discovery_config_.redis_password,
               config.redis_password);
@@ -134,6 +134,18 @@ TEST(P2PClientHATest, StoresRedisDiscoveryConfig) {
               config.redis_master_view_ttl_sec);
     EXPECT_EQ(client.master_discovery_config_.redis_heartbeat_interval_sec,
               config.redis_heartbeat_interval_sec);
+}
+
+TEST(P2PClientHATest, EtcdMasterViewKeyUsesConfiguredClusterId) {
+    EXPECT_EQ(BuildP2PEtcdMasterViewKey("cluster-a"),
+              "mooncake-store/cluster-a/master_view");
+    EXPECT_EQ(BuildP2PEtcdMasterViewKey("cluster-a/"),
+              "mooncake-store/cluster-a/master_view");
+    EXPECT_EQ(
+        BuildP2PEtcdMasterViewKey(""),
+        "mooncake-store/" + std::string(DEFAULT_CLUSTER_ID) + "/master_view");
+    EXPECT_NE(BuildP2PEtcdMasterViewKey("cluster-a"),
+              BuildP2PEtcdMasterViewKey("cluster-b"));
 }
 
 TEST(P2PClientHATest, InvalidRedisDiscoveryConfigReturnsError) {

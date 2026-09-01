@@ -577,7 +577,7 @@ class P2PClientService final : public ClientService {
 
    protected:
     struct MasterDiscoveryConfig {
-        std::string redis_cluster_id = DEFAULT_CLUSTER_ID;
+        std::string cluster_id = DEFAULT_CLUSTER_ID;
         std::string redis_username;
         std::string redis_password;
         int redis_db_index = 0;

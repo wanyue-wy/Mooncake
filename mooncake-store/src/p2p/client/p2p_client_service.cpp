@@ -69,7 +69,7 @@ void P2PClientService::SetMasterDiscoveryConfig(
     const P2PClientConfig& config) {
     master_view_.reset();
     master_view_entry_.clear();
-    master_discovery_config_.redis_cluster_id =
+    master_discovery_config_.cluster_id =
         config.redis_cluster_id.empty() ? DEFAULT_CLUSTER_ID
                                         : config.redis_cluster_id;
     master_discovery_config_.redis_username = config.redis_username;
@@ -87,7 +87,8 @@ ErrorCode P2PClientService::ResolveMasterAddress(
         std::unique_ptr<P2PMasterView> view;
         ErrorCode connect_result = ErrorCode::INVALID_PARAMS;
         if (master_server_entry.rfind(kEtcdPrefix, 0) == 0) {
-            auto etcd_view = std::make_unique<P2PEtcdMasterView>();
+            auto etcd_view = std::make_unique<P2PEtcdMasterView>(
+                master_discovery_config_.cluster_id);
             connect_result = etcd_view->Connect(
                 master_server_entry.substr(std::strlen(kEtcdPrefix)));
             view = std::move(etcd_view);
@@ -102,7 +103,7 @@ ErrorCode P2PClientService::ResolveMasterAddress(
             }
 #ifdef STORE_USE_REDIS
             auto redis_view = std::make_unique<P2PRedisMasterView>(
-                master_discovery_config_.redis_cluster_id,
+                master_discovery_config_.cluster_id,
                 master_server_entry.substr(std::strlen(kRedisPrefix)),
                 master_discovery_config_.redis_password,
                 master_discovery_config_.redis_db_index,

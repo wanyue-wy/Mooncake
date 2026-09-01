@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 
 #include "types.h"
 #ifdef STORE_USE_REDIS
@@ -8,6 +9,8 @@
 #endif
 
 namespace mooncake {
+
+std::string BuildP2PEtcdMasterViewKey(std::string_view cluster_id);
 
 class P2PMasterView {
    public:
@@ -24,7 +27,7 @@ class P2PMasterView {
 
 class P2PEtcdMasterView final : public P2PMasterView {
    public:
-    P2PEtcdMasterView();
+    explicit P2PEtcdMasterView(std::string_view cluster_id);
 
     ErrorCode Connect(const std::string& etcd_endpoints);
     void ElectLeader(const std::string& master_address, ViewVersionId& version,

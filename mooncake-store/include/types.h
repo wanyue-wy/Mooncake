@@ -30,7 +30,6 @@ static constexpr double DEFAULT_EVICTION_HIGH_WATERMARK_RATIO = 0.95;
 static constexpr int64_t ETCD_MASTER_VIEW_LEASE_TTL = 5;          // in seconds
 static constexpr int64_t DEFAULT_DUMMY_CLIENT_LIVE_TTL_SEC = 30;  // in seconds
 static constexpr int64_t DEFAULT_CLIENT_LIVE_TTL_SEC = 10;        // in seconds
-static constexpr int64_t DEFAULT_CLIENT_CRASHED_TTL_SEC = 30;     // in seconds
 constexpr const char* DEFAULT_CLUSTER_ID = "mooncake_cluster";
 static const std::string DEFAULT_CXL_PATH = "/dev/dax0.0";
 static const size_t DEFAULT_CXL_BASE = 0x100000000ULL;

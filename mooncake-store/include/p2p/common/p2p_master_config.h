@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include "p2p/common/p2p_types.h"
 #include "types.h"
 
 namespace mooncake {

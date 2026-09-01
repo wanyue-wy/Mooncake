@@ -189,7 +189,8 @@ int P2PMaster::RunWithHA() {
             return -1;
 #endif
         } else {
-            auto etcd_view = std::make_unique<P2PEtcdMasterView>();
+            auto etcd_view =
+                std::make_unique<P2PEtcdMasterView>(config_.cluster_id);
             connect_result = etcd_view->Connect(config_.ha.etcd_endpoints);
             master_view = std::move(etcd_view);
         }

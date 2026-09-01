@@ -1,26 +1,26 @@
 #include "p2p/ha/p2p_master_view.h"
 
 #include <chrono>
-#include <cstdlib>
-#include <cstring>
 #include <thread>
 
 #include <glog/logging.h>
 
 #include "etcd_helper.h"
+#include "types.h"
 
 namespace mooncake {
 
-P2PEtcdMasterView::P2PEtcdMasterView() {
-    const char* cluster_id_env = std::getenv("MC_STORE_CLUSTER_ID");
-    std::string cluster_id =
-        cluster_id_env != nullptr && std::strlen(cluster_id_env) > 0
-            ? cluster_id_env
-            : "mooncake";
-    if (!cluster_id.empty() && cluster_id.back() != '/') {
-        cluster_id += '/';
+std::string BuildP2PEtcdMasterViewKey(std::string_view cluster_id) {
+    std::string normalized_cluster_id =
+        cluster_id.empty() ? DEFAULT_CLUSTER_ID : std::string(cluster_id);
+    if (normalized_cluster_id.back() != '/') {
+        normalized_cluster_id += '/';
     }
-    master_view_key_ = "mooncake-store/" + cluster_id + "master_view";
+    return "mooncake-store/" + normalized_cluster_id + "master_view";
+}
+
+P2PEtcdMasterView::P2PEtcdMasterView(std::string_view cluster_id)
+    : master_view_key_(BuildP2PEtcdMasterViewKey(cluster_id)) {
     LOG(INFO) << "P2P master view key: " << master_view_key_;
 }
 

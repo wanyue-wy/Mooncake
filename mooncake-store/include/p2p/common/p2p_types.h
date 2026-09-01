@@ -8,6 +8,8 @@
 
 namespace mooncake {
 
+static constexpr int64_t DEFAULT_CLIENT_CRASHED_TTL_SEC = 30;
+
 /**
  * @brief Client health state owned by the P2P master.
  */
