@@ -89,6 +89,14 @@ TEST_F(P2PMasterMetricsTest, SerializeMetricsContentTest) {
               std::string::npos);
     EXPECT_EQ(text.find("master_batch_replica_clear_requests_total"),
               std::string::npos);
+    EXPECT_EQ(text.find("master_get_replica_list_by_regex_requests_total"),
+              std::string::npos);
+    EXPECT_EQ(text.find("master_remove_by_regex_requests_total"),
+              std::string::npos);
+    EXPECT_EQ(text.find("master_remove_all_requests_total"),
+              std::string::npos);
+    EXPECT_EQ(text.find("master_batch_query_ip_requests_total"),
+              std::string::npos);
 }
 
 TEST_F(P2PMasterMetricsTest, SummaryArchTagTest) {
