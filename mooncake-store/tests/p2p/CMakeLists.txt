@@ -22,6 +22,7 @@ add_p2p_store_test(p2p_master_service_test p2p_master_service_test.cpp)
 add_p2p_store_test(p2p_master_http_endpoints_test p2p_master_http_endpoints_test.cpp)
 add_p2p_store_test(p2p_master_metrics_test p2p_master_metrics_test.cpp)
 add_p2p_store_test(p2p_master_config_test p2p_master_config_test.cpp)
+target_link_libraries(p2p_master_config_test PRIVATE mooncake_common)
 add_p2p_store_test(p2p_segment_manager_test p2p_segment_manager_test.cpp)
 add_p2p_store_test(p2p_rpc_protocol_test p2p_rpc_protocol_test.cpp)
 
