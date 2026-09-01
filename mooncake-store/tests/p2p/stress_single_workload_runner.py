@@ -55,8 +55,10 @@ import urllib.request
 import urllib.error
 
 # --- Configuration ---
-# PROJECT_ROOT points to the repository root directory (two levels up from mooncake-store/tests/)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# PROJECT_ROOT points to the repository root directory.
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 MASTER_BIN = os.path.join(PROJECT_ROOT, "build/mooncake-store/src/mooncake_master_p2p")
 TEST_BIN = os.path.join(
     PROJECT_ROOT, "build/mooncake-store/tests/p2p/stress_workload_test_p2p"
