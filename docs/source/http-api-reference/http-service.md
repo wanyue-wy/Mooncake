@@ -10,6 +10,14 @@ The HTTP service serves multiple purposes:
 - **Data Inspection**: Examine stored objects and their replicas
 - **Health Checks**: Service availability and status verification
 
+`mooncake_master_p2p` exposes a separate route-oriented HTTP surface. It keeps
+`/health`, `/metrics`, `/metrics/summary`, `/get_all_keys`, and
+`/get_key_count`, and provides
+`/batch_query_routes?keys=key1,key2`. Each returned route contains
+`client_id`, `segment_id`, `ip_address`, `rpc_port`, and `object_size`, plus an
+aligned `error_codes` array. The P2P master does not expose the centralized
+`/query_key`, `/batch_query_keys`, segment-management, or remove endpoints.
+
 ## HTTP Endpoints
 
 ### Metrics Endpoints
@@ -158,4 +166,3 @@ Basic health check endpoint for service availability verification.
 ```bash
 curl http://localhost:8080/health
 ```
-

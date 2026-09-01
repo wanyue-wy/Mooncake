@@ -21,9 +21,6 @@ struct P2PRegisterClientRequest {
 };
 YLT_REFL(P2PRegisterClientRequest, client_id, segments, ip_address, rpc_port);
 
-// TODO(M8): Replace the lifecycle DTOs below with the final owning P2P
-// protocol types. The current field order is retained during M6 so this change
-// only establishes architecture ownership.
 struct P2PRegisterClientResponse {
     ViewVersionId view_version = 0;
 };

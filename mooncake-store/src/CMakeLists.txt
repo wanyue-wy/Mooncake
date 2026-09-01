@@ -114,9 +114,9 @@ target_link_libraries(mooncake_store
 # links the whole mooncake_store because base-class inheritance is severed only
 # in Phase 2; the leaf-only layering constraint (§3.2) is enforced in Phase 3.
 list(APPEND MOONCAKE_STORE_P2P_SOURCES
+    p2p/master/p2p_master_config_loader.cpp
     p2p/master/p2p_route_table.cpp
     p2p/master/p2p_master_service.cpp
-    p2p/master/p2p_master_client.cpp
     p2p/master/p2p_master_metric_manager.cpp
     p2p/master/p2p_segment_manager.cpp
     p2p/master/p2p_rpc_service.cpp
@@ -165,6 +165,46 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
 
 add_library(mooncake_store_p2p_objects OBJECT ${MOONCAKE_STORE_P2P_SOURCES})
 target_link_libraries(mooncake_store_p2p_objects PUBLIC mooncake_store)
+
+# P2P master/HA objects are isolated from the P2P client data path so the
+# master binary does not pull client schedulers, caches, or facade code through
+# the aggregate object target.
+set(MOONCAKE_STORE_P2P_MASTER_SOURCES
+    p2p/master/p2p_master_config_loader.cpp
+    p2p/master/p2p_route_table.cpp
+    p2p/master/p2p_master_service.cpp
+    p2p/master/p2p_master_client.cpp
+    p2p/master/p2p_master_metric_manager.cpp
+    p2p/master/p2p_segment_manager.cpp
+    p2p/master/p2p_rpc_service.cpp
+    p2p/master/p2p_master.cpp
+    p2p/master/p2p_client_meta.cpp
+    p2p/master/p2p_client_manager.cpp
+    p2p/ha/oplog/oplog_manager.cpp
+    p2p/ha/oplog/oplog_serializer.cpp
+    p2p/ha/oplog/localfs_oplog_store.cpp
+    p2p/ha/oplog/polling_oplog_change_notifier.cpp
+    p2p/ha/oplog/oplog_store_factory.cpp
+    p2p/ha/oplog/oplog_applier.cpp
+    p2p/ha/oplog/oplog_replicator.cpp
+    p2p/ha/oplog/p2p_oplog_types.cpp
+    p2p/ha/oplog/p2p_oplog_applier.cpp
+    p2p/ha/oplog/p2p_standby_metadata_store.cpp
+    p2p/ha/oplog/p2p_hot_standby_service.cpp
+    p2p/ha/oplog/p2p_standby_snapshot_service.cpp
+    p2p/ha/standby_state_machine.cpp
+    p2p/ha/p2p_master_view.cpp
+    p2p/ha/ha_metric_manager.cpp
+)
+if(STORE_USE_REDIS)
+    list(APPEND MOONCAKE_STORE_P2P_MASTER_SOURCES
+        p2p/ha/redis_util.cpp
+        p2p/ha/redis_election_helper.cpp
+        p2p/ha/oplog/redis_oplog_store.cpp)
+endif()
+add_library(mooncake_store_p2p_master_objects OBJECT
+            ${MOONCAKE_STORE_P2P_MASTER_SOURCES})
+target_link_libraries(mooncake_store_p2p_master_objects PUBLIC mooncake_store)
 
 # Keep the standalone P2P library artifact for installation. Internal
 # consumers use the object target above to avoid circular static-library
@@ -271,7 +311,7 @@ endif()
 target_include_directories(mooncake_master PRIVATE ${MASTER_EXTRA_INCS})
 target_include_directories(mooncake_master_p2p PRIVATE ${MASTER_EXTRA_INCS})
 target_link_libraries(mooncake_master PRIVATE
-    ${MOONCAKE_STORE_LIBS}
+    mooncake_store
     cachelib_memory_allocator
     pthread
     ibverbs
@@ -281,7 +321,8 @@ target_link_libraries(mooncake_master PRIVATE
     asio_shared
 )
 target_link_libraries(mooncake_master_p2p PRIVATE
-    ${MOONCAKE_STORE_LIBS}
+    $<TARGET_OBJECTS:mooncake_store_p2p_master_objects>
+    mooncake_store
     cachelib_memory_allocator
     pthread
     ibverbs
