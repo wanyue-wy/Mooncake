@@ -350,21 +350,35 @@ auto P2PMasterRpcService::BatchGetWriteRoute(
 
 auto P2PMasterRpcService::PublishRoute(
     const P2PPublishRouteRequest& request) -> tl::expected<void, ErrorCode> {
-    return master_service_.AddReplica(AddReplicaRequest{
-        .key = request.key,
-        .size = request.object_size,
-        .client_id = request.client_id,
-        .segment_id = request.segment_id,
-    });
+    return execute_rpc(
+        "PublishRoute",
+        [&] {
+            return master_service_.AddReplica(AddReplicaRequest{
+                .key = request.key,
+                .size = request.object_size,
+                .client_id = request.client_id,
+                .segment_id = request.segment_id,
+            });
+        },
+        [&](auto& timer) { timer.LogRequest("key=", request.key); },
+        [] { P2PMasterMetricManager::instance().inc_add_replica_requests(); },
+        [] { P2PMasterMetricManager::instance().inc_add_replica_failures(); });
 }
 
 auto P2PMasterRpcService::WithdrawRoute(
     const P2PWithdrawRouteRequest& request) -> tl::expected<void, ErrorCode> {
-    return master_service_.RemoveReplica(RemoveReplicaRequest{
-        .key = request.key,
-        .client_id = request.client_id,
-        .segment_id = request.segment_id,
-    });
+    return execute_rpc(
+        "WithdrawRoute",
+        [&] {
+            return master_service_.RemoveReplica(RemoveReplicaRequest{
+                .key = request.key,
+                .client_id = request.client_id,
+                .segment_id = request.segment_id,
+            });
+        },
+        [&](auto& timer) { timer.LogRequest("key=", request.key); },
+        [] { P2PMasterMetricManager::instance().inc_remove_replica_requests(); },
+        [] { P2PMasterMetricManager::instance().inc_remove_replica_failures(); });
 }
 
 auto P2PMasterRpcService::BatchWithdrawRoute(

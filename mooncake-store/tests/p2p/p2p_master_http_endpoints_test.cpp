@@ -330,7 +330,7 @@ TEST_F(P2PMasterHttpEndpointsTest, GetAllKeysReturnsExactlyThePopulatedKeySet) {
 }
 
 TEST_F(P2PMasterHttpEndpointsTest,
-       BatchQueryKeysDistinguishesPopulatedAndMissingKeys) {
+       BatchQueryRoutesReturnsDescriptorsAndErrors) {
     const std::string key0 = "batchquery_test_key_0";
     const std::string key1 = "batchquery_test_key_1";
     const std::string missing_key = "batchquery_test_missing_key";
@@ -338,65 +338,47 @@ TEST_F(P2PMasterHttpEndpointsTest,
     AddKey(key0, /*size=*/1024, segment_id_a_);
     AddKey(key1, /*size=*/2048, segment_id_b_);
 
-    auto resp = HttpGet(http_base_url_ + "/batch_query_keys?keys=" + key0 +
+    auto resp = HttpGet(http_base_url_ + "/batch_query_routes?keys=" + key0 +
                         "," + key1 + "," + missing_key);
     ASSERT_EQ(resp.status, 200) << "body=" << resp.resp_body;
 
-    auto parsed =
-        ParseJson<BatchQueryResponse>(resp.resp_body, "/batch_query_keys");
-    ASSERT_TRUE(parsed.success) << "body=" << resp.resp_body;
-    ASSERT_EQ(parsed.data.size(), 3u);
-
-    // Populated keys are reported as ok.
-    ASSERT_EQ(parsed.data.count(key0), 1u);
-    EXPECT_TRUE(parsed.data[key0].ok);
-    EXPECT_TRUE(parsed.data[key0].error.empty());
-    ASSERT_EQ(parsed.data.count(key1), 1u);
-    EXPECT_TRUE(parsed.data[key1].ok);
-    // P2P replicas are proxy replicas (client/segment references), not
-    // memory descriptors, so the endpoint currently emits no buffer values
-    // for them.
-    EXPECT_TRUE(parsed.data[key0].values.empty());
-    EXPECT_TRUE(parsed.data[key1].values.empty());
-
-    // A key that was never populated is reported with the lookup error.
-    ASSERT_EQ(parsed.data.count(missing_key), 1u);
-    EXPECT_FALSE(parsed.data[missing_key].ok);
-    EXPECT_EQ(parsed.data[missing_key].error,
-              toString(ErrorCode::OBJECT_NOT_FOUND));
+    auto parsed = ParseJson<P2PBatchGetReadRouteResponse>(
+        resp.resp_body, "/batch_query_routes");
+    ASSERT_EQ(parsed.responses.size(), 3u);
+    ASSERT_EQ(parsed.error_codes.size(), 3u);
+    EXPECT_EQ(parsed.error_codes[0], ErrorCode::OK);
+    EXPECT_EQ(parsed.error_codes[1], ErrorCode::OK);
+    EXPECT_EQ(parsed.error_codes[2], ErrorCode::OBJECT_NOT_FOUND);
+    ASSERT_EQ(parsed.responses[0].routes.size(), 1u);
+    ASSERT_EQ(parsed.responses[1].routes.size(), 1u);
+    EXPECT_EQ(parsed.responses[0].routes[0].object_size, 1024u);
+    EXPECT_EQ(parsed.responses[1].routes[0].object_size, 2048u);
+    EXPECT_EQ(parsed.responses[0].routes[0].client_id, client_id_);
 
     RemoveKey(key0, segment_id_a_);
     RemoveKey(key1, segment_id_b_);
 
     // Once removed, the same keys must now be reported as missing.
     auto resp_after_remove =
-        HttpGet(http_base_url_ + "/batch_query_keys?keys=" + key0 + "," + key1);
+        HttpGet(http_base_url_ + "/batch_query_routes?keys=" + key0 + "," +
+                key1);
     ASSERT_EQ(resp_after_remove.status, 200)
         << "body=" << resp_after_remove.resp_body;
-    auto parsed_after_remove = ParseJson<BatchQueryResponse>(
-        resp_after_remove.resp_body, "/batch_query_keys after remove");
-    ASSERT_TRUE(parsed_after_remove.success);
-    ASSERT_EQ(parsed_after_remove.data.size(), 2u);
-    for (const auto& key : {key0, key1}) {
-        ASSERT_EQ(parsed_after_remove.data.count(key), 1u);
-        EXPECT_FALSE(parsed_after_remove.data[key].ok)
-            << "removed key " << key << " still reported as present";
-    }
+    auto parsed_after_remove = ParseJson<P2PBatchGetReadRouteResponse>(
+        resp_after_remove.resp_body, "/batch_query_routes after remove");
+    ASSERT_EQ(parsed_after_remove.error_codes.size(), 2u);
+    EXPECT_EQ(parsed_after_remove.error_codes[0], ErrorCode::OBJECT_NOT_FOUND);
+    EXPECT_EQ(parsed_after_remove.error_codes[1], ErrorCode::OBJECT_NOT_FOUND);
 }
 
-TEST_F(P2PMasterHttpEndpointsTest, BatchQueryKeysRejectsEmptyKeyList) {
+TEST_F(P2PMasterHttpEndpointsTest, BatchQueryRoutesRejectsEmptyKeyList) {
     // No query parameter at all.
-    auto resp = HttpGet(http_base_url_ + "/batch_query_keys");
+    auto resp = HttpGet(http_base_url_ + "/batch_query_routes");
     ASSERT_EQ(resp.status, 400) << "body=" << resp.resp_body;
-    auto parsed =
-        ParseJson<BatchQueryResponse>(resp.resp_body, "/batch_query_keys");
-    EXPECT_FALSE(parsed.success);
-    EXPECT_NE(parsed.error.find("No keys provided"), std::string::npos)
-        << "body=" << resp.resp_body;
-    EXPECT_TRUE(parsed.data.empty());
+    EXPECT_NE(resp.resp_body.find("No keys provided"), std::string::npos);
 
     // Empty `keys` query parameter.
-    auto resp_empty = HttpGet(http_base_url_ + "/batch_query_keys?keys=");
+    auto resp_empty = HttpGet(http_base_url_ + "/batch_query_routes?keys=");
     ASSERT_EQ(resp_empty.status, 400) << "body=" << resp_empty.resp_body;
 }
 

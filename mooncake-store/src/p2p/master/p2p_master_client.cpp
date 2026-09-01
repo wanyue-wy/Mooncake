@@ -100,12 +100,19 @@ ErrorCode P2PMasterClient::Connect(const std::string& master_addr) {
         return ErrorCode::HEARTBEAT_ROUTING_MISMATCH;
     }
 
-    auto heartbeat_probe =
-        InvokeVia<&P2PMasterRpcService::ServiceReady, std::string>(
-            heartbeat_accessor_);
-    if (!heartbeat_probe.has_value()) {
-        connected_address_.clear();
-        return heartbeat_probe.error();
+    if (heartbeat_rpc_port_ > 0) {
+        auto heartbeat_probe =
+            InvokeVia<&P2PMasterRpcService::ServiceReady, std::string>(
+                heartbeat_accessor_);
+        if (!heartbeat_probe.has_value() && same_address) {
+            heartbeat_probe =
+                InvokeVia<&P2PMasterRpcService::ServiceReady, std::string>(
+                    heartbeat_accessor_);
+        }
+        if (!heartbeat_probe.has_value()) {
+            connected_address_.clear();
+            return ErrorCode::HEARTBEAT_RPC_UNREACHABLE;
+        }
     }
     return ErrorCode::OK;
 }
