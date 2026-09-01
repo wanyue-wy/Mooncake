@@ -131,7 +131,9 @@ TEST_F(P2PClientManagerTest, UnregisterClientSuccess) {
     std::atomic<int> removal_count{0};
     auto mgr = CreateManager();
     mgr->SetSegmentRemovalCallback(
-        [&removal_count](const UUID& seg_id) { removal_count.fetch_add(1); });
+        [&removal_count](const P2PRouteLocation&) {
+            removal_count.fetch_add(1);
+        });
     mgr->Start();
 
     UUID client_id = {100, 200};
@@ -391,7 +393,9 @@ TEST_F(P2PClientManagerTest, ClientMonitorStatusTransition) {
     const int crash_sec = 4;
     auto mgr = CreateManager(disconnect_sec, crash_sec);
     mgr->SetSegmentRemovalCallback(
-        [&removal_count](const UUID& seg_id) { removal_count.fetch_add(1); });
+        [&removal_count](const P2PRouteLocation&) {
+            removal_count.fetch_add(1);
+        });
     mgr->Start();
 
     UUID client_id = {100, 200};

@@ -281,7 +281,12 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
     auto meta = std::make_shared<P2PClientMeta>(req.client_id, req.ip_address,
                                                 req.rpc_port);
     if (segment_removal_cb_) {
-        meta->SetSegmentRemovalCallback(segment_removal_cb_);
+        meta->SetSegmentRemovalCallback(
+            [callback = segment_removal_cb_, client_id](
+                const UUID& segment_id) {
+                callback(P2PRouteLocation{.client_id = client_id,
+                                          .segment_id = segment_id});
+            });
     }
     for (const auto& segment : req.segments) {
         auto result = meta->MountSegment(segment);
