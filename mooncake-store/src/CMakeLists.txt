@@ -180,6 +180,7 @@ set(MOONCAKE_STORE_P2P_MASTER_SOURCES
     p2p/master/p2p_master.cpp
     p2p/master/p2p_client_meta.cpp
     p2p/master/p2p_client_manager.cpp
+    p2p/client/client_metrics_aggregator.cpp
     p2p/ha/oplog/oplog_manager.cpp
     p2p/ha/oplog/oplog_serializer.cpp
     p2p/ha/oplog/localfs_oplog_store.cpp
