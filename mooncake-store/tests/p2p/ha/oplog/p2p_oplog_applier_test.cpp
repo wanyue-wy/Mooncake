@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <xxhash.h>
 #include <ylt/struct_pack.hpp>
 
 #include "p2p/ha/oplog/p2p_oplog_applier.h"
@@ -12,8 +13,11 @@ OpLogEntry Entry(uint64_t sequence, OpType type, std::string payload = {}) {
     entry.sequence_id = sequence;
     entry.op_type = type;
     entry.payload = std::move(payload);
-    entry.timestamp = std::chrono::system_clock::now();
-    entry.checksum = entry.ComputeChecksum();
+    entry.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now().time_since_epoch())
+                             .count();
+    entry.checksum = static_cast<uint32_t>(
+        XXH32(entry.payload.data(), entry.payload.size(), 0));
     return entry;
 }
 
