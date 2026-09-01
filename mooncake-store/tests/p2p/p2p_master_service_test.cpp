@@ -661,6 +661,34 @@ TEST_F(P2PMasterServiceTest, AddReplicaDuplicate) {
     EXPECT_EQ(ErrorCode::REPLICA_ALREADY_EXISTS, res2.error());
 }
 
+TEST_F(P2PMasterServiceTest, AddReplicaRejectsObjectSizeMismatch) {
+    auto service = CreateService();
+    auto seg1 = MakeP2PSegment("seg1");
+    auto seg2 = MakeP2PSegment("seg2");
+    auto client1 = generate_uuid();
+    auto client2 = generate_uuid();
+    RegisterP2PClient(*service, client1, {seg1}, "10.0.0.1", 50051);
+    RegisterP2PClient(*service, client2, {seg2}, "10.0.0.2", 50052);
+
+    AddReplicaHelper(*service, "key1", 1024, client1, seg1.id);
+    AddReplicaRequest mismatch;
+    mismatch.key = "key1";
+    mismatch.size = 2048;
+    mismatch.client_id = client2;
+    mismatch.segment_id = seg2.id;
+    auto result = service->AddReplica(mismatch);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), ErrorCode::INVALID_PARAMS);
+
+    auto route = service->GetReplicaList("key1");
+    ASSERT_TRUE(route.has_value());
+    EXPECT_EQ(route->replicas.size(), 1);
+    EXPECT_EQ(route->replicas.front()
+                  .get_p2p_proxy_descriptor()
+                  .object_size,
+              1024);
+}
+
 TEST_F(P2PMasterServiceTest, AddReplicaMaxLimit) {
     auto service = CreateService(/* max_client_per_key= */ 2);
     auto seg1 = MakeP2PSegment("seg1");
@@ -865,6 +893,33 @@ TEST_F(P2PMasterServiceTest, UnregisterClientPartialKeepsOtherOwner) {
     EXPECT_EQ(1, get_res.value().replicas.size());
     EXPECT_EQ(client2,
               get_res.value().replicas[0].get_p2p_proxy_descriptor().client_id);
+}
+
+TEST_F(P2PMasterServiceTest,
+       UnregisterClientDoesNotCleanSameSegmentIdOnOtherClient) {
+    auto service = CreateService();
+    const UUID shared_segment_id = generate_uuid();
+    auto seg1 = MakeP2PSegment("seg1");
+    auto seg2 = MakeP2PSegment("seg2");
+    seg1.id = shared_segment_id;
+    seg2.id = shared_segment_id;
+    auto client1 = generate_uuid();
+    auto client2 = generate_uuid();
+    RegisterP2PClient(*service, client1, {seg1}, "10.0.0.1", 50051);
+    RegisterP2PClient(*service, client2, {seg2}, "10.0.0.2", 50052);
+    AddReplicaHelper(*service, "key1", 1024, client1, shared_segment_id);
+    AddReplicaHelper(*service, "key1", 1024, client2, shared_segment_id);
+
+    ASSERT_TRUE(service
+                    ->UnregisterClient(
+                        P2PUnregisterClientRequest{client1, DeploymentMode::P2P})
+                    .has_value());
+
+    auto route = service->GetReplicaList("key1");
+    ASSERT_TRUE(route.has_value());
+    ASSERT_EQ(route->replicas.size(), 1);
+    EXPECT_EQ(route->replicas.front().get_p2p_proxy_descriptor().client_id,
+              client2);
 }
 
 TEST_F(P2PMasterServiceTest, UnregisterClientIdempotent) {
