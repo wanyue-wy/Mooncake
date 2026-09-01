@@ -81,9 +81,9 @@ class AsyncMetadataNotifierTest : public ::testing::Test {
     // Helper: query replicas for a key via the master service directly
     size_t CountReplicas(const std::string& key) {
         auto& svc = master_.GetWrapped().GetMasterService();
-        auto res = svc.GetReplicaList(key);
+        auto res = svc.GetReadRoute(P2PGetReadRouteRequest{.key = key});
         if (!res.has_value()) return 0;
-        return res->replicas.size();
+        return res->routes.size();
     }
 
     static testing::InProcP2PMaster master_;

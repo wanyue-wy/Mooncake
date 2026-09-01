@@ -179,7 +179,7 @@ ErrorCode ClientTestWrapper::Put(const std::string& key,
     // Perform put operation
     ReplicateConfig replicate_config;
     replicate_config.replica_num = 1;
-    WriteConfig config = is_p2p_ ? WriteConfig{WriteRouteRequestConfig{}}
+    WriteConfig config = is_p2p_ ? WriteConfig{P2PWriteRouteConfig{}}
                                  : WriteConfig{replicate_config};
     auto put_result = client_->Put(key, slice_guard.slices_, config);
     return put_result.has_value() ? ErrorCode::OK : put_result.error();

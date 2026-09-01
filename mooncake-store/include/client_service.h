@@ -31,7 +31,7 @@
 
 namespace mooncake {
 
-using WriteConfig = std::variant<ReplicateConfig, WriteRouteRequestConfig>;
+using WriteConfig = std::variant<ReplicateConfig, P2PWriteRouteConfig>;
 
 
 /**

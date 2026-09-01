@@ -128,10 +128,10 @@ TEST_F(RuntimeConfigTest, CentralizedModeReturnsReplicateConfig) {
     EXPECT_FALSE(cfg.with_soft_pin);
 }
 
-TEST_F(RuntimeConfigTest, P2PModeReturnsWriteRouteRequestConfig) {
+TEST_F(RuntimeConfigTest, P2PModeReturnsP2PWriteRouteConfig) {
     auto wc = p2p_store().getDefaultWriteConfig();
-    ASSERT_TRUE(std::holds_alternative<WriteRouteRequestConfig>(wc));
-    auto& cfg = std::get<WriteRouteRequestConfig>(wc);
+    ASSERT_TRUE(std::holds_alternative<P2PWriteRouteConfig>(wc));
+    auto& cfg = std::get<P2PWriteRouteConfig>(wc);
     EXPECT_DOUBLE_EQ(cfg.remote_weight, 0.5);
     EXPECT_DOUBLE_EQ(cfg.local_write_waterline, 0.5);
     EXPECT_TRUE(cfg.top_tier_only);
@@ -187,7 +187,7 @@ TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigPatch) {
     p2p_store().updateWriteConfig(patch);
 
     auto wc = p2p_store().getDefaultWriteConfig();
-    auto& cfg = std::get<WriteRouteRequestConfig>(wc);
+    auto& cfg = std::get<P2PWriteRouteConfig>(wc);
     EXPECT_DOUBLE_EQ(cfg.remote_weight, 0.75);
     EXPECT_TRUE(cfg.top_tier_only);
     EXPECT_EQ(cfg.max_candidates, 5u);
@@ -199,7 +199,7 @@ TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigRemoteWeightClamped) {
     patch["remote_weight"] = 5.0;  // out of range -> clamped to 1.0
     p2p_store().updateWriteConfig(patch);
     EXPECT_DOUBLE_EQ(
-        std::get<WriteRouteRequestConfig>(p2p_store().getDefaultWriteConfig())
+        std::get<P2PWriteRouteConfig>(p2p_store().getDefaultWriteConfig())
             .remote_weight,
         1.0);
 
@@ -207,7 +207,7 @@ TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigRemoteWeightClamped) {
     patch2["remote_weight"] = -1.0;  // out of range -> clamped to 0.0
     p2p_store().updateWriteConfig(patch2);
     EXPECT_DOUBLE_EQ(
-        std::get<WriteRouteRequestConfig>(p2p_store().getDefaultWriteConfig())
+        std::get<P2PWriteRouteConfig>(p2p_store().getDefaultWriteConfig())
             .remote_weight,
         0.0);
 }
@@ -217,7 +217,7 @@ TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigLocalWriteWaterline) {
     patch["local_write_waterline"] = 0.8;
     p2p_store().updateWriteConfig(patch);
     EXPECT_DOUBLE_EQ(
-        std::get<WriteRouteRequestConfig>(p2p_store().getDefaultWriteConfig())
+        std::get<P2PWriteRouteConfig>(p2p_store().getDefaultWriteConfig())
             .local_write_waterline,
         0.8);
 
@@ -226,7 +226,7 @@ TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigLocalWriteWaterline) {
     patch2["local_write_waterline"] = 2.0;
     p2p_store().updateWriteConfig(patch2);
     EXPECT_DOUBLE_EQ(
-        std::get<WriteRouteRequestConfig>(p2p_store().getDefaultWriteConfig())
+        std::get<P2PWriteRouteConfig>(p2p_store().getDefaultWriteConfig())
             .local_write_waterline,
         1.0);
 }
@@ -251,7 +251,7 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigRejectsContradiction) {
         EXPECT_FALSE(store.updateWriteConfig(patch));
     }
     const auto cfg =
-        std::get<WriteRouteRequestConfig>(store.getDefaultWriteConfig());
+        std::get<P2PWriteRouteConfig>(store.getDefaultWriteConfig());
     EXPECT_DOUBLE_EQ(cfg.remote_weight, 0.5);
     EXPECT_DOUBLE_EQ(cfg.local_write_waterline, 0.5);
 }
@@ -263,7 +263,7 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigAllowsValidCombos) {
     patch["local_write_waterline"] = 0.0;
     EXPECT_TRUE(p2p_store().updateWriteConfig(patch));
     const auto cfg1 =
-        std::get<WriteRouteRequestConfig>(p2p_store().getDefaultWriteConfig());
+        std::get<P2PWriteRouteConfig>(p2p_store().getDefaultWriteConfig());
     EXPECT_DOUBLE_EQ(cfg1.remote_weight, 0.5);
     EXPECT_DOUBLE_EQ(cfg1.local_write_waterline, 0.0);
 
@@ -273,7 +273,7 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigAllowsValidCombos) {
     patch2["local_write_waterline"] = 0.8;
     EXPECT_TRUE(p2p_store().updateWriteConfig(patch2));
     const auto cfg2 =
-        std::get<WriteRouteRequestConfig>(p2p_store().getDefaultWriteConfig());
+        std::get<P2PWriteRouteConfig>(p2p_store().getDefaultWriteConfig());
     EXPECT_DOUBLE_EQ(cfg2.remote_weight, 0.0);
     EXPECT_DOUBLE_EQ(cfg2.local_write_waterline, 0.8);
 
@@ -284,7 +284,7 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigAllowsValidCombos) {
     patch3["local_write_waterline"] = 0.0;
     EXPECT_TRUE(p2p_store().updateWriteConfig(patch3));
     const auto cfg3 =
-        std::get<WriteRouteRequestConfig>(p2p_store().getDefaultWriteConfig());
+        std::get<P2PWriteRouteConfig>(p2p_store().getDefaultWriteConfig());
     EXPECT_DOUBLE_EQ(cfg3.remote_weight, 1.0);
     EXPECT_DOUBLE_EQ(cfg3.local_write_waterline, 0.0);
 
@@ -295,19 +295,19 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigAllowsValidCombos) {
     patch4["local_write_waterline"] = 1.0;
     EXPECT_TRUE(p2p_store().updateWriteConfig(patch4));
     const auto cfg4 =
-        std::get<WriteRouteRequestConfig>(p2p_store().getDefaultWriteConfig());
+        std::get<P2PWriteRouteConfig>(p2p_store().getDefaultWriteConfig());
     EXPECT_DOUBLE_EQ(cfg4.remote_weight, 0.0);
     EXPECT_DOUBLE_EQ(cfg4.local_write_waterline, 1.0);
 }
 
 TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigStrategy) {
     Json::Value patch;
-    patch["strategy"] = static_cast<int>(ObjectIterateStrategy::RANDOM);
+    patch["strategy"] = static_cast<int>(P2PClientSelectionStrategy::RANDOM);
     p2p_store().updateWriteConfig(patch);
 
     auto wc2 = p2p_store().getDefaultWriteConfig();
-    auto& cfg2 = std::get<WriteRouteRequestConfig>(wc2);
-    EXPECT_EQ(cfg2.strategy, ObjectIterateStrategy::RANDOM);
+    auto& cfg2 = std::get<P2PWriteRouteConfig>(wc2);
+    EXPECT_EQ(cfg2.strategy, P2PClientSelectionStrategy::RANDOM);
 }
 
 TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigTagFilters) {
@@ -319,7 +319,7 @@ TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigTagFilters) {
     p2p_store().updateWriteConfig(patch);
 
     auto wc3 = p2p_store().getDefaultWriteConfig();
-    auto& cfg3 = std::get<WriteRouteRequestConfig>(wc3);
+    auto& cfg3 = std::get<P2PWriteRouteConfig>(wc3);
     ASSERT_EQ(cfg3.tag_filters.size(), 2u);
     EXPECT_EQ(cfg3.tag_filters[0], "gpu");
 }
@@ -365,7 +365,7 @@ TEST_F(RuntimeConfigTest, PatchPreservesUnmentionedFields) {
     p2p_store().updateWriteConfig(p2);
 
     auto wc = p2p_store().getDefaultWriteConfig();
-    auto& cfg = std::get<WriteRouteRequestConfig>(wc);
+    auto& cfg = std::get<P2PWriteRouteConfig>(wc);
     EXPECT_DOUBLE_EQ(cfg.remote_weight, 0.9);
     EXPECT_EQ(cfg.max_candidates, 7u);
 }
@@ -383,7 +383,7 @@ TEST_F(RuntimeConfigTest, LoadFromJsonBothSections) {
     store.loadFromJson(root);
 
     auto wc = store.getDefaultWriteConfig();
-    auto& wcfg = std::get<WriteRouteRequestConfig>(wc);
+    auto& wcfg = std::get<P2PWriteRouteConfig>(wc);
     EXPECT_DOUBLE_EQ(wcfg.remote_weight, 0.9);
     EXPECT_EQ(wcfg.max_candidates, 3u);
     EXPECT_EQ(store.getDefaultReadConfig().max_candidates, 8u);
@@ -393,7 +393,7 @@ TEST_F(RuntimeConfigTest, LoadFromJsonNullIsNoOp) {
     RuntimeConfigStore store(DeploymentMode::P2P);
     store.loadFromJson(Json::Value());
     auto wc = store.getDefaultWriteConfig();
-    auto& cfg = std::get<WriteRouteRequestConfig>(wc);
+    auto& cfg = std::get<P2PWriteRouteConfig>(wc);
     EXPECT_DOUBLE_EQ(cfg.remote_weight, 0.5);
     EXPECT_EQ(cfg.max_candidates, 2u);
 }
@@ -416,8 +416,8 @@ TEST_F(RuntimeConfigTest, ExportRoundTrip) {
 
     auto wc1 = s1.getDefaultWriteConfig();
     auto wc2 = s2.getDefaultWriteConfig();
-    auto& w1 = std::get<WriteRouteRequestConfig>(wc1);
-    auto& w2 = std::get<WriteRouteRequestConfig>(wc2);
+    auto& w1 = std::get<P2PWriteRouteConfig>(wc1);
+    auto& w2 = std::get<P2PWriteRouteConfig>(wc2);
     EXPECT_EQ(w1.max_candidates, w2.max_candidates);
     EXPECT_DOUBLE_EQ(w1.remote_weight, w2.remote_weight);
     EXPECT_EQ(s1.getDefaultReadConfig().max_candidates,
@@ -571,12 +571,12 @@ TEST_F(RuntimeConfigTest, ApplyPatchIgnoresWrongTypes) {
     store.updateWriteConfig(bad);
 
     auto wc = store.getDefaultWriteConfig();
-    auto& cfg = std::get<WriteRouteRequestConfig>(wc);
+    auto& cfg = std::get<P2PWriteRouteConfig>(wc);
     EXPECT_EQ(cfg.max_candidates, 2u);
     EXPECT_DOUBLE_EQ(cfg.remote_weight, 0.5);
     EXPECT_DOUBLE_EQ(cfg.local_write_waterline, 0.5);
     EXPECT_TRUE(cfg.top_tier_only);
-    EXPECT_EQ(cfg.strategy, ObjectIterateStrategy::CAPACITY_PRIORITY);
+    EXPECT_EQ(cfg.strategy, P2PClientSelectionStrategy::CAPACITY_PRIORITY);
     EXPECT_TRUE(cfg.tag_filters.empty());
     EXPECT_EQ(cfg.priority_limit, 0);
 }
@@ -642,21 +642,21 @@ TEST_F(RuntimeConfigTest, LoadFromJsonArrayIsNoOp) {
     arr.append(1);
     store.loadFromJson(arr);
     auto wc = store.getDefaultWriteConfig();
-    EXPECT_TRUE(std::holds_alternative<WriteRouteRequestConfig>(wc));
+    EXPECT_TRUE(std::holds_alternative<P2PWriteRouteConfig>(wc));
 }
 
 TEST_F(RuntimeConfigTest, LoadFromJsonStringIsNoOp) {
     RuntimeConfigStore store(DeploymentMode::P2P);
     store.loadFromJson(Json::Value("hello"));
     auto wc = store.getDefaultWriteConfig();
-    EXPECT_TRUE(std::holds_alternative<WriteRouteRequestConfig>(wc));
+    EXPECT_TRUE(std::holds_alternative<P2PWriteRouteConfig>(wc));
 }
 
 TEST_F(RuntimeConfigTest, LoadFromJsonNumberIsNoOp) {
     RuntimeConfigStore store(DeploymentMode::P2P);
     store.loadFromJson(Json::Value(42));
     auto wc = store.getDefaultWriteConfig();
-    EXPECT_TRUE(std::holds_alternative<WriteRouteRequestConfig>(wc));
+    EXPECT_TRUE(std::holds_alternative<P2PWriteRouteConfig>(wc));
 }
 
 // ============================================================================
@@ -669,7 +669,7 @@ TEST_F(RuntimeConfigTest, UpdateWriteConfigNonObjectIsNoOp) {
     store.updateWriteConfig(Json::Value(Json::arrayValue));
     store.updateWriteConfig(Json::Value(123));
     auto wc = store.getDefaultWriteConfig();
-    auto& cfg = std::get<WriteRouteRequestConfig>(wc);
+    auto& cfg = std::get<P2PWriteRouteConfig>(wc);
     EXPECT_EQ(cfg.max_candidates, 2u);
 }
 
