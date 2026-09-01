@@ -16,23 +16,23 @@ static constexpr int64_t DEFAULT_CLIENT_CRASHED_TTL_SEC = 30;
  * @brief Client health state owned by the P2P master.
  */
 enum class P2PClientStatus {
-    UNDEFINED = 0,
-    HEALTH,
-    DISCONNECTION,
+    UNREGISTERED = 0,
+    HEALTHY,
+    DISCONNECTED,
     CRASHED,
 };
 
 inline std::ostream& operator<<(std::ostream& os,
                                 P2PClientStatus status) noexcept {
     switch (status) {
-        case P2PClientStatus::HEALTH:
-            return os << "HEALTH";
-        case P2PClientStatus::DISCONNECTION:
-            return os << "DISCONNECTION";
+        case P2PClientStatus::HEALTHY:
+            return os << "HEALTHY";
+        case P2PClientStatus::DISCONNECTED:
+            return os << "DISCONNECTED";
         case P2PClientStatus::CRASHED:
             return os << "CRASHED";
         default:
-            return os << "UNDEFINED";
+            return os << "UNREGISTERED";
     }
 }
 

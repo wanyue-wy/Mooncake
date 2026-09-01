@@ -4,12 +4,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
+
 #include <ylt/util/tl/expected.hpp>
 
 #include "mutex.h"
@@ -21,53 +21,31 @@
 namespace mooncake {
 
 struct P2PClientHealthState {
-    P2PClientStatus status = P2PClientStatus::UNDEFINED;
+    P2PClientStatus status = P2PClientStatus::UNREGISTERED;
     std::chrono::steady_clock::time_point last_heartbeat;
 };
 
-/**
- * @brief Records a P2P client's health state, endpoint and mounted tiers.
- */
+/** @brief One P2P client's health, endpoint and mounted segment state. */
 class P2PClientMeta final {
    public:
-    P2PClientMeta(const UUID& client_id, const std::string& ip_address,
-                  uint16_t rpc_port);
+    P2PClientMeta(const UUID& client_id, std::string ip_address,
+                  uint16_t rpc_port, int64_t disconnect_timeout_sec,
+                  int64_t crash_timeout_sec);
     ~P2PClientMeta();
 
     auto MountSegment(const P2PSegment& segment)
         -> tl::expected<void, ErrorCode>;
     auto UnmountSegment(const UUID& segment_id)
         -> tl::expected<void, ErrorCode>;
-    auto GetSegments() -> tl::expected<std::vector<P2PSegment>, ErrorCode>;
-    auto QuerySegments(const std::string& segment_name)
+    std::vector<P2PSegment> GetSegments() const;
+    auto QuerySegments(const std::string& segment_name) const
         -> tl::expected<std::pair<size_t, size_t>, ErrorCode>;
-    auto QuerySegment(const UUID& segment_id)
-        -> tl::expected<std::shared_ptr<P2PSegment>, ErrorCode>;
-    auto QueryIp(const UUID& client_id)
-        -> tl::expected<std::vector<std::string>, ErrorCode>;
+    auto QuerySegment(const UUID& segment_id) const
+        -> tl::expected<P2PSegment, ErrorCode>;
 
-    using SegmentRemovalCallback = std::function<void(const UUID& segment_id)>;
-    void SetSegmentRemovalCallback(SegmentRemovalCallback cb);
-
-    static void SetTimeouts(int64_t disconnect_sec, int64_t crash_sec);
-
-    /**
-     * @brief Update heartbeat timestamp and health status.
-     * Attention: if client is CRASHED, the heartbeat will not be updated.
-     * @return std::pair<P2PClientStatus, P2PClientStatus> {old_status, new_status}
-     */
     std::pair<P2PClientStatus, P2PClientStatus> Heartbeat();
-
-    /**
-     * @brief Update health status based on the last heartbeat timestamp.
-     * @return std::pair<P2PClientStatus, P2PClientStatus> {old_status, new_status}
-     */
     std::pair<P2PClientStatus, P2PClientStatus> CheckHealth();
-
-    void OnDisconnected();
-    void OnRecovered();
-    void OnCrashed();
-    void RecycleMeta();
+    std::vector<P2PRouteLocation> RecycleSegments();
 
     UUID get_client_id() const { return client_id_; }
     P2PClientHealthState get_health_state() const;
@@ -75,26 +53,18 @@ class P2PClientMeta final {
 
     auto UpdateSegmentUsages(const std::vector<TierUsageInfo>& usages)
         -> SyncSegmentMetaResult;
-
     size_t GetAvailableCapacity() const;
 
     const std::string& get_ip_address() const { return ip_address_; }
     uint16_t get_rpc_port() const { return rpc_port_; }
+    auto QueryIp() const -> tl::expected<std::vector<std::string>, ErrorCode>;
 
-    /**
-     * @brief Evaluate this client as a write-route candidate.
-     *
-     * Performs health check and capacity filtering (tag_filters /
-     * priority_limit / top_tier_only) internally and, on success, returns a
-     * WriteCandidate whose `score` is the raw free ratio (free/total over
-     * eligible tiers).
-     *
-     * @return A populated WriteCandidate when this client is routable;
-     *         std::nullopt when it is not a candidate (unhealthy, no eligible
-     *         tier, or insufficient free capacity).
-     */
+    void MarkRegistered() {
+        registered_.store(true, std::memory_order_release);
+    }
+
     std::optional<WriteCandidate> GetWriteRouteCandidate(
-        const WriteRouteRequest& req);
+        const WriteRouteRequest& req) const;
 
     void SetSyncing(bool syncing) {
         is_syncing_.store(syncing, std::memory_order_release);
@@ -103,50 +73,31 @@ class P2PClientMeta final {
         return is_syncing_.load(std::memory_order_acquire);
     }
 
-   protected:
-    auto InnerStatusCheck() const -> tl::expected<void, ErrorCode>;
-    void InnerUpdateHeartbeat();
-    std::pair<P2PClientStatus, P2PClientStatus> InnerUpdateHealthStatus();
-    std::string HealthToString(P2PClientStatus status) const;
-
-    std::shared_ptr<P2PSegmentManager> GetSegmentManager();
-
    private:
-    /// Free/total capacity over the segments eligible for write-route scoring.
     struct CapacityStat {
         size_t free = 0;
         size_t total = 0;
     };
-    /**
-     * @brief Aggregate free/total over the eligible segments for write-route
-     *        scoring. A segment is eligible when it carries no tag in
-     *        `tag_filters` and its priority is >= `priority_limit`. When
-     *        `top_tier_only` is true, only the highest-priority eligible
-     *        segment(s) contribute (a client may not spill to lower tiers under
-     *        memory pressure). Returns {0,0} when no segment is eligible.
-     */
+
+    auto InnerStatusCheck() const -> tl::expected<void, ErrorCode>;
+    void InnerUpdateHeartbeat();
+    std::pair<P2PClientStatus, P2PClientStatus> InnerUpdateHealthStatus();
+    static std::string HealthToString(P2PClientStatus status);
     CapacityStat GetWriteScoreCapacity(
         const std::vector<std::string>& tag_filters, int priority_limit,
         bool top_tier_only) const;
 
-   protected:
-    static int64_t disconnect_timeout_sec_;
-    static int64_t crash_timeout_sec_;
+    const UUID client_id_;
+    const std::string ip_address_;
+    const uint16_t rpc_port_;
+    const int64_t disconnect_timeout_sec_;
+    const int64_t crash_timeout_sec_;
 
     mutable SharedMutex client_mutex_;
-    UUID client_id_;
     P2PClientHealthState health_state_ GUARDED_BY(client_mutex_);
     std::atomic<bool> recycled_{false};
-
-   private:
-    std::string ip_address_;
-    uint16_t rpc_port_ = 0;
-    std::shared_ptr<P2PSegmentManager> segment_manager_;
-
-    mutable SpinRWLock capacity_mutex_;
-    size_t client_capacity_ GUARDED_BY(capacity_mutex_) = 0;
-    size_t client_usage_ GUARDED_BY(capacity_mutex_) = 0;
-
+    std::atomic<bool> registered_{false};
+    P2PSegmentManager segment_manager_;
     std::atomic<bool> is_syncing_{false};
 };
 
