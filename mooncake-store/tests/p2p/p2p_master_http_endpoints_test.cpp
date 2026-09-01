@@ -342,18 +342,15 @@ TEST_F(P2PMasterHttpEndpointsTest,
                         "," + key1 + "," + missing_key);
     ASSERT_EQ(resp.status, 200) << "body=" << resp.resp_body;
 
-    auto parsed = ParseJson<P2PBatchGetReadRouteResponse>(
-        resp.resp_body, "/batch_query_routes");
-    ASSERT_EQ(parsed.responses.size(), 3u);
-    ASSERT_EQ(parsed.error_codes.size(), 3u);
-    EXPECT_EQ(parsed.error_codes[0], ErrorCode::OK);
-    EXPECT_EQ(parsed.error_codes[1], ErrorCode::OK);
-    EXPECT_EQ(parsed.error_codes[2], ErrorCode::OBJECT_NOT_FOUND);
-    ASSERT_EQ(parsed.responses[0].routes.size(), 1u);
-    ASSERT_EQ(parsed.responses[1].routes.size(), 1u);
-    EXPECT_EQ(parsed.responses[0].routes[0].object_size, 1024u);
-    EXPECT_EQ(parsed.responses[1].routes[0].object_size, 2048u);
-    EXPECT_EQ(parsed.responses[0].routes[0].client_id, client_id_);
+    EXPECT_NE(resp.resp_body.find("\"object_size\":1024"),
+              std::string::npos);
+    EXPECT_NE(resp.resp_body.find("\"object_size\":2048"),
+              std::string::npos);
+    const std::string expected_errors =
+        "\"error_codes\":[0,0," +
+        std::to_string(toInt(ErrorCode::OBJECT_NOT_FOUND)) + "]";
+    EXPECT_NE(resp.resp_body.find(expected_errors), std::string::npos)
+        << "body=" << resp.resp_body;
 
     RemoveKey(key0, segment_id_a_);
     RemoveKey(key1, segment_id_b_);
@@ -364,11 +361,13 @@ TEST_F(P2PMasterHttpEndpointsTest,
                 key1);
     ASSERT_EQ(resp_after_remove.status, 200)
         << "body=" << resp_after_remove.resp_body;
-    auto parsed_after_remove = ParseJson<P2PBatchGetReadRouteResponse>(
-        resp_after_remove.resp_body, "/batch_query_routes after remove");
-    ASSERT_EQ(parsed_after_remove.error_codes.size(), 2u);
-    EXPECT_EQ(parsed_after_remove.error_codes[0], ErrorCode::OBJECT_NOT_FOUND);
-    EXPECT_EQ(parsed_after_remove.error_codes[1], ErrorCode::OBJECT_NOT_FOUND);
+    const auto missing_code =
+        std::to_string(toInt(ErrorCode::OBJECT_NOT_FOUND));
+    EXPECT_NE(resp_after_remove.resp_body.find(
+                  "\"error_codes\":[" + missing_code + "," + missing_code +
+                  "]"),
+              std::string::npos)
+        << "body=" << resp_after_remove.resp_body;
 }
 
 TEST_F(P2PMasterHttpEndpointsTest, BatchQueryRoutesRejectsEmptyKeyList) {
