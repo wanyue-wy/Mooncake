@@ -106,7 +106,7 @@ class HeartbeatTestClient {
         return client_.Heartbeat(request);
     }
 
-    tl::expected<bool, ErrorCode> ExistKey(std::string_view key) {
+    tl::expected<bool, ErrorCode> RouteExists(std::string_view key) {
         return client_.RouteExists(key);
     }
 
