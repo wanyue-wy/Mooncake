@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <csignal>
 #include <cstdint>
 #include <string>
 #include <string_view>

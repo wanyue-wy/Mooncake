@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <functional>
 #include <iomanip>
