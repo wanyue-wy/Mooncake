@@ -228,18 +228,12 @@ TEST_F(P2PHotStandbyServiceTest, ReplicatesMasterWrittenP2POplog) {
     ASSERT_EQ(client_it->second.segments.size(), 1);
     EXPECT_EQ(client_it->second.segments[0].id, segment_id);
 
-    auto object_it = exported.objects.find("key-a");
-    ASSERT_NE(object_it, exported.objects.end());
-    EXPECT_EQ(object_it->second.size, 1234);
-    ASSERT_EQ(object_it->second.replicas.size(), 1);
-    ASSERT_TRUE(std::holds_alternative<P2PProxyDescriptor>(
-        object_it->second.replicas[0].descriptor_variant));
-    const auto& desc = std::get<P2PProxyDescriptor>(
-        object_it->second.replicas[0].descriptor_variant);
-    EXPECT_EQ(desc.client_id, client_id);
-    EXPECT_EQ(desc.segment_id, segment_id);
-    EXPECT_EQ(desc.ip_address, "127.0.0.1");
-    EXPECT_EQ(desc.rpc_port, 50051);
+    auto object_it = exported.routes.find("key-a");
+    ASSERT_NE(object_it, exported.routes.end());
+    EXPECT_EQ(object_it->second.object_size, 1234);
+    ASSERT_EQ(object_it->second.locations.size(), 1);
+    EXPECT_EQ(object_it->second.locations[0].client_id, client_id);
+    EXPECT_EQ(object_it->second.locations[0].segment_id, segment_id);
 }
 
 TEST_F(P2PHotStandbyServiceTest, BootstrapsFromStandbySnapshotSource) {
@@ -267,10 +261,10 @@ TEST_F(P2PHotStandbyServiceTest, BootstrapsFromStandbySnapshotSource) {
 
     auto exported = target.ExportMetadata();
     ASSERT_NE(exported.clients.find(client_id), exported.clients.end());
-    auto object = exported.objects.find("snapshot-key");
-    ASSERT_NE(object, exported.objects.end());
-    EXPECT_EQ(object->second.size, 8192);
-    ASSERT_EQ(object->second.replicas.size(), 1);
+    auto object = exported.routes.find("snapshot-key");
+    ASSERT_NE(object, exported.routes.end());
+    EXPECT_EQ(object->second.object_size, 8192);
+    ASSERT_EQ(object->second.locations.size(), 1);
 
     target.Stop();
     source.Stop();
@@ -290,7 +284,7 @@ TEST_F(P2PHotStandbyServiceTest,
         source.WaitForAppliedSequence(2, std::chrono::milliseconds(2000)));
 
     P2PStandbySnapshotService snapshot(&source);
-    auto begin = snapshot.BeginSnapshot({kClusterId});
+    auto begin = snapshot.BeginSnapshot({.cluster_id = kClusterId});
     ASSERT_EQ(fromInt(begin.error_code), ErrorCode::OK);
     EXPECT_EQ(begin.baseline_sequence_id, 2);
 
@@ -298,9 +292,10 @@ TEST_F(P2PHotStandbyServiceTest,
     ASSERT_TRUE(
         source.WaitForAppliedSequence(3, std::chrono::milliseconds(2000)));
 
-    auto chunk = snapshot.GetSnapshotChunk(
-        {begin.session_id, /*object_offset=*/0, /*client_offset=*/0,
-         /*limit=*/100});
+    auto chunk = snapshot.GetSnapshotChunk({.session_id = begin.session_id,
+                                            .object_offset = 0,
+                                            .client_offset = 0,
+                                            .limit = 100});
     ASSERT_EQ(fromInt(chunk.error_code), ErrorCode::OK);
     ASSERT_TRUE(chunk.done);
     ASSERT_EQ(chunk.objects.size(), 1);
@@ -316,26 +311,34 @@ TEST_F(P2PHotStandbyServiceTest,
     P2PStandbySnapshotService snapshot(&source);
     std::vector<std::string> session_ids;
     for (size_t i = 0; i < kMaxStandbySnapshotSessions; ++i) {
-        auto begin = snapshot.BeginSnapshot({kClusterId});
+        auto begin = snapshot.BeginSnapshot({.cluster_id = kClusterId});
         ASSERT_EQ(fromInt(begin.error_code), ErrorCode::OK);
         session_ids.push_back(std::move(begin.session_id));
     }
 
-    auto excess_session = snapshot.BeginSnapshot({kClusterId});
+    auto excess_session =
+        snapshot.BeginSnapshot({.cluster_id = kClusterId});
     EXPECT_EQ(fromInt(excess_session.error_code),
               ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS);
 
     auto oversized_chunk = snapshot.GetSnapshotChunk(
-        {session_ids.front(), 0, 0, kMaxStandbySnapshotChunkSize + 1});
+        {.session_id = session_ids.front(),
+         .object_offset = 0,
+         .client_offset = 0,
+         .limit = kMaxStandbySnapshotChunkSize + 1});
     EXPECT_EQ(fromInt(oversized_chunk.error_code), ErrorCode::INVALID_PARAMS);
 
-    auto invalid_offset =
-        snapshot.GetSnapshotChunk({session_ids.front(), 1, 0, 1});
+    auto invalid_offset = snapshot.GetSnapshotChunk(
+        {.session_id = session_ids.front(),
+         .object_offset = 1,
+         .client_offset = 0,
+         .limit = 1});
     EXPECT_EQ(fromInt(invalid_offset.error_code), ErrorCode::INVALID_PARAMS);
 
     ASSERT_EQ(snapshot.EndSnapshot({session_ids.front()}),
               toInt(ErrorCode::OK));
-    auto replacement_session = snapshot.BeginSnapshot({kClusterId});
+    auto replacement_session =
+        snapshot.BeginSnapshot({.cluster_id = kClusterId});
     EXPECT_EQ(fromInt(replacement_session.error_code), ErrorCode::OK);
     source.Stop();
 }
@@ -410,7 +413,7 @@ TEST_F(P2PHotStandbyServiceTest, TrimSignalSwitchesToSnapshotResync) {
     }
     EXPECT_EQ(target.GetState(), StandbyState::WATCHING);
     auto exported = target.ExportMetadata();
-    EXPECT_NE(exported.objects.find("trim-resync-key"), exported.objects.end());
+    EXPECT_NE(exported.routes.find("trim-resync-key"), exported.routes.end());
 }
 
 TEST_F(P2PHotStandbyServiceTest, ReconnectsFromLastAppliedSequence) {
@@ -610,7 +613,7 @@ TEST_F(P2PHotStandbyServiceTest, UnmountSegmentCascadeIsReplayed) {
     standby.Stop();
 
     auto exported = standby.ExportMetadata();
-    EXPECT_EQ(exported.objects.find("key-cascade"), exported.objects.end());
+    EXPECT_EQ(exported.routes.find("key-cascade"), exported.routes.end());
     auto client_it = exported.clients.find(client_id);
     ASSERT_NE(client_it, exported.clients.end());
     EXPECT_TRUE(client_it->second.segments.empty());
@@ -635,9 +638,9 @@ TEST_F(P2PHotStandbyServiceTest, PromoteFinalCatchUpExportsLateEntry) {
     EXPECT_GE(standby.GetLatestAppliedSequenceId(), 2);
 
     auto exported = standby.ExportMetadata();
-    auto object_it = exported.objects.find("key-late");
-    ASSERT_NE(object_it, exported.objects.end());
-    EXPECT_EQ(object_it->second.size, 8192);
+    auto object_it = exported.routes.find("key-late");
+    ASSERT_NE(object_it, exported.routes.end());
+    EXPECT_EQ(object_it->second.object_size, 8192);
 }
 
 TEST_F(P2PHotStandbyServiceTest, PromotionFailsOnFinalCatchUpApplyFailure) {

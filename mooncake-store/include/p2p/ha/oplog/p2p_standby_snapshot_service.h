@@ -15,6 +15,7 @@
 #include <ylt/reflection/user_reflect_macro.hpp>
 
 #include "p2p/ha/oplog/p2p_standby_metadata_store.h"
+#include "p2p/ha/oplog/p2p_oplog_types.h"
 #include "types.h"
 
 namespace mooncake {
@@ -25,33 +26,36 @@ inline constexpr uint32_t kMaxStandbySnapshotChunkSize = 4096;
 inline constexpr size_t kMaxStandbySnapshotSessions = 16;
 
 struct BeginStandbySnapshotRequest {
+    uint16_t schema_version{kP2PHAProtocolSchemaVersion};
     std::string cluster_id;
-    YLT_REFL(BeginStandbySnapshotRequest, cluster_id);
+    YLT_REFL(BeginStandbySnapshotRequest, schema_version, cluster_id);
 };
 
 struct BeginStandbySnapshotResponse {
+    uint16_t schema_version{kP2PHAProtocolSchemaVersion};
     int32_t error_code{toInt(ErrorCode::OK)};
     std::string session_id;
     uint64_t baseline_sequence_id{0};
     uint64_t object_count{0};
     uint64_t client_count{0};
-    YLT_REFL(BeginStandbySnapshotResponse, error_code, session_id,
+    YLT_REFL(BeginStandbySnapshotResponse, schema_version, error_code, session_id,
              baseline_sequence_id, object_count, client_count);
 };
 
 struct StandbySnapshotChunkRequest {
+    uint16_t schema_version{kP2PHAProtocolSchemaVersion};
     std::string session_id;
     uint64_t object_offset{0};
     uint64_t client_offset{0};
     uint32_t limit{256};
-    YLT_REFL(StandbySnapshotChunkRequest, session_id, object_offset,
+    YLT_REFL(StandbySnapshotChunkRequest, schema_version, session_id, object_offset,
              client_offset, limit);
 };
 
 struct StandbySnapshotObjectRecord {
     std::string key;
-    StandbyObjectMetadata metadata;
-    YLT_REFL(StandbySnapshotObjectRecord, key, metadata);
+    P2PStandbyRouteEntry route;
+    YLT_REFL(StandbySnapshotObjectRecord, key, route);
 };
 
 struct StandbySnapshotClientRecord {
@@ -61,13 +65,14 @@ struct StandbySnapshotClientRecord {
 };
 
 struct StandbySnapshotChunkResponse {
+    uint16_t schema_version{kP2PHAProtocolSchemaVersion};
     int32_t error_code{toInt(ErrorCode::OK)};
     uint64_t next_object_offset{0};
     uint64_t next_client_offset{0};
     bool done{false};
     std::vector<StandbySnapshotObjectRecord> objects;
     std::vector<StandbySnapshotClientRecord> clients;
-    YLT_REFL(StandbySnapshotChunkResponse, error_code, next_object_offset,
+    YLT_REFL(StandbySnapshotChunkResponse, schema_version, error_code, next_object_offset,
              next_client_offset, done, objects, clients);
 };
 
