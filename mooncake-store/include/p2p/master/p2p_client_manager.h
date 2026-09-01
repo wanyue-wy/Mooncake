@@ -57,9 +57,9 @@ class P2PClientManager final {
 
     using ClientVisitor = std::function<tl::expected<bool, ErrorCode>(
         const std::shared_ptr<P2PClientMeta>& client)>;
-    auto ListClients(ObjectIterateStrategy strategy) const
+    auto ListClients(P2PClientSelectionStrategy strategy) const
         -> tl::expected<std::vector<std::shared_ptr<P2PClientMeta>>, ErrorCode>;
-    auto ForEachClient(ObjectIterateStrategy strategy,
+    auto ForEachClient(P2PClientSelectionStrategy strategy,
                        const ClientVisitor& visitor)
         -> tl::expected<void, ErrorCode>;
 

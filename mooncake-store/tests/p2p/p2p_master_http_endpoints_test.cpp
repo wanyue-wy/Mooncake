@@ -4,7 +4,7 @@
  *        (GET /health, GET /get_key_count, GET /get_all_keys,
  *         GET /batch_query_keys, GET /metrics).
  *
- * Brings up an in-process WrappedP2PMasterService with the embedded HTTP
+ * Brings up an in-process P2PMasterRpcService with the embedded HTTP
  * server bound to a free port (no RPC server)
  */
 
@@ -74,7 +74,7 @@ class P2PMasterHttpEndpointsTest : public ::testing::Test {
         wms_cfg.routes.max_clients_per_key = 0;  // no limit for P2P
         wms_cfg.metrics.http_port = http_port;
 
-        wrapped_ = std::make_unique<WrappedP2PMasterService>(wms_cfg);
+        wrapped_ = std::make_unique<P2PMasterRpcService>(wms_cfg);
         wrapped_->init();
         // Give the HTTP server a moment to come up (mirrors InProcP2PMaster).
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -175,24 +175,22 @@ class P2PMasterHttpEndpointsTest : public ::testing::Test {
 
     static void AddKey(const std::string& key, size_t size,
                        const UUID& segment_id) {
-        // AddReplicaRequest::key is a string_view; `key` outlives the
-        // synchronous AddReplica call.
-        AddReplicaRequest req;
+        P2PPublishRouteRequest req;
         req.key = key;
-        req.size = size;
+        req.object_size = size;
         req.client_id = client_id_;
         req.segment_id = segment_id;
-        auto res = wrapped_->AddReplica(req);
+        auto res = wrapped_->PublishRoute(req);
         ASSERT_TRUE(res.has_value())
             << "AddReplica failed for " << key << ": " << res.error();
     }
 
     static void RemoveKey(const std::string& key, const UUID& segment_id) {
-        RemoveReplicaRequest req;
+        P2PWithdrawRouteRequest req;
         req.key = key;
         req.client_id = client_id_;
         req.segment_id = segment_id;
-        auto res = wrapped_->RemoveReplica(req);
+        auto res = wrapped_->WithdrawRoute(req);
         ASSERT_TRUE(res.has_value())
             << "RemoveReplica failed for " << key << ": " << res.error();
     }
@@ -235,14 +233,14 @@ class P2PMasterHttpEndpointsTest : public ::testing::Test {
     }
 
     static constexpr size_t kSegmentSize = 16 * 1024 * 1024;
-    static std::unique_ptr<WrappedP2PMasterService> wrapped_;
+    static std::unique_ptr<P2PMasterRpcService> wrapped_;
     static std::string http_base_url_;
     static UUID client_id_;
     static UUID segment_id_a_;
     static UUID segment_id_b_;
 };
 
-std::unique_ptr<WrappedP2PMasterService> P2PMasterHttpEndpointsTest::wrapped_;
+std::unique_ptr<P2PMasterRpcService> P2PMasterHttpEndpointsTest::wrapped_;
 std::string P2PMasterHttpEndpointsTest::http_base_url_;
 UUID P2PMasterHttpEndpointsTest::client_id_;
 UUID P2PMasterHttpEndpointsTest::segment_id_a_;

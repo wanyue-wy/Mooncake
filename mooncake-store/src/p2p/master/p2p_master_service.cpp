@@ -559,7 +559,7 @@ auto P2PMasterService::GetWriteRoute(const WriteRouteRequest& req)
         req.config.max_candidates !=
             WriteRouteRequestConfig::RETURN_ALL_CANDIDATES;
     client_manager_->ForEachClient(
-        req.config.strategy,
+        static_cast<P2PClientSelectionStrategy>(req.config.strategy),
         [&](const std::shared_ptr<P2PClientMeta>& client)
             -> tl::expected<bool, ErrorCode> {
             const UUID client_id = client->get_client_id();

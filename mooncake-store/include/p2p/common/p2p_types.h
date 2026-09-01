@@ -108,4 +108,42 @@ struct P2PRouteEntry {
 };
 YLT_REFL(P2PRouteEntry, object_size, locations);
 
+enum class P2PClientSelectionStrategy {
+    ORDERED = 0,
+    RANDOM = 1,
+    CAPACITY_PRIORITY = 2,
+};
+
+inline std::ostream& operator<<(std::ostream& output,
+                                P2PClientSelectionStrategy strategy) {
+    switch (strategy) {
+        case P2PClientSelectionStrategy::ORDERED:
+            return output << "ORDERED";
+        case P2PClientSelectionStrategy::RANDOM:
+            return output << "RANDOM";
+        case P2PClientSelectionStrategy::CAPACITY_PRIORITY:
+            return output << "CAPACITY_PRIORITY";
+    }
+    return output << "UNKNOWN";
+}
+
+struct P2PRouteDescriptor {
+    UUID client_id{0, 0};
+    UUID segment_id{0, 0};
+    std::string ip_address;
+    uint16_t rpc_port{0};
+    uint64_t object_size{0};
+};
+YLT_REFL(P2PRouteDescriptor, client_id, segment_id, ip_address, rpc_port,
+         object_size);
+
+struct P2PReadRouteConfig {
+    static constexpr size_t RETURN_ALL_CANDIDATES = 0;
+
+    size_t max_candidates{RETURN_ALL_CANDIDATES};
+    std::vector<std::string> tag_filters;
+    int priority_limit{0};
+};
+YLT_REFL(P2PReadRouteConfig, max_candidates, tag_filters, priority_limit);
+
 }  // namespace mooncake
