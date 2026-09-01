@@ -149,8 +149,8 @@ class InProcP2PMaster {
         if (server_) {
             server_->stop();
             server_.reset();
-            wrapped_.reset();
         }
+        wrapped_.reset();
     }
 
     int rpc_port() const { return rpc_port_; }

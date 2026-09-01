@@ -332,12 +332,12 @@ class P2PMasterService {
         MetadataShard& shard, std::string_view key, const UUID& client_id,
         const UUID& segment_id) NO_THREAD_SAFETY_ANALYSIS;
 
-    std::shared_ptr<P2PClientManager> client_manager_;
     std::array<MetadataShard, kNumShards> metadata_shards_;
     uint64_t max_client_per_key_;
     bool enable_async_oplog_write_{false};
     ViewVersionId view_version_;
     std::unique_ptr<OpLogManager> oplog_manager_;
+    std::shared_ptr<P2PClientManager> client_manager_;
 
     friend class MetadataAccessorRW;
     friend class MetadataAccessorRO;

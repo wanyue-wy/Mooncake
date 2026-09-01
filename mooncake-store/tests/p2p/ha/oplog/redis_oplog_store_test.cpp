@@ -513,6 +513,51 @@ TEST_F(RedisOpLogStoreTest, MasterRegistryHeartbeatUpdatesAndUnregisters) {
     EXPECT_TRUE(masters.empty());
 }
 
+TEST_F(RedisOpLogStoreTest, ClearingProvidersWaitsForInflightCallback) {
+    auto registry = std::make_unique<RedisMasterRegistry>(
+        cluster_id_, redis_endpoint_, redis_username_, redis_password_, 0);
+    RedisMasterRegistryHeartbeat heartbeat(
+        std::move(registry),
+        RedisMasterRegistryEntry{"provider-instance", "127.0.0.1:51051",
+                                 "127.0.0.1:53051", "starting", false},
+        std::chrono::seconds(10));
+    ASSERT_EQ(heartbeat.Start(), ErrorCode::OK);
+
+    std::atomic<bool> provider_entered{false};
+    std::atomic<bool> release_provider{false};
+    std::atomic<bool> providers_cleared{false};
+    heartbeat.SetStandbyProviders(
+        [&] {
+            provider_entered.store(true, std::memory_order_release);
+            while (!release_provider.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            return uint64_t{42};
+        },
+        [] { return true; });
+    heartbeat.UpdateRole("standby", false);
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!provider_entered.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(provider_entered.load(std::memory_order_acquire));
+
+    std::thread clear_thread([&] {
+        heartbeat.ClearStandbyProviders();
+        providers_cleared.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(providers_cleared.load(std::memory_order_acquire));
+
+    release_provider.store(true, std::memory_order_release);
+    clear_thread.join();
+    EXPECT_TRUE(providers_cleared.load(std::memory_order_acquire));
+    heartbeat.Stop();
+}
+
 TEST_F(RedisOpLogStoreTest, SnapshotSequenceRoundTrip) {
     auto writer = CreateWriter();
     ASSERT_EQ(ErrorCode::OK, writer->RecordSnapshotSequenceId("snap-a", 42));

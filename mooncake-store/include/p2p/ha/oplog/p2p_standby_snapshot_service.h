@@ -160,8 +160,12 @@ class RedisMasterRegistryHeartbeat {
 
     ErrorCode Start();
     void UpdateRole(std::string role, bool snapshot_ready);
+    void SetStandbyProviders(
+        std::function<uint64_t()> applied_sequence_provider,
+        std::function<bool()> snapshot_ready_provider);
     void SetAppliedSequenceProvider(std::function<uint64_t()> provider);
     void SetSnapshotReadyProvider(std::function<bool()> provider);
+    void ClearStandbyProviders();
     void Stop();
 
    private:

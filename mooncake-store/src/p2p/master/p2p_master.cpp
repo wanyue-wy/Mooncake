@@ -79,6 +79,36 @@ std::string BuildSnapshotEndpoint(const std::string& master_endpoint,
     }
     return host + ":" + std::to_string(snapshot_port);
 }
+
+class ScopedStandbyRegistryProviders final {
+   public:
+    ScopedStandbyRegistryProviders(
+        RedisMasterRegistryHeartbeat& registry_heartbeat,
+        P2PHotStandbyService& standby)
+        : registry_heartbeat_(&registry_heartbeat) {
+        registry_heartbeat_->SetStandbyProviders(
+            [&standby] { return standby.GetLatestAppliedSequenceId(); },
+            [&standby] { return standby.IsReadyForSnapshot(); });
+    }
+
+    ~ScopedStandbyRegistryProviders() { Reset(); }
+
+    ScopedStandbyRegistryProviders(
+        const ScopedStandbyRegistryProviders&) = delete;
+    ScopedStandbyRegistryProviders& operator=(
+        const ScopedStandbyRegistryProviders&) = delete;
+
+    void Reset() {
+        if (registry_heartbeat_ == nullptr) {
+            return;
+        }
+        registry_heartbeat_->ClearStandbyProviders();
+        registry_heartbeat_ = nullptr;
+    }
+
+   private:
+    RedisMasterRegistryHeartbeat* registry_heartbeat_;
+};
 #endif
 
 std::unique_ptr<WrappedP2PMasterService> CreateActiveService(
@@ -198,6 +228,10 @@ int P2PMaster::RunWithHA() {
 #endif
 
         std::unique_ptr<P2PHotStandbyService> standby;
+#ifdef STORE_USE_REDIS
+        std::unique_ptr<ScopedStandbyRegistryProviders>
+            standby_registry_providers;
+#endif
         if (config_.oplog.enabled) {
             P2PHotStandbyConfig standby_config;
             standby_config.cluster_id = config_.cluster_id;
@@ -227,14 +261,9 @@ int P2PMaster::RunWithHA() {
             }
 #ifdef STORE_USE_REDIS
             if (master_registry_heartbeat) {
-                master_registry_heartbeat->SetAppliedSequenceProvider(
-                    [service = standby.get()] {
-                        return service->GetLatestAppliedSequenceId();
-                    });
-                master_registry_heartbeat->SetSnapshotReadyProvider(
-                    [service = standby.get()] {
-                        return service->IsReadyForSnapshot();
-                    });
+                standby_registry_providers =
+                    std::make_unique<ScopedStandbyRegistryProviders>(
+                        *master_registry_heartbeat, *standby);
                 master_registry_heartbeat->UpdateRole(
                     "standby", standby->IsReadyForSnapshot());
             }
@@ -244,8 +273,9 @@ int P2PMaster::RunWithHA() {
         EtcdLeaseId lease_id = 0;
         ViewVersionId view_version = 0;
         master_view->ElectLeader(local_endpoint, view_version, lease_id);
-        auto keep_leader_thread = std::thread(
-            [server = server.get(), view = master_view.get(), lease_id] {
+        auto keep_leader_thread =
+            std::thread([server = server.get(), view = master_view.get(),
+                         lease_id] {
                 view->KeepLeader(lease_id);
                 server->stop();
             });
@@ -273,10 +303,7 @@ int P2PMaster::RunWithHA() {
             promoted_sequence_id = standby->GetLatestAppliedSequenceId();
             promoted_metadata = standby->ExportMetadata();
 #ifdef STORE_USE_REDIS
-            if (master_registry_heartbeat) {
-                master_registry_heartbeat->SetAppliedSequenceProvider({});
-                master_registry_heartbeat->SetSnapshotReadyProvider({});
-            }
+            standby_registry_providers.reset();
 #endif
             standby.reset();
         }
@@ -307,6 +334,7 @@ int P2PMaster::RunWithHA() {
         const int run_result =
             RunActiveRpcServers(config_, *server, *active_service);
 #endif
+        active_service.reset();
         master_view->CancelKeepAlive(lease_id);
         keep_leader_thread.join();
         if (run_result != 0) {

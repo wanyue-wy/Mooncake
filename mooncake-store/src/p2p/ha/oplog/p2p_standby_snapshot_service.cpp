@@ -589,6 +589,17 @@ void RedisMasterRegistryHeartbeat::UpdateRole(std::string role,
     cv_.notify_all();
 }
 
+void RedisMasterRegistryHeartbeat::SetStandbyProviders(
+    std::function<uint64_t()> applied_sequence_provider,
+    std::function<bool()> snapshot_ready_provider) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    applied_sequence_provider_ = std::move(applied_sequence_provider);
+    snapshot_ready_provider_ = std::move(snapshot_ready_provider);
+    refresh_requested_ = true;
+    cv_.notify_all();
+    cv_.wait(lock, [this] { return provider_in_flight_ == 0; });
+}
+
 void RedisMasterRegistryHeartbeat::SetAppliedSequenceProvider(
     std::function<uint64_t()> provider) {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -605,6 +616,10 @@ void RedisMasterRegistryHeartbeat::SetSnapshotReadyProvider(
     refresh_requested_ = true;
     cv_.notify_all();
     cv_.wait(lock, [this] { return provider_in_flight_ == 0; });
+}
+
+void RedisMasterRegistryHeartbeat::ClearStandbyProviders() {
+    SetStandbyProviders({}, {});
 }
 
 void RedisMasterRegistryHeartbeat::Stop() {
