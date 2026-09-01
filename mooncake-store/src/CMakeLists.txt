@@ -117,6 +117,7 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/master/p2p_master_config_loader.cpp
     p2p/master/p2p_route_table.cpp
     p2p/master/p2p_master_service.cpp
+    p2p/master/p2p_master_client.cpp
     p2p/master/p2p_master_metric_manager.cpp
     p2p/master/p2p_segment_manager.cpp
     p2p/master/p2p_rpc_service.cpp
@@ -173,7 +174,6 @@ set(MOONCAKE_STORE_P2P_MASTER_SOURCES
     p2p/master/p2p_master_config_loader.cpp
     p2p/master/p2p_route_table.cpp
     p2p/master/p2p_master_service.cpp
-    p2p/master/p2p_master_client.cpp
     p2p/master/p2p_master_metric_manager.cpp
     p2p/master/p2p_segment_manager.cpp
     p2p/master/p2p_rpc_service.cpp

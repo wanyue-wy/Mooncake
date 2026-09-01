@@ -3,6 +3,7 @@
 
 #include <string>
 
+#include "default_config.h"
 #include "p2p/master/p2p_master.h"
 #include "p2p/master/p2p_master_config_loader.h"
 #include "types.h"
