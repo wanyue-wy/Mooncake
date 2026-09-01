@@ -22,6 +22,18 @@ add_p2p_store_test(p2p_master_http_endpoints_test p2p_master_http_endpoints_test
 add_p2p_store_test(p2p_master_metrics_test p2p_master_metrics_test.cpp)
 add_p2p_store_test(p2p_segment_manager_test p2p_segment_manager_test.cpp)
 
+add_executable(stress_workload_test_p2p stress_workload_test.cpp)
+target_link_libraries(stress_workload_test_p2p PUBLIC
+    ${MOONCAKE_STORE_LIBS}
+    transfer_engine
+    cachelib_memory_allocator
+    ${ETCD_WRAPPER_LIB}
+    mooncake_common
+    glog
+    gflags
+    pthread
+)
+
 # client side
 add_p2p_store_test(p2p_client_integration_test p2p_client_integration_test.cpp)
 add_p2p_store_test(p2p_client_ha_test p2p_client_ha_test.cpp)
