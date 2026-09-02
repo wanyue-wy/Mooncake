@@ -3,8 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -39,19 +39,52 @@ class P2PRouteTable final {
         std::vector<std::string> removed_keys;
     };
 
+    using Mutation = tl::expected<MutationResult, ErrorCode>;
+
+    class BatchSyncHandler {
+       public:
+        virtual ~BatchSyncHandler() = default;
+
+        virtual ErrorCode BeforePublish(
+            const P2PPublishRouteOperation& operation) = 0;
+        virtual void AfterPublish(
+            size_t index, const P2PPublishRouteOperation& operation,
+            const Mutation& result) = 0;
+        virtual ErrorCode BeforeWithdraw(
+            const P2PWithdrawRouteOperation& operation) = 0;
+        virtual void AfterWithdraw(
+            size_t index, const P2PWithdrawRouteOperation& operation,
+            const Mutation& result) = 0;
+    };
+
    public:
     explicit P2PRouteTable(uint64_t max_client_per_key = 0)
         : max_client_per_key_(max_client_per_key) {}
 
-    // TODO(M8.3; see p2p-master-final-refactor-plan.md): Add batch publish and
-    // withdraw APIs that consume owning AoS route operations directly. Batch
-    // execution must group once by shard, execute once, and expose no shard
-    // accessor outside P2PRouteTable.
     auto Publish(std::string_view key, uint64_t object_size,
                  const P2PRouteLocation& location)
-        -> tl::expected<MutationResult, ErrorCode>;
+        -> Mutation;
     auto Withdraw(std::string_view key, const P2PRouteLocation& location)
-        -> tl::expected<MutationResult, ErrorCode>;
+        -> Mutation;
+
+    /**
+     * Batch handler methods execute while the corresponding route shard is
+     * write locked. They must not call P2PRouteTable or acquire a lock ordered
+     * before the route shard lock.
+     */
+    void BatchPublish(
+        const UUID& client_id,
+        std::span<const P2PPublishRouteOperation> operations,
+        BatchSyncHandler& handler);
+    void BatchWithdraw(
+        const UUID& client_id,
+        std::span<const P2PWithdrawRouteOperation> operations,
+        BatchSyncHandler& handler);
+    void BatchSync(
+        const UUID& client_id,
+        std::span<const P2PPublishRouteOperation> publish_operations,
+        std::span<const P2PWithdrawRouteOperation> withdraw_operations,
+        BatchSyncHandler& handler);
 
     bool RouteExists(std::string_view key) const;
     std::optional<P2PRouteEntry> GetRoute(std::string_view key) const;
@@ -90,6 +123,17 @@ class P2PRouteTable final {
     size_t GetShardIndex(std::string_view key) const {
         return std::hash<std::string_view>{}(key) % kShardCount;
     }
+
+    auto PublishLocked(RouteShard& shard, std::string_view key,
+                       uint64_t object_size,
+                       const P2PRouteLocation& location) -> Mutation
+        NO_THREAD_SAFETY_ANALYSIS;
+    auto WithdrawLocked(
+        RouteShard& shard, std::string_view key,
+        const P2PRouteLocation& location,
+        const P2PWithdrawRouteOperation* operation = nullptr,
+        BatchSyncHandler* handler = nullptr) -> Mutation
+        NO_THREAD_SAFETY_ANALYSIS;
 
    private:
     std::array<RouteShard, kShardCount> shards_;

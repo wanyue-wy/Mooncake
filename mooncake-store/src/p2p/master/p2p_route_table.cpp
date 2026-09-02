@@ -17,7 +17,16 @@ size_t P2PRouteTable::CountOwnerClients(const P2PRouteEntry& entry) {
 
 auto P2PRouteTable::Publish(std::string_view key, uint64_t object_size,
                             const P2PRouteLocation& location)
-    -> tl::expected<MutationResult, ErrorCode> {
+    -> Mutation {
+    auto& shard = shards_[GetShardIndex(key)];
+    SharedMutexLocker lock(&shard.mutex);
+    return PublishLocked(shard, key, object_size, location);
+}
+
+auto P2PRouteTable::PublishLocked(RouteShard& shard, std::string_view key,
+                                  uint64_t object_size,
+                                  const P2PRouteLocation& location)
+    -> Mutation {
     if (object_size == 0) {
         LOG(ERROR) << "Publish route rejected: object_size must be positive"
                    << ", key=" << key << ", client_id=" << location.client_id
@@ -25,8 +34,6 @@ auto P2PRouteTable::Publish(std::string_view key, uint64_t object_size,
         return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
     }
 
-    auto& shard = shards_[GetShardIndex(key)];
-    SharedMutexLocker lock(&shard.mutex);
     auto it = shard.routes.find(key);
     if (it != shard.routes.end()) {
         auto& entry = it->second;
@@ -114,9 +121,17 @@ void P2PRouteTable::RemoveAllReverseIndexes(RouteShard& shard,
 
 auto P2PRouteTable::Withdraw(std::string_view key,
                              const P2PRouteLocation& location)
-    -> tl::expected<MutationResult, ErrorCode> {
+    -> Mutation {
     auto& shard = shards_[GetShardIndex(key)];
     SharedMutexLocker lock(&shard.mutex);
+    return WithdrawLocked(shard, key, location);
+}
+
+auto P2PRouteTable::WithdrawLocked(
+    RouteShard& shard, std::string_view key,
+    const P2PRouteLocation& location,
+    const P2PWithdrawRouteOperation* operation,
+    BatchSyncHandler* handler) -> Mutation {
     auto route_it = shard.routes.find(key);
     if (route_it == shard.routes.end()) {
         LOG(WARNING) << "Withdraw route rejected: key not found"
@@ -134,6 +149,18 @@ auto P2PRouteTable::Withdraw(std::string_view key,
         return tl::make_unexpected(ErrorCode::REPLICA_NOT_FOUND);
     }
 
+    if (handler != nullptr && operation != nullptr) {
+        const auto error = handler->BeforeWithdraw(*operation);
+        if (error != ErrorCode::OK) {
+            LOG(ERROR) << "Withdraw route rejected by pre-mutation callback"
+                       << ", key=" << key
+                       << ", client_id=" << location.client_id
+                       << ", segment_id=" << location.segment_id
+                       << ", error=" << toString(error);
+            return tl::make_unexpected(error);
+        }
+    }
+
     RemoveReverseIndex(shard, route_it->first, location);
     locations.erase(location_it);
     if (locations.empty()) {
@@ -141,6 +168,79 @@ auto P2PRouteTable::Withdraw(std::string_view key,
         return MutationResult{.removed_key = true};
     }
     return MutationResult{};
+}
+
+void P2PRouteTable::BatchPublish(
+    const UUID& client_id,
+    std::span<const P2PPublishRouteOperation> operations,
+    BatchSyncHandler& handler) {
+    BatchSync(client_id, operations,
+              std::span<const P2PWithdrawRouteOperation>{}, handler);
+}
+
+void P2PRouteTable::BatchWithdraw(
+    const UUID& client_id,
+    std::span<const P2PWithdrawRouteOperation> operations,
+    BatchSyncHandler& handler) {
+    BatchSync(client_id, std::span<const P2PPublishRouteOperation>{},
+              operations, handler);
+}
+
+void P2PRouteTable::BatchSync(
+    const UUID& client_id,
+    std::span<const P2PPublishRouteOperation> publish_operations,
+    std::span<const P2PWithdrawRouteOperation> withdraw_operations,
+    BatchSyncHandler& handler) {
+    std::unordered_map<size_t, std::vector<std::pair<size_t, bool>>>
+        operations_by_shard;
+    for (size_t index = 0; index < publish_operations.size(); ++index) {
+        operations_by_shard[GetShardIndex(publish_operations[index].key)]
+            .emplace_back(index, true);
+    }
+    for (size_t index = 0; index < withdraw_operations.size(); ++index) {
+        operations_by_shard[GetShardIndex(withdraw_operations[index].key)]
+            .emplace_back(index, false);
+    }
+
+    for (const auto& [shard_index, operations] : operations_by_shard) {
+        auto& shard = shards_[shard_index];
+        SharedMutexLocker lock(&shard.mutex);
+        for (const auto& [operation_index, is_publish] : operations) {
+            if (is_publish) {
+                const auto& operation = publish_operations[operation_index];
+                const P2PRouteLocation location{
+                    .client_id = client_id,
+                    .segment_id = operation.segment_id,
+                };
+                const auto error = handler.BeforePublish(operation);
+                if (error != ErrorCode::OK) {
+                    LOG(ERROR) << "Publish route rejected by pre-mutation "
+                                  "callback"
+                               << ", key=" << operation.key
+                               << ", client_id=" << client_id
+                               << ", segment_id=" << operation.segment_id
+                               << ", error=" << toString(error);
+                    const Mutation result = tl::make_unexpected(error);
+                    handler.AfterPublish(operation_index, operation, result);
+                    continue;
+                }
+                auto result = PublishLocked(shard, operation.key,
+                                            operation.object_size, location);
+                handler.AfterPublish(operation_index, operation, result);
+                continue;
+            }
+
+            const auto& operation = withdraw_operations[operation_index];
+            const P2PRouteLocation location{
+                .client_id = client_id,
+                .segment_id = operation.segment_id,
+            };
+            auto result =
+                WithdrawLocked(shard, operation.key, location, &operation,
+                               &handler);
+            handler.AfterWithdraw(operation_index, operation, result);
+        }
+    }
 }
 
 bool P2PRouteTable::RouteExists(std::string_view key) const {
