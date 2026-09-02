@@ -247,12 +247,12 @@ void P2PClientService::HandleHeartbeatResponse(
     for (const auto& task_result : response.task_results) {
         HandleHeartbeatTaskResult(task_result);
     }
-    if (response.status == P2PClientStatus::HEALTH) {
+    if (response.status == P2PClientStatus::HEALTHY) {
         if (connection_interrupted_) {
             OnHAEvent(HAEvent::MASTER_RECONNECTED);
             connection_interrupted_ = false;
         }
-    } else if (response.status == P2PClientStatus::UNDEFINED &&
+    } else if (response.status == P2PClientStatus::UNREGISTERED &&
                !register_client_future.valid()) {
         register_client_future =
             std::async(std::launch::async, register_client);

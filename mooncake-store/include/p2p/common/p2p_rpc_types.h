@@ -50,7 +50,7 @@ struct P2PHeartbeatRequest {
 YLT_REFL(P2PHeartbeatRequest, client_id, tasks);
 
 struct P2PHeartbeatResponse {
-    P2PClientStatus status = P2PClientStatus::UNDEFINED;
+    P2PClientStatus status = P2PClientStatus::UNREGISTERED;
     ViewVersionId view_version = 0;
     std::vector<HeartbeatTaskResult> task_results;
 };
@@ -67,7 +67,7 @@ struct P2PQueryClientStatusRequest {
 YLT_REFL(P2PQueryClientStatusRequest, client_id);
 
 struct P2PQueryClientStatusResponse {
-    P2PClientStatus status = P2PClientStatus::UNDEFINED;
+    P2PClientStatus status = P2PClientStatus::UNREGISTERED;
 };
 YLT_REFL(P2PQueryClientStatusResponse, status);
 

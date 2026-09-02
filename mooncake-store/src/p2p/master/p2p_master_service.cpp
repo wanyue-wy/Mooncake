@@ -250,7 +250,7 @@ std::vector<Replica::Descriptor> P2PMasterService::FilterRoutes(
                          << ", error=" << toString(segment_result.error());
             continue;
         }
-        const auto& segment = *segment_result.value();
+        const auto& segment = segment_result.value();
 
         const bool excluded_by_tag = std::any_of(
             p2p_config.tag_filters.begin(), p2p_config.tag_filters.end(),
@@ -509,6 +509,8 @@ auto P2PMasterService::UnmountSegment(const UUID& segment_id,
                    << ", error=" << result.error();
         return result;
     }
+    OnSegmentRemoved(P2PRouteLocation{.client_id = client_id,
+                                      .segment_id = segment_id});
 
     UnmountSegmentPayload payload;
     payload.segment_id = segment_id;

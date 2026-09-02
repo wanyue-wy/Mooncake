@@ -520,9 +520,9 @@ TEST_F(HAIntegrationTest, ReRegisterReportsCurrentTierSegments) {
             client1_->GetClientID(), segment.id);
         ASSERT_TRUE(registered.has_value())
             << "Missing registered segment: " << segment.name;
-        EXPECT_EQ(registered.value()->name, segment.name);
-        EXPECT_EQ(registered.value()->size, segment.size);
-        EXPECT_EQ(registered.value()->memory_type, segment.memory_type);
+        EXPECT_EQ(registered.value().name, segment.name);
+        EXPECT_EQ(registered.value().size, segment.size);
+        EXPECT_EQ(registered.value().memory_type, segment.memory_type);
     }
 
     ForceRecover(client1_);
@@ -623,7 +623,7 @@ TEST_F(HAIntegrationTest, ClientDisconnectAndRecover) {
             short_ttl_master.GetWrapped().GetMasterService().QueryClientStatus(
                 req);
         ASSERT_TRUE(res.has_value());
-        ASSERT_EQ(res.value().status, P2PClientStatus::HEALTH);
+        ASSERT_EQ(res.value().status, P2PClientStatus::HEALTHY);
     }
 
     // Simulate client1 network failure: stop its heartbeat
@@ -640,7 +640,7 @@ TEST_F(HAIntegrationTest, ClientDisconnectAndRecover) {
             short_ttl_master.GetWrapped().GetMasterService().QueryClientStatus(
                 req);
         ASSERT_TRUE(res.has_value());
-        EXPECT_EQ(res.value().status, P2PClientStatus::DISCONNECTION)
+        EXPECT_EQ(res.value().status, P2PClientStatus::DISCONNECTED)
             << "Master should have marked disconnected client";
     }
 
@@ -652,7 +652,7 @@ TEST_F(HAIntegrationTest, ClientDisconnectAndRecover) {
             short_ttl_master.GetWrapped().GetMasterService().QueryClientStatus(
                 req);
         ASSERT_TRUE(res.has_value());
-        EXPECT_EQ(res.value().status, P2PClientStatus::HEALTH);
+        EXPECT_EQ(res.value().status, P2PClientStatus::HEALTHY);
     }
 
     // Recover: manually send heartbeat from tmp1
@@ -661,7 +661,7 @@ TEST_F(HAIntegrationTest, ClientDisconnectAndRecover) {
         req.client_id = tmp1->GetClientID();
         auto hb_res = tmp1->GetMasterClient().Heartbeat(req);
         ASSERT_TRUE(hb_res.has_value()) << "Recovery heartbeat failed";
-        EXPECT_EQ(hb_res.value().status, P2PClientStatus::HEALTH)
+        EXPECT_EQ(hb_res.value().status, P2PClientStatus::HEALTHY)
             << "Client should recover to HEALTH after heartbeat";
     }
 
@@ -673,7 +673,7 @@ TEST_F(HAIntegrationTest, ClientDisconnectAndRecover) {
             short_ttl_master.GetWrapped().GetMasterService().QueryClientStatus(
                 req);
         ASSERT_TRUE(res.has_value());
-        EXPECT_EQ(res.value().status, P2PClientStatus::HEALTH)
+        EXPECT_EQ(res.value().status, P2PClientStatus::HEALTHY)
             << "Client should be HEALTH after recovery heartbeat";
     }
 
