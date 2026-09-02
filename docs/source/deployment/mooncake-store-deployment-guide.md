@@ -39,7 +39,9 @@ This page summarizes useful flags, environment variables, and HTTP endpoints to 
 
 ### P2P HA OpLog Coverage
 
-The current P2P primary master records oplog entries for explicit client and segment lifecycle changes (`REGISTER_CLIENT`, `UNREGISTER_CLIENT`, `MOUNT_SEGMENT`, `UNMOUNT_SEGMENT`) and replica mapping changes (`ADD_REPLICA`, `REMOVE_REPLICA`). Remaining failover-visible metadata mutations still need follow-up coverage, including client crash cleanup, heartbeat state transitions, replica eviction/rebalance, and task metadata.
+The P2P primary master records schema-v2 OpLog entries for explicit client and segment lifecycle changes (`REGISTER_CLIENT`, `UNREGISTER_CLIENT`, `MOUNT_SEGMENT`, `UNMOUNT_SEGMENT`) and route changes (`PUBLISH_ROUTE`, `WITHDRAW_ROUTE`). Snapshot chunks and every P2P payload carry schema version 2; other versions are rejected.
+
+M8 is a coordinated, breaking P2P upgrade. Stop every P2P master, standby, and client before upgrading, then clear the cluster's old Redis/localfs P2P OpLog, snapshot, and standby state. Old P2P clients cannot connect to the new wire protocol, and no automatic schema migration or dual-read compatibility is provided. Client registration and metadata resync rebuild the route table after restart; local object data is not deleted. Centralized deployments are unaffected.
 
 - DFS Storage (optional)
   - `--root_fs_dir` (str, default empty): DFS mount directory for storage backend, used in Multi-layer Storage Support.
