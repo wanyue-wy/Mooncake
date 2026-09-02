@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include <boost/functional/hash.hpp>
+
 #include "types.h"
 
 namespace mooncake {
@@ -76,5 +78,34 @@ struct P2PSegment {
     size_t usage{0};
 };
 YLT_REFL(P2PSegment, id, name, size, priority, tags, memory_type, usage);
+
+/**
+ * @brief Stable identity of a P2P route inside the master.
+ *
+ * Segment IDs are client-local. The pair, rather than segment_id alone, is
+ * therefore the only valid identity for indexing and cleanup.
+ */
+struct P2PRouteLocation {
+    UUID client_id{0, 0};
+    UUID segment_id{0, 0};
+
+    bool operator==(const P2PRouteLocation&) const = default;
+};
+YLT_REFL(P2PRouteLocation, client_id, segment_id);
+
+struct P2PRouteLocationHash {
+    size_t operator()(const P2PRouteLocation& location) const noexcept {
+        size_t seed = 0;
+        boost::hash_combine(seed, boost::hash<UUID>{}(location.client_id));
+        boost::hash_combine(seed, boost::hash<UUID>{}(location.segment_id));
+        return seed;
+    }
+};
+
+struct P2PRouteEntry {
+    uint64_t object_size{0};
+    std::vector<P2PRouteLocation> locations;
+};
+YLT_REFL(P2PRouteEntry, object_size, locations);
 
 }  // namespace mooncake
