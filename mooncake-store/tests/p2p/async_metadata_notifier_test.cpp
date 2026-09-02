@@ -2,7 +2,7 @@
  * @file async_metadata_notifier_test.cpp
  * @brief Unit tests for AsyncMetadataNotifier.
  *
- * Uses an in-process P2P master so that BatchSyncReplica RPCs are real but
+ * Uses an in-process P2P master so that BatchSyncRoutes RPCs are real but
  * require no network setup.
  */
 #include <glog/logging.h>

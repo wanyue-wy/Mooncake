@@ -67,19 +67,20 @@ std::vector<std::shared_ptr<P2PClientMeta>> P2PClientManager::GetAllClients() {
     return clients;
 }
 
-auto P2PClientManager::BuildClientList(ObjectIterateStrategy strategy) const
+auto P2PClientManager::BuildClientList(
+    P2PClientSelectionStrategy strategy) const
     -> std::optional<std::vector<std::shared_ptr<P2PClientMeta>>> {
     std::vector<std::shared_ptr<P2PClientMeta>> clients;
     clients.reserve(client_metas_.size());
 
     switch (strategy) {
-        case ObjectIterateStrategy::ORDERED: {
+        case P2PClientSelectionStrategy::ORDERED: {
             for (const auto& [id, meta] : client_metas_) {
                 clients.emplace_back(meta);
             }
             break;
         }
-        case ObjectIterateStrategy::RANDOM: {
+        case P2PClientSelectionStrategy::RANDOM: {
             for (const auto& [id, meta] : client_metas_) {
                 clients.emplace_back(meta);
             }
@@ -88,7 +89,7 @@ auto P2PClientManager::BuildClientList(ObjectIterateStrategy strategy) const
             std::shuffle(clients.begin(), clients.end(), generator);
             break;
         }
-        case ObjectIterateStrategy::CAPACITY_PRIORITY: {
+        case P2PClientSelectionStrategy::CAPACITY_PRIORITY: {
             std::vector<std::pair<size_t, std::shared_ptr<P2PClientMeta>>>
                 clients_with_capacity;
             clients_with_capacity.reserve(client_metas_.size());
@@ -112,7 +113,7 @@ auto P2PClientManager::BuildClientList(ObjectIterateStrategy strategy) const
     return clients;
 }
 
-auto P2PClientManager::ForEachClient(ObjectIterateStrategy strategy,
+auto P2PClientManager::ForEachClient(P2PClientSelectionStrategy strategy,
                                      const ClientVisitor& visitor)
     -> tl::expected<void, ErrorCode> {
     SharedMutexLocker lock(&clients_mutex_, shared_lock);
@@ -338,14 +339,6 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
 
 auto P2PClientManager::UnregisterClient(const P2PUnregisterClientRequest& req)
     -> tl::expected<P2PUnregisterClientResponse, ErrorCode> {
-    if (req.deployment_mode != DeploymentMode::P2P) {
-        LOG(ERROR) << "UnregisterClient: architecture mismatch"
-                   << ", client_mode=" << static_cast<int>(req.deployment_mode)
-                   << ", master_mode=" << static_cast<int>(DeploymentMode::P2P)
-                   << ", client_id=" << req.client_id;
-        return tl::make_unexpected(ErrorCode::ILLEGAL_CLIENT);
-    }
-
     const auto& client_id = req.client_id;
     std::shared_ptr<P2PClientMeta> meta;
     bool was_health = false;

@@ -62,7 +62,7 @@ class P2PClientManager final {
 
     using ClientVisitor = std::function<tl::expected<bool, ErrorCode>(
         const std::shared_ptr<P2PClientMeta>& client)>;
-    auto ForEachClient(ObjectIterateStrategy strategy,
+    auto ForEachClient(P2PClientSelectionStrategy strategy,
                        const ClientVisitor& visitor)
         -> tl::expected<void, ErrorCode>;
 
@@ -77,7 +77,7 @@ class P2PClientManager final {
     HeartbeatTaskResult ProcessTask(
         const std::shared_ptr<P2PClientMeta>& client,
         const HeartbeatTask& task);
-    auto BuildClientList(ObjectIterateStrategy strategy) const
+    auto BuildClientList(P2PClientSelectionStrategy strategy) const
         -> std::optional<std::vector<std::shared_ptr<P2PClientMeta>>>;
 
     mutable SharedMutex clients_mutex_;

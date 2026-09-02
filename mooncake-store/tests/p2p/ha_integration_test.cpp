@@ -112,7 +112,7 @@ class HAIntegrationTest : public ::testing::Test {
     }
 
     // For cross-client reads immediately after a Put on another client, the
-    // async BatchSyncReplica notification may not have reached master yet.
+    // async BatchSyncRoutes notification may not have reached master yet.
     // Retry on OBJECT_NOT_FOUND until master learns about the replica.
     static tl::expected<std::string, ErrorCode> GetDataWithRetry(
         std::shared_ptr<P2PClientService>& client, const std::string& key,
@@ -334,7 +334,7 @@ TEST_F(HAIntegrationTest, DegradedModeRemoteOpsFail) {
     ASSERT_TRUE(put.has_value());
 
     // Verify data is accessible before degradation (client1 → master →
-    // client2). Use retry: async BatchSyncReplica may not have reached master
+    // client2). Use retry: async BatchSyncRoutes may not have reached master
     // yet.
     auto get_before = GetDataWithRetry(client1_, "a3_client2_key", 10);
     ASSERT_TRUE(get_before.has_value()) << "Pre-degradation get failed: "
@@ -364,7 +364,7 @@ TEST_F(HAIntegrationTest, RecoverFromDegradedRemoteGet) {
     ASSERT_TRUE(put.has_value());
 
     // Verify data is accessible before degradation (client1 → master →
-    // client2). Use retry: async BatchSyncReplica may not have reached master
+    // client2). Use retry: async BatchSyncRoutes may not have reached master
     // yet.
     auto get_before = GetDataWithRetry(client1_, "a4_client2_key", 11);
     ASSERT_TRUE(get_before.has_value()) << "Pre-degradation get failed: "
@@ -500,7 +500,6 @@ TEST_F(HAIntegrationTest, ReRegisterReportsCurrentTierSegments) {
     auto& svc = master_.GetWrapped().GetMasterService();
     P2PUnregisterClientRequest unreg;
     unreg.client_id = client1_->GetClientID();
-    unreg.deployment_mode = DeploymentMode::P2P;
     auto unreg_result = svc.UnregisterClient(unreg);
     ASSERT_TRUE(unreg_result.has_value())
         << "UnregisterClient failed: " << unreg_result.error();

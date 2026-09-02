@@ -16,7 +16,6 @@
 #include "p2p/ha/oplog/p2p_standby_metadata_store.h"
 #include "p2p/master/p2p_client_manager.h"
 #include "p2p/master/p2p_route_table.h"
-#include "replica.h"
 #include "types.h"
 
 namespace mooncake {
@@ -72,16 +71,15 @@ class P2PMasterService {
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>;
 
-    // TODO(M8.3; see p2p-master-final-refactor-plan.md): Return P2P-owned route
-    // descriptors instead of Replica::Descriptor.
     auto GetReplicaListByRegex(const std::string& regex_pattern)
         -> tl::expected<
-            std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+            std::unordered_map<std::string,
+                               std::vector<P2PRouteDescriptor>>,
             ErrorCode>;
     auto GetReplicaList(std::string_view key,
-                        const P2PGetReplicaListRequestConfig& config =
-                            P2PGetReplicaListRequestConfig())
-        -> tl::expected<P2PGetReplicaListResponse, ErrorCode>;
+                        const P2PReadRouteConfig& config =
+                            P2PReadRouteConfig())
+        -> tl::expected<P2PGetReadRouteResponse, ErrorCode>;
 
     auto Remove(std::string_view key, bool force = false)
         -> tl::expected<void, ErrorCode>;
@@ -92,39 +90,39 @@ class P2PMasterService {
 
     OpLogManager* GetOpLogManager() const { return oplog_manager_.get(); }
 
-    auto GetWriteRoute(const WriteRouteRequest& req)
-        -> tl::expected<WriteRouteResponse, ErrorCode>;
+    auto GetWriteRoute(const P2PGetWriteRouteRequest& req)
+        -> tl::expected<P2PGetWriteRouteResponse, ErrorCode>;
 
     /**
      * @brief Batch get write routes for multiple keys.
      *        Reuses GetWriteRoute logic per key.
      */
-    auto BatchGetWriteRoute(const BatchGetWriteRouteRequest& req)
-        -> BatchGetWriteRouteResponse;
+    auto BatchGetWriteRoute(const P2PBatchGetWriteRouteRequest& req)
+        -> P2PBatchGetWriteRouteResponse;
 
     /**
      * @brief Add a route replica to master
      */
-    auto AddReplica(const AddReplicaRequest& req)
+    auto AddReplica(const P2PPublishRouteRequest& req)
         -> tl::expected<void, ErrorCode>;
 
     /**
      * @brief Remove a route replica from master
      */
-    auto RemoveReplica(const RemoveReplicaRequest& req)
+    auto RemoveReplica(const P2PWithdrawRouteRequest& req)
         -> tl::expected<void, ErrorCode>;
 
     /**
      * @brief Remove replicas from multiple segments in one call
      */
-    auto BatchRemoveReplica(const BatchRemoveReplicaRequest& req)
-        -> std::vector<tl::expected<void, ErrorCode>>;
+    auto BatchRemoveReplica(const P2PBatchWithdrawRouteRequest& req)
+        -> P2PBatchWithdrawRouteResponse;
 
     /**
-     * @brief Batch sync replicas with mixed ADD and REMOVE ops
+     * @brief Batch sync routes with mixed publish and withdraw operations.
      */
-    auto BatchSyncReplica(const BatchSyncReplicaRequest& req)
-        -> BatchSyncReplicaResponse;
+    auto BatchSyncRoutes(const P2PBatchSyncRoutesRequest& request)
+        -> P2PBatchSyncRoutesResponse;
 
     /**
      * @brief Client notifies Master that metadata sync is complete
@@ -154,17 +152,12 @@ class P2PMasterService {
     static OwnerClientSet CollectRouteOwnerClients(
         const P2PRouteEntry& route);
 
-    // TODO(M8.3; see p2p-master-final-refactor-plan.md): Return a P2P-owned
-    // route descriptor instead of Replica::Descriptor.
-    auto BuildReplicaDescriptor(const P2PRouteLocation& location,
-                                uint64_t object_size) const
-        -> tl::expected<Replica::Descriptor, ErrorCode>;
+    auto BuildRouteDescriptor(const P2PRouteLocation& location,
+                              uint64_t object_size) const
+        -> tl::expected<P2PRouteDescriptor, ErrorCode>;
 
-    // TODO(M8.3; see p2p-master-final-refactor-plan.md): Return P2P-owned route
-    // descriptors instead of Replica::Descriptor.
-    std::vector<Replica::Descriptor> FilterRoutes(
-        const P2PGetReplicaListRequestConfig& config,
-        const P2PRouteEntry& route) const;
+    std::vector<P2PRouteDescriptor> FilterRoutes(
+        const P2PReadRouteConfig& config, const P2PRouteEntry& route) const;
 
     auto InnerAddReplica(std::string_view key, const UUID& client_id,
                          const UUID& segment_id, size_t size,

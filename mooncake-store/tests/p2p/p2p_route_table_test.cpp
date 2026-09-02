@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <vector>
 
 #include "p2p/master/p2p_route_table.h"
 
@@ -75,6 +76,100 @@ TEST(P2PRouteTableTest, CountsUniqueClientsForRouteLimit) {
         table.Publish("key", 1024, Location(kClientB, UUID{13, 13}));
     ASSERT_FALSE(second_client.has_value());
     EXPECT_EQ(second_client.error(), ErrorCode::REPLICA_NUM_EXCEEDED);
+}
+
+TEST(P2PRouteTableTest, BatchSyncPreservesResultsAndMutationOrder) {
+    P2PRouteTable table;
+    const UUID segment_id{11, 11};
+    const std::vector<P2PPublishRouteOperation> publishes{
+        {.key = "key", .object_size = 1024, .segment_id = segment_id},
+        {.key = "key", .object_size = 1024, .segment_id = segment_id},
+    };
+    const std::vector<P2PWithdrawRouteOperation> withdrawals{
+        {.key = "key", .segment_id = segment_id},
+        {.key = "missing", .segment_id = segment_id},
+    };
+    std::vector<ErrorCode> publish_results(publishes.size(), ErrorCode::OK);
+    std::vector<ErrorCode> withdraw_results(withdrawals.size(), ErrorCode::OK);
+    std::vector<std::string> hooks;
+
+    table.BatchSync(
+        kClientA, publishes, withdrawals,
+        P2PRouteTable::BeforePublishCallback{},
+        [&](size_t index, const P2PPublishRouteOperation& operation,
+            const P2PRouteTable::Mutation& result) {
+            publish_results[index] =
+                result.has_value() ? ErrorCode::OK : result.error();
+            if (result.has_value()) {
+                hooks.push_back("publish:" + operation.key);
+            }
+        },
+        [&](const P2PWithdrawRouteOperation& operation) {
+            hooks.push_back("withdraw:" + operation.key);
+            return ErrorCode::OK;
+        },
+        [&](size_t index, const P2PWithdrawRouteOperation&,
+            const P2PRouteTable::Mutation& result) {
+            withdraw_results[index] =
+                result.has_value() ? ErrorCode::OK : result.error();
+        });
+
+    EXPECT_EQ(publish_results,
+              (std::vector<ErrorCode>{ErrorCode::OK,
+                                      ErrorCode::REPLICA_ALREADY_EXISTS}));
+    EXPECT_EQ(withdraw_results,
+              (std::vector<ErrorCode>{ErrorCode::OK,
+                                      ErrorCode::OBJECT_NOT_FOUND}));
+    EXPECT_EQ(hooks,
+              (std::vector<std::string>{"publish:key", "withdraw:key"}));
+    EXPECT_FALSE(table.RouteExists("key"));
+}
+
+TEST(P2PRouteTableTest, BatchWithdrawCallbackFailureKeepsRoute) {
+    P2PRouteTable table;
+    const UUID segment_id{11, 11};
+    const auto location = Location(kClientA, segment_id);
+    ASSERT_TRUE(table.Publish("key", 1024, location).has_value());
+    const std::vector<P2PWithdrawRouteOperation> withdrawals{
+        {.key = "key", .segment_id = segment_id},
+    };
+    ErrorCode result = ErrorCode::OK;
+
+    table.BatchWithdraw(
+        kClientA, withdrawals,
+        [](const P2PWithdrawRouteOperation&) {
+            return ErrorCode::INTERNAL_ERROR;
+        },
+        [&](size_t, const P2PWithdrawRouteOperation&,
+            const P2PRouteTable::Mutation& mutation) {
+            ASSERT_FALSE(mutation.has_value());
+            result = mutation.error();
+        });
+
+    EXPECT_EQ(result, ErrorCode::INTERNAL_ERROR);
+    EXPECT_TRUE(table.RouteExists("key"));
+}
+
+TEST(P2PRouteTableTest, BatchPublishCallbackFailureDoesNotCreateRoute) {
+    P2PRouteTable table;
+    const std::vector<P2PPublishRouteOperation> publishes{
+        {.key = "key", .object_size = 1024, .segment_id = UUID{11, 11}},
+    };
+    ErrorCode result = ErrorCode::OK;
+
+    table.BatchPublish(
+        kClientA, publishes,
+        [](const P2PPublishRouteOperation&) {
+            return ErrorCode::SEGMENT_NOT_FOUND;
+        },
+        [&](size_t, const P2PPublishRouteOperation&,
+            const P2PRouteTable::Mutation& mutation) {
+            ASSERT_FALSE(mutation.has_value());
+            result = mutation.error();
+        });
+
+    EXPECT_EQ(result, ErrorCode::SEGMENT_NOT_FOUND);
+    EXPECT_FALSE(table.RouteExists("key"));
 }
 
 TEST(P2PRouteTableTest, CleanupUsesClientAndSegmentIdentity) {
