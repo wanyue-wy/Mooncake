@@ -16,7 +16,7 @@ namespace mooncake {
 
 class RuntimeConfigStore {
    public:
-    using WriteConfig = std::variant<ReplicateConfig, WriteRouteRequestConfig>;
+    using WriteConfig = std::variant<ReplicateConfig, P2PWriteRouteConfig>;
 
     explicit RuntimeConfigStore(DeploymentMode mode);
 
@@ -30,12 +30,12 @@ class RuntimeConfigStore {
 
    private:
     static void applyPatch(ReplicateConfig& config, const Json::Value& json);
-    static bool applyPatch(WriteRouteRequestConfig& config,
+    static bool applyPatch(P2PWriteRouteConfig& config,
                            const Json::Value& json);
     static void applyPatch(ReadRouteConfig& config, const Json::Value& json);
 
     static Json::Value toJson(const ReplicateConfig& config);
-    static Json::Value toJson(const WriteRouteRequestConfig& config);
+    static Json::Value toJson(const P2PWriteRouteConfig& config);
     static Json::Value toJson(const ReadRouteConfig& config);
 
     mutable std::shared_mutex mu_;

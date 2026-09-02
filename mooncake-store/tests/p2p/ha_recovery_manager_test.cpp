@@ -198,7 +198,8 @@ class HARecoveryManagerTest : public ::testing::Test {
         local_segment.id = tier_id;
         local_segment.name = "local_recovery_tier";
         auto& svc = master_.GetWrapped().GetMasterService();
-        auto result = svc.MountSegment(local_segment, client_id_);
+        auto result = svc.MountSegment(P2PMountSegmentRequest{
+            .client_id = client_id_, .segment = local_segment});
         ASSERT_TRUE(result.has_value())
             << "MountSegment failed: " << result.error();
     }
@@ -219,7 +220,8 @@ class HARecoveryManagerTest : public ::testing::Test {
         auto& svc = master_.GetWrapped().GetMasterService();
         const auto deadline = std::chrono::steady_clock::now() + timeout;
         do {
-            if (svc.GetReplicaList(key).has_value()) {
+            if (svc.GetReadRoute(P2PGetReadRouteRequest{.key = key})
+                    .has_value()) {
                 return true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -417,13 +419,11 @@ TEST_F(HARecoveryManagerTest, ReconnectResyncsLocalReplicaToP2PMaster) {
         << "Replica did not become visible on the P2P master";
 
     auto& svc = master_.GetWrapped().GetMasterService();
-    auto result = svc.GetReplicaList(key);
+    auto result = svc.GetReadRoute(P2PGetReadRouteRequest{.key = key});
     ASSERT_TRUE(result.has_value())
         << "GetReplicaList failed: " << result.error();
-    ASSERT_EQ(result.value().replicas.size(), 1);
-    const auto& replica = result.value().replicas[0];
-    ASSERT_TRUE(replica.is_p2p_proxy_replica());
-    const auto& desc = replica.get_p2p_proxy_descriptor();
+    ASSERT_EQ(result.value().routes.size(), 1);
+    const auto& desc = result.value().routes[0];
     EXPECT_EQ(desc.client_id, client_id_);
     EXPECT_EQ(desc.segment_id, tier_id.value());
 }
@@ -450,7 +450,7 @@ TEST_F(HARecoveryManagerTest, RegisterOnlyRecoverySkipsLocalReplicaResync) {
     WaitUntilFull(*mgr);
 
     auto& svc = master_.GetWrapped().GetMasterService();
-    auto result = svc.GetReplicaList(key);
+    auto result = svc.GetReadRoute(P2PGetReadRouteRequest{.key = key});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), ErrorCode::OBJECT_NOT_FOUND);
 }

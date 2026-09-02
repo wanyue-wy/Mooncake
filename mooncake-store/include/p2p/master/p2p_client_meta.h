@@ -63,8 +63,8 @@ class P2PClientMeta final {
         registered_.store(true, std::memory_order_release);
     }
 
-    std::optional<WriteCandidate> GetWriteRouteCandidate(
-        const WriteRouteRequest& req) const;
+    std::optional<P2PWriteCandidate> GetWriteRouteCandidate(
+        const P2PGetWriteRouteRequest& req) const;
 
     void SetSyncing(bool syncing) {
         is_syncing_.store(syncing, std::memory_order_release);

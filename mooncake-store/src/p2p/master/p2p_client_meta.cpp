@@ -298,8 +298,8 @@ P2PClientMeta::CapacityStat P2PClientMeta::GetWriteScoreCapacity(
     return top_tier_only ? top : all;
 }
 
-std::optional<WriteCandidate> P2PClientMeta::GetWriteRouteCandidate(
-    const WriteRouteRequest& req) const {
+std::optional<P2PWriteCandidate> P2PClientMeta::GetWriteRouteCandidate(
+    const P2PGetWriteRouteRequest& req) const {
     SharedMutexLocker lock(&client_mutex_, shared_lock);
     if (!InnerStatusCheck().has_value()) {
         return std::nullopt;
@@ -307,11 +307,11 @@ std::optional<WriteCandidate> P2PClientMeta::GetWriteRouteCandidate(
     const auto capacity = GetWriteScoreCapacity(
         req.config.tag_filters, req.config.priority_limit,
         req.config.top_tier_only);
-    if (capacity.total == 0 || capacity.free < req.size) {
+    if (capacity.total == 0 || capacity.free < req.object_size) {
         return std::nullopt;
     }
 
-    WriteCandidate candidate;
+    P2PWriteCandidate candidate;
     candidate.client_id = client_id_;
     candidate.ip_address = ip_address_;
     candidate.rpc_port = rpc_port_;

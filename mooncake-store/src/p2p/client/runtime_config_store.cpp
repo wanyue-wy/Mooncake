@@ -7,7 +7,7 @@ namespace mooncake {
 
 RuntimeConfigStore::RuntimeConfigStore(DeploymentMode mode)
     : write_(mode == DeploymentMode::P2P
-                 ? WriteConfig{WriteRouteRequestConfig{}}
+                 ? WriteConfig{P2PWriteRouteConfig{}}
                  : WriteConfig{ReplicateConfig{}}) {}
 
 RuntimeConfigStore::WriteConfig RuntimeConfigStore::getDefaultWriteConfig()
@@ -27,7 +27,7 @@ bool RuntimeConfigStore::updateWriteConfig(const Json::Value& json) {
     std::visit(
         [&](auto& cfg) {
             if constexpr (std::is_same_v<std::decay_t<decltype(cfg)>,
-                                         WriteRouteRequestConfig>) {
+                                         P2PWriteRouteConfig>) {
                 ok = applyPatch(cfg, json);
             } else {
                 applyPatch(cfg, json);
@@ -60,7 +60,7 @@ bool RuntimeConfigStore::loadFromJson(const Json::Value& root) {
         std::visit(
             [&](auto& cfg) {
                 if constexpr (std::is_same_v<std::decay_t<decltype(cfg)>,
-                                             WriteRouteRequestConfig>) {
+                                             P2PWriteRouteConfig>) {
                     ok = applyPatch(cfg, root["write"]);
                 } else {
                     applyPatch(cfg, root["write"]);
@@ -113,7 +113,7 @@ void RuntimeConfigStore::applyPatch(ReplicateConfig& config,
     }
 }
 
-bool RuntimeConfigStore::applyPatch(WriteRouteRequestConfig& config,
+bool RuntimeConfigStore::applyPatch(P2PWriteRouteConfig& config,
                                     const Json::Value& json) {
     if (!json.isObject()) return false;
 
@@ -126,7 +126,7 @@ bool RuntimeConfigStore::applyPatch(WriteRouteRequestConfig& config,
     }
     if (json.isMember("strategy") && json["strategy"].isInt()) {
         patched.strategy =
-            static_cast<ObjectIterateStrategy>(json["strategy"].asInt());
+            static_cast<P2PClientSelectionStrategy>(json["strategy"].asInt());
     }
     if (json.isMember("remote_weight") && json["remote_weight"].isNumeric()) {
         double w = json["remote_weight"].asDouble();
@@ -209,7 +209,7 @@ Json::Value RuntimeConfigStore::toJson(const ReplicateConfig& config) {
     return json;
 }
 
-Json::Value RuntimeConfigStore::toJson(const WriteRouteRequestConfig& config) {
+Json::Value RuntimeConfigStore::toJson(const P2PWriteRouteConfig& config) {
     Json::Value json;
     json["max_candidates"] = Json::Value::UInt64(config.max_candidates);
     json["strategy"] = static_cast<int>(config.strategy);

@@ -109,7 +109,7 @@ class P2PMasterHttpEndpointsTest : public ::testing::Test {
             << "RegisterClient failed: " << reg_res.error();
 
         // Tests populate keys themselves; start from an empty keyspace.
-        ASSERT_EQ(wrapped_->GetMasterService().GetKeyCount(), 0u);
+        ASSERT_EQ(wrapped_->GetMasterService().GetRouteKeyCount(), 0u);
     }
 
     static void TearDownTestSuite() {
@@ -270,7 +270,8 @@ TEST_F(P2PMasterHttpEndpointsTest,
 
     // Cross-check the HTTP value against the in-process service state.
     EXPECT_EQ(HttpGetKeyCount(),
-              static_cast<int64_t>(wrapped_->GetMasterService().GetKeyCount()));
+              static_cast<int64_t>(
+                  wrapped_->GetMasterService().GetRouteKeyCount()));
 
     // Removing replicas of two keys must drop the count accordingly.
     RemoveKey(keys[0], segment_id_a_);

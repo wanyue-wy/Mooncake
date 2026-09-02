@@ -42,21 +42,6 @@ P2PReadRouteConfig ToP2PReadRouteConfig(const ReadRouteConfig& config) {
     return rpc_config;
 }
 
-P2PWriteRouteConfig ToP2PWriteRouteConfig(
-    const WriteRouteRequestConfig& config) {
-    P2PWriteRouteConfig rpc_config;
-    rpc_config.max_candidates = config.max_candidates;
-    rpc_config.strategy =
-        static_cast<P2PClientSelectionStrategy>(config.strategy);
-    rpc_config.remote_weight = config.remote_weight;
-    rpc_config.local_write_waterline = config.local_write_waterline;
-    rpc_config.top_tier_only = config.top_tier_only;
-    rpc_config.early_return = config.early_return;
-    rpc_config.tag_filters = config.tag_filters;
-    rpc_config.priority_limit = config.priority_limit;
-    return rpc_config;
-}
-
 std::vector<Replica::Descriptor> ToFacadeReplicaDescriptors(
     std::vector<P2PRouteDescriptor> routes) {
     std::vector<Replica::Descriptor> replicas;
@@ -1052,7 +1037,7 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchPut(
     std::vector<size_t> sizes;
 
     auto guard = AcquireInflightGuard();
-    const auto* route_cfg_ptr = std::get_if<WriteRouteRequestConfig>(&config);
+    const auto* route_cfg_ptr = std::get_if<P2PWriteRouteConfig>(&config);
     if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
         std::fill(results.begin(), results.end(),
@@ -1062,11 +1047,11 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchPut(
         std::fill(results.begin(), results.end(),
                   tl::unexpected(ErrorCode::INVALID_PARAMS));
     } else if (!route_cfg_ptr) {
-        LOG(ERROR) << "P2PClientService expects WriteRouteRequestConfig";
+        LOG(ERROR) << "P2PClientService expects P2PWriteRouteConfig";
         std::fill(results.begin(), results.end(),
                   tl::unexpected(ErrorCode::INVALID_PARAMS));
     } else if (!route_cfg_ptr->IsValid()) {
-        LOG(ERROR) << "invalid WriteRouteRequestConfig: " << *route_cfg_ptr;
+        LOG(ERROR) << "invalid P2PWriteRouteConfig: " << *route_cfg_ptr;
         std::fill(results.begin(), results.end(),
                   tl::unexpected(ErrorCode::INVALID_PARAMS));
     } else {
@@ -1107,7 +1092,7 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchPut(
     return results;
 }
 
-bool P2PClientService::IsLocalWrite(const WriteRouteRequestConfig& cfg) const {
+bool P2PClientService::IsLocalWrite(const P2PWriteRouteConfig& cfg) const {
     if (ha_manager_ && ha_manager_->IsLocalService()) return true;
     if (cfg.remote_weight <= 0.0) return true;   // force local
     if (cfg.remote_weight >= 1.0) return false;  // force remote
@@ -1115,7 +1100,7 @@ bool P2PClientService::IsLocalWrite(const WriteRouteRequestConfig& cfg) const {
 }
 
 bool P2PClientService::IsBelowLocalWaterline(
-    const WriteRouteRequestConfig& cfg) const {
+    const P2PWriteRouteConfig& cfg) const {
     if (cfg.local_write_waterline <= 0.0 || !data_manager_) return false;
 
     auto tiers = data_manager_->GetTierViews();
@@ -1155,7 +1140,7 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::InnerBatchPut(
     const std::vector<ObjectKey>& keys,
     std::vector<std::vector<Slice>>& batched_slices,
     const std::vector<size_t>& sizes,
-    const WriteRouteRequestConfig& route_config) {
+    const P2PWriteRouteConfig& route_config) {
     if (IsLocalWrite(route_config)) {
         return InnerBatchPutLocalOnly(keys, batched_slices, sizes);
     }
@@ -1265,7 +1250,7 @@ P2PClientService::InnerBatchPutNormal(
     const std::vector<ObjectKey>& keys,
     std::vector<std::vector<Slice>>& batched_slices,
     const std::vector<size_t>& sizes,
-    const WriteRouteRequestConfig& route_config) {
+    const P2PWriteRouteConfig& route_config) {
     // Phase 1: fetch write routes from master.
     auto batch_routes = BatchFetchWriteRoutes(keys, sizes, route_config);
     if (!batch_routes) {
@@ -1287,10 +1272,10 @@ P2PClientService::InnerBatchPutNormal(
 tl::expected<P2PBatchGetWriteRouteResponse, ErrorCode>
 P2PClientService::BatchFetchWriteRoutes(const std::vector<ObjectKey>& keys,
                                         const std::vector<size_t>& sizes,
-                                        const WriteRouteRequestConfig& config) {
+                                        const P2PWriteRouteConfig& config) {
     P2PBatchGetWriteRouteRequest req;
     req.client_id = client_id_;
-    req.config = ToP2PWriteRouteConfig(config);
+    req.config = config;
     req.keys.assign(keys.begin(), keys.end());
     req.object_sizes.assign(sizes.begin(), sizes.end());
     auto batch_route_result = master_client_.BatchGetWriteRoute(req);
@@ -1307,7 +1292,7 @@ P2PClientService::CreatePutHandlesFromRoute(
     const std::vector<ObjectKey>& keys,
     std::vector<std::vector<Slice>>& batched_slices,
     const std::vector<size_t>& sizes,
-    const WriteRouteRequestConfig& route_config,
+    const P2PWriteRouteConfig& route_config,
     P2PBatchGetWriteRouteResponse& batch_resp) {
     struct WriteTask {
         std::unique_ptr<TaskHandle<void>> first_task;
@@ -1382,7 +1367,7 @@ P2PClientService::CreatePutHandlesFromRoute(
 auto P2PClientService::BuildWriteOps(std::string_view key,
                                      std::vector<Slice>& slices,
                                      size_t object_size,
-                                     const WriteRouteRequestConfig& config,
+                                     const P2PWriteRouteConfig& config,
                                      std::vector<P2PWriteCandidate> candidates)
     -> tl::expected<std::vector<std::unique_ptr<WriteOp>>, ErrorCode> {
     if (candidates.empty()) {
@@ -3039,7 +3024,7 @@ void P2PClientService::RegisterHttpMethods() {
 
             Slice slice{static_cast<char*>(buf_handle.ptr()), body.size()};
             std::vector<Slice> slices{slice};
-            auto result = Put(key, slices, WriteRouteRequestConfig{});
+            auto result = Put(key, slices, P2PWriteRouteConfig{});
 
             if (!result) {
                 resp.set_status_and_content(

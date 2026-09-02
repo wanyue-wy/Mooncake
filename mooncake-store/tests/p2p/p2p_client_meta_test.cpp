@@ -150,9 +150,9 @@ TEST(P2PClientMetaTest, ScoresOnlyEligibleSegments) {
                           Segment({2, 2}, "fast", 2000, 10, {"hot"}, 500))
                     .has_value());
 
-    WriteRouteRequest request;
+    P2PGetWriteRouteRequest request;
     request.client_id = client->get_client_id();
-    request.size = 1000;
+    request.object_size = 1000;
     request.config.top_tier_only = true;
     request.config.priority_limit = 5;
     auto candidate = client->GetWriteRouteCandidate(request);
@@ -164,15 +164,15 @@ TEST(P2PClientMetaTest, ScoresOnlyEligibleSegments) {
     EXPECT_FALSE(client->GetWriteRouteCandidate(request).has_value());
 }
 
-TEST(P2PClientMetaTest, UnhealthyClientIsNotWriteCandidate) {
+TEST(P2PClientMetaTest, UnhealthyClientIsNotP2PWriteCandidate) {
     auto client = Client({1, 1}, 1, 5);
     ASSERT_TRUE(client->MountSegment(Segment()).has_value());
     client->health_state_.last_heartbeat =
         std::chrono::steady_clock::now() - std::chrono::seconds(2);
     ASSERT_EQ(client->CheckHealth().second, P2PClientStatus::DISCONNECTED);
 
-    WriteRouteRequest request;
-    request.size = 1;
+    P2PGetWriteRouteRequest request;
+    request.object_size = 1;
     EXPECT_FALSE(client->GetWriteRouteCandidate(request).has_value());
 }
 
