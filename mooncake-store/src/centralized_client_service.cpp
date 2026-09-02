@@ -481,8 +481,7 @@ CentralizedClientService::BatchIsExist(const std::vector<std::string>& keys) {
         return std::vector<tl::expected<bool, ErrorCode>>(
             keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
     }
-    std::vector<std::string_view> key_views(keys.begin(), keys.end());
-    auto results = master_client_.BatchExistKey(key_views);
+    auto results = master_client_.BatchExistKey(keys);
     for (size_t i = 0; i < results.size(); ++i) {
         if (!results[i]) {
             LOG(ERROR) << "Failed to query key"
