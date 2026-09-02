@@ -6,483 +6,307 @@
 
 namespace mooncake {
 
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::ExistKey> {
-    static constexpr const char* value = "ExistKey";
-};
+#define DEFINE_P2P_RPC_NAME(method)                                    \
+    template <>                                                        \
+    struct RpcNameTraits<&P2PMasterRpcService::method> {               \
+        static constexpr const char* value = #method;                   \
+    }
 
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::BatchExistKey> {
-    static constexpr const char* value = "BatchExistKey";
-};
+DEFINE_P2P_RPC_NAME(RegisterClient);
+DEFINE_P2P_RPC_NAME(UnregisterClient);
+DEFINE_P2P_RPC_NAME(Heartbeat);
+DEFINE_P2P_RPC_NAME(QueryClientStatus);
+DEFINE_P2P_RPC_NAME(MountSegment);
+DEFINE_P2P_RPC_NAME(UnmountSegment);
+DEFINE_P2P_RPC_NAME(RouteExists);
+DEFINE_P2P_RPC_NAME(BatchRouteExists);
+DEFINE_P2P_RPC_NAME(GetReadRoute);
+DEFINE_P2P_RPC_NAME(BatchGetReadRoute);
+DEFINE_P2P_RPC_NAME(GetWriteRoute);
+DEFINE_P2P_RPC_NAME(BatchGetWriteRoute);
+DEFINE_P2P_RPC_NAME(PublishRoute);
+DEFINE_P2P_RPC_NAME(WithdrawRoute);
+DEFINE_P2P_RPC_NAME(BatchWithdrawRoute);
+DEFINE_P2P_RPC_NAME(BatchSyncRoutes);
+DEFINE_P2P_RPC_NAME(CompleteRouteSync);
+DEFINE_P2P_RPC_NAME(ServiceReady);
+DEFINE_P2P_RPC_NAME(HeartbeatServiceReady);
 
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::BatchQueryIp> {
-    static constexpr const char* value = "BatchQueryIp";
-};
+#undef DEFINE_P2P_RPC_NAME
 
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::GetReplicaListByRegex> {
-    static constexpr const char* value = "GetReplicaListByRegex";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::GetReplicaList> {
-    static constexpr const char* value = "GetReplicaList";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::BatchGetReplicaList> {
-    static constexpr const char* value = "BatchGetReplicaList";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::Remove> {
-    static constexpr const char* value = "Remove";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::RemoveByRegex> {
-    static constexpr const char* value = "RemoveByRegex";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::RemoveAll> {
-    static constexpr const char* value = "RemoveAll";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::MountSegment> {
-    static constexpr const char* value = "MountSegment";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::UnmountSegment> {
-    static constexpr const char* value = "UnmountSegment";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::Heartbeat> {
-    static constexpr const char* value = "Heartbeat";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::RegisterClient> {
-    static constexpr const char* value = "RegisterClient";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::UnregisterClient> {
-    static constexpr const char* value = "UnregisterClient";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::QueryClientStatus> {
-    static constexpr const char* value = "QueryClientStatus";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::ServiceReady> {
-    static constexpr const char* value = "ServiceReady";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::HeartbeatServiceReady> {
-    static constexpr const char* value = "HeartbeatServiceReady";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::GetWriteRoute> {
-    static constexpr const char* value = "GetWriteRoute";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::BatchGetWriteRoute> {
-    static constexpr const char* value = "BatchGetWriteRoute";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::AddReplica> {
-    static constexpr const char* value = "AddReplica";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::RemoveReplica> {
-    static constexpr const char* value = "RemoveReplica";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::BatchRemoveReplica> {
-    static constexpr const char* value = "BatchRemoveReplica";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::BatchSyncReplica> {
-    static constexpr const char* value = "BatchSyncReplica";
-};
-
-template <>
-struct RpcNameTraits<&WrappedP2PMasterService::SetSyncCompleted> {
-    static constexpr const char* value = "SetSyncCompleted";
-};
+P2PMasterClient::P2PMasterClient(const UUID& client_id,
+                                 MasterClientMetric* metrics)
+    : client_id_(client_id), metrics_(metrics) {
+    coro_io::client_pool<coro_rpc::coro_rpc_client>::pool_config config{};
+    const char* protocol = std::getenv("MC_RPC_PROTOCOL");
+    if (protocol && std::string_view(protocol) == "rdma") {
+        config.client_config.socket_config = coro_io::ib_socket_t::config_t{};
+    }
+    pools_ =
+        std::make_shared<coro_io::client_pools<coro_rpc::coro_rpc_client>>(
+            config);
+}
 
 ErrorCode P2PMasterClient::Connect(const std::string& master_addr) {
     ScopedVLogTimer timer(1, "P2PMasterClient::Connect");
-    timer.LogRequest("master_addr=", master_addr);
-
     MutexLocker lock(&connect_mutex_);
-    bool is_same_addr = (client_addr_param_ == master_addr);
-    if (!is_same_addr) {
-        auto client_pool = client_pools_->at(master_addr);
-        client_accessor_.SetClientPool(client_pool);
-        client_addr_param_ = master_addr;
-        if (heartbeat_rpc_port_ > 0) {
-            auto colon = master_addr.rfind(':');
-            std::string host = (colon == std::string::npos)
-                                   ? master_addr
-                                   : master_addr.substr(0, colon);
-            heartbeat_accessor_.SetClientPool(client_pools_->at(
-                host + ":" + std::to_string(heartbeat_rpc_port_)));
+    const bool same_address = connected_address_ == master_addr;
+    if (!same_address) {
+        auto main_pool = pools_->at(master_addr);
+        main_accessor_.SetClientPool(main_pool);
+        connected_address_ = master_addr;
+        if (heartbeat_rpc_port_ == 0) {
+            heartbeat_accessor_.SetClientPool(main_pool);
         } else {
-            heartbeat_accessor_.SetClientPool(client_pool);
+            const auto colon = master_addr.rfind(':');
+            const std::string host = colon == std::string::npos
+                                         ? master_addr
+                                         : master_addr.substr(0, colon);
+            heartbeat_accessor_.SetClientPool(
+                pools_->at(host + ":" + std::to_string(heartbeat_rpc_port_)));
         }
     }
 
-    auto result =
-        invoke_rpc<&WrappedP2PMasterService::ServiceReady, std::string>();
-    if (!result.has_value() && is_same_addr) {
-        timer.LogResponse("error_code=", result.error());
-        result =
-            invoke_rpc<&WrappedP2PMasterService::ServiceReady, std::string>();
+    auto ready = Invoke<&P2PMasterRpcService::ServiceReady, std::string>();
+    if (!ready.has_value() && same_address) {
+        ready = Invoke<&P2PMasterRpcService::ServiceReady, std::string>();
     }
-    if (!result.has_value()) {
-        timer.LogResponse("error_code=", result.error());
-        client_addr_param_.clear();
-        return result.error();
+    if (!ready.has_value()) {
+        connected_address_.clear();
+        return ready.error();
     }
-
-    std::string client_version = GetMooncakeStoreVersion();
-    if (result.value() != client_version) {
-        LOG(ERROR) << "Version mismatch: server=" << result.value()
-                   << " client=" << client_version;
-        timer.LogResponse("error_code=", ErrorCode::INVALID_VERSION);
+    if (*ready != GetMooncakeStoreVersion()) {
+        LOG(ERROR) << "P2P master version mismatch"
+                   << ", server=" << *ready
+                   << ", client=" << GetMooncakeStoreVersion();
+        connected_address_.clear();
         return ErrorCode::INVALID_VERSION;
     }
 
-    auto hb_ready = invoke_rpc<&WrappedP2PMasterService::HeartbeatServiceReady,
-                               P2PHeartbeatServiceReadyResponse>();
-    if (!hb_ready.has_value()) {
-        LOG(ERROR) << "HeartbeatServiceReady probe failed: error_code="
-                   << hb_ready.error()
-                   << " (master may predate this RPC; upgrade master first)";
-        timer.LogResponse("error_code=", hb_ready.error());
-        client_addr_param_.clear();
-        return hb_ready.error();
+    auto heartbeat_ready =
+        Invoke<&P2PMasterRpcService::HeartbeatServiceReady,
+               P2PHeartbeatServiceReadyResponse>();
+    if (!heartbeat_ready.has_value()) {
+        connected_address_.clear();
+        return heartbeat_ready.error();
     }
-    const bool client_dedicated = heartbeat_rpc_port_ > 0;
-    const bool master_dedicated = hb_ready->heartbeat_rpc_port > 0;
-    if (client_dedicated != master_dedicated) {
-        LOG(ERROR) << "Heartbeat routing mismatch: client_hb_port="
-                   << heartbeat_rpc_port_
-                   << " master_hb_port=" << hb_ready->heartbeat_rpc_port
-                   << " (one side is dedicated, the other is legacy)";
-        timer.LogResponse("error_code=",
-                          ErrorCode::HEARTBEAT_ROUTING_MISMATCH);
-        client_addr_param_.clear();
+    if ((heartbeat_rpc_port_ > 0) !=
+        (heartbeat_ready->heartbeat_rpc_port > 0)) {
+        LOG(ERROR) << "P2P heartbeat routing mismatch"
+                   << ", client_port=" << heartbeat_rpc_port_
+                   << ", server_port="
+                   << heartbeat_ready->heartbeat_rpc_port;
+        connected_address_.clear();
         return ErrorCode::HEARTBEAT_ROUTING_MISMATCH;
     }
 
-    if (client_dedicated) {
-        auto hb_result = invoke_rpc_via<&WrappedP2PMasterService::ServiceReady,
-                                        std::string>(heartbeat_accessor_);
-        if (!hb_result.has_value() && is_same_addr) {
-            hb_result =
-                invoke_rpc_via<&WrappedP2PMasterService::ServiceReady,
-                               std::string>(heartbeat_accessor_);
+    if (heartbeat_rpc_port_ > 0) {
+        auto heartbeat_probe =
+            InvokeVia<&P2PMasterRpcService::ServiceReady, std::string>(
+                heartbeat_accessor_);
+        if (!heartbeat_probe.has_value() && same_address) {
+            heartbeat_probe =
+                InvokeVia<&P2PMasterRpcService::ServiceReady, std::string>(
+                    heartbeat_accessor_);
         }
-        if (!hb_result.has_value()) {
-            LOG(ERROR) << "Dedicated heartbeat RPC server unreachable at"
-                       << " heartbeat_rpc_port=" << heartbeat_rpc_port_
-                       << ": error_code=" << hb_result.error();
-            timer.LogResponse("error_code=",
-                              ErrorCode::HEARTBEAT_RPC_UNREACHABLE);
-            client_addr_param_.clear();
+        if (!heartbeat_probe.has_value()) {
+            connected_address_.clear();
             return ErrorCode::HEARTBEAT_RPC_UNREACHABLE;
         }
     }
-
-    timer.LogResponse("error_code=", ErrorCode::OK);
     return ErrorCode::OK;
 }
 
-tl::expected<bool, ErrorCode> P2PMasterClient::ExistKey(
-    std::string_view object_key) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::ExistKey");
-    timer.LogRequest("object_key=", object_key);
-    auto result =
-        invoke_rpc<&WrappedP2PMasterService::ExistKey, bool>(object_key);
-    timer.LogResponseExpected(result);
-    return result;
+auto P2PMasterClient::RegisterClient(
+    const P2PRegisterClientRequest& request)
+    -> tl::expected<P2PRegisterClientResponse, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::RegisterClient,
+                  P2PRegisterClientResponse>(request);
 }
 
-std::vector<tl::expected<bool, ErrorCode>> P2PMasterClient::BatchExistKey(
-    const std::vector<std::string_view>& object_keys) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::BatchExistKey");
-    timer.LogRequest("keys_count=", object_keys.size());
-    auto result =
-        invoke_batch_rpc<&WrappedP2PMasterService::BatchExistKey, bool>(
-            object_keys.size(), object_keys);
-    timer.LogResponse("result=", result.size(), " keys");
-    return result;
+auto P2PMasterClient::UnregisterClient(
+    const P2PUnregisterClientRequest& request)
+    -> tl::expected<P2PUnregisterClientResponse, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::UnregisterClient,
+                  P2PUnregisterClientResponse>(request);
 }
 
-tl::expected<P2PGetReplicaListResponse, ErrorCode>
-P2PMasterClient::GetReplicaList(
-    std::string_view key, const P2PGetReplicaListRequestConfig& config) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::GetReplicaList");
-    timer.LogRequest("object_key=", key);
-    auto result = invoke_rpc<&WrappedP2PMasterService::GetReplicaList,
-                             P2PGetReplicaListResponse>(key, config);
-    timer.LogResponseExpected(result);
-    return result;
+auto P2PMasterClient::Heartbeat(const P2PHeartbeatRequest& request)
+    -> tl::expected<P2PHeartbeatResponse, ErrorCode> {
+    return InvokeVia<&P2PMasterRpcService::Heartbeat, P2PHeartbeatResponse>(
+        heartbeat_accessor_, request);
 }
 
-async_simple::coro::Lazy<tl::expected<P2PGetReplicaListResponse, ErrorCode>>
-P2PMasterClient::AsyncGetReplicaList(
-    std::string_view key, const P2PGetReplicaListRequestConfig& config) {
-    co_return co_await invoke_rpc_async<
-        &WrappedP2PMasterService::GetReplicaList, P2PGetReplicaListResponse>(
-        key, config);
+auto P2PMasterClient::QueryClientStatus(const UUID& client_id)
+    -> tl::expected<P2PQueryClientStatusResponse, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::QueryClientStatus,
+                  P2PQueryClientStatusResponse>(
+        P2PQueryClientStatusRequest{.client_id = client_id});
 }
 
-std::vector<tl::expected<P2PGetReplicaListResponse, ErrorCode>>
-P2PMasterClient::BatchGetReplicaList(
-    const std::vector<std::string_view>& keys,
-    const P2PGetReplicaListRequestConfig& config) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::BatchGetReplicaList");
-    timer.LogRequest("requests_count=", keys.size());
-    if (keys.empty()) return {};
+auto P2PMasterClient::MountSegment(const P2PSegment& segment)
+    -> tl::expected<void, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::MountSegment, void>(
+        P2PMountSegmentRequest{.client_id = client_id_, .segment = segment});
+}
 
-    auto result = invoke_rpc<
-        &WrappedP2PMasterService::BatchGetReplicaList,
-        std::vector<tl::expected<P2PGetReplicaListResponse, ErrorCode>>>(keys,
-                                                                      config);
+auto P2PMasterClient::UnmountSegment(const UUID& segment_id)
+    -> tl::expected<void, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::UnmountSegment, void>(
+        P2PUnmountSegmentRequest{.client_id = client_id_,
+                                 .segment_id = segment_id});
+}
+
+auto P2PMasterClient::RouteExists(std::string_view key)
+    -> tl::expected<bool, ErrorCode> {
+    auto result = Invoke<&P2PMasterRpcService::RouteExists,
+                         P2PRouteExistsResponse>(
+        P2PRouteExistsRequest{.key = std::string(key)});
     if (!result.has_value()) {
-        LOG(ERROR) << "BatchGetReplicaList RPC failed: "
-                   << toString(result.error());
-        return std::vector<tl::expected<P2PGetReplicaListResponse, ErrorCode>>(
-            keys.size(), tl::make_unexpected(result.error()));
+        return tl::make_unexpected(result.error());
     }
-    timer.LogResponse("result=", result->size(), " requests");
-    return std::move(result.value());
+    return result->exists;
 }
 
-tl::expected<
-    std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
-    ErrorCode>
-P2PMasterClient::BatchQueryIp(const std::vector<UUID>& client_ids) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::BatchQueryIp");
-    timer.LogRequest("client_ids_count=", client_ids.size());
-    auto result = invoke_rpc<
-        &WrappedP2PMasterService::BatchQueryIp,
-        std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>>(
-        client_ids);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<
-    std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
-    ErrorCode>
-P2PMasterClient::GetReplicaListByRegex(const std::string& str) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::GetReplicaListByRegex");
-    timer.LogRequest("Regex=", str);
-    auto result = invoke_rpc<
-        &WrappedP2PMasterService::GetReplicaListByRegex,
-        std::unordered_map<std::string, std::vector<Replica::Descriptor>>>(str);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<void, ErrorCode> P2PMasterClient::Remove(std::string_view key,
-                                                       bool force) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::Remove");
-    timer.LogRequest("key=", key, ", force=", force);
-    auto result =
-        invoke_rpc<&WrappedP2PMasterService::Remove, void>(key, force);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<long, ErrorCode> P2PMasterClient::RemoveByRegex(
-    std::string_view str, bool force) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::RemoveByRegex");
-    timer.LogRequest("key=", str, ", force=", force);
-    auto result = invoke_rpc<&WrappedP2PMasterService::RemoveByRegex, long>(
-        str, force);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<long, ErrorCode> P2PMasterClient::RemoveAll(bool force) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::RemoveAll");
-    timer.LogRequest("action=remove_all_objects, force=", force);
-    auto result =
-        invoke_rpc<&WrappedP2PMasterService::RemoveAll, long>(force);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<void, ErrorCode> P2PMasterClient::UnmountSegment(
-    const UUID& segment_id) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::UnmountSegment");
-    timer.LogRequest("segment_id=", segment_id, ", client_id=", client_id_);
-    auto result = invoke_rpc<&WrappedP2PMasterService::UnmountSegment, void>(
-        segment_id, client_id_);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<P2PHeartbeatResponse, ErrorCode> P2PMasterClient::Heartbeat(
-    const P2PHeartbeatRequest& req) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::Heartbeat");
-    timer.LogRequest("client_id=", client_id_);
-    auto result =
-        invoke_rpc_via<&WrappedP2PMasterService::Heartbeat, P2PHeartbeatResponse>(
-            heartbeat_accessor_, req);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<P2PQueryClientStatusResponse, ErrorCode>
-P2PMasterClient::QueryClientStatus(const UUID& client_id) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::QueryClientStatus");
-    timer.LogRequest("client_id=", client_id);
-    P2PQueryClientStatusRequest req;
-    req.client_id = client_id;
-    auto result = invoke_rpc<&WrappedP2PMasterService::QueryClientStatus,
-                             P2PQueryClientStatusResponse>(req);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<void, ErrorCode> P2PMasterClient::MountSegment(
-    const P2PSegment& segment) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::MountSegment");
-    timer.LogRequest("segment_name=", segment.name,
-                     ", client_id=", client_id_);
-    auto result = invoke_rpc<&WrappedP2PMasterService::MountSegment, void>(
-        segment, client_id_);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<P2PRegisterClientResponse, ErrorCode>
-P2PMasterClient::RegisterClient(const P2PRegisterClientRequest& req) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::RegisterClient");
-    timer.LogRequest("client_id=", client_id_,
-                     ", segments_count=", req.segments.size());
-    auto result = invoke_rpc<&WrappedP2PMasterService::RegisterClient,
-                             P2PRegisterClientResponse>(req);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<P2PUnregisterClientResponse, ErrorCode>
-P2PMasterClient::UnregisterClient(const P2PUnregisterClientRequest& req) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::UnregisterClient");
-    timer.LogRequest("client_id=", client_id_);
-    auto result = invoke_rpc<&WrappedP2PMasterService::UnregisterClient,
-                             P2PUnregisterClientResponse>(req);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<WriteRouteResponse, ErrorCode> P2PMasterClient::GetWriteRoute(
-    const WriteRouteRequest& req) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::GetWriteRoute");
-    timer.LogRequest("key=", req.key);
-
-    auto result =
-        invoke_rpc<&WrappedP2PMasterService::GetWriteRoute, WriteRouteResponse>(
-            req);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<BatchGetWriteRouteResponse, ErrorCode>
-P2PMasterClient::BatchGetWriteRoute(const BatchGetWriteRouteRequest& req) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::BatchGetWriteRoute");
-    timer.LogRequest("key_count=", req.keys.size());
-
-    auto result = invoke_rpc<&WrappedP2PMasterService::BatchGetWriteRoute,
-                             BatchGetWriteRouteResponse>(req);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<void, ErrorCode> P2PMasterClient::AddReplica(
-    const AddReplicaRequest& req) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::AddReplica");
-    timer.LogRequest("key=", req.key);
-
-    auto result = invoke_rpc<&WrappedP2PMasterService::AddReplica, void>(req);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-tl::expected<void, ErrorCode> P2PMasterClient::RemoveReplica(
-    const RemoveReplicaRequest& req) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::RemoveReplica");
-    timer.LogRequest("key=", req.key);
-
-    auto result =
-        invoke_rpc<&WrappedP2PMasterService::RemoveReplica, void>(req);
-    timer.LogResponseExpected(result);
-    return result;
-}
-
-std::vector<tl::expected<void, ErrorCode>> P2PMasterClient::BatchRemoveReplica(
-    const BatchRemoveReplicaRequest& req) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::BatchRemoveReplica");
-    timer.LogRequest("key=", req.key, "segment_count=", req.segment_ids.size());
-
-    auto result = invoke_rpc<&WrappedP2PMasterService::BatchRemoveReplica,
-                             std::vector<tl::expected<void, ErrorCode>>>(req);
-
-    if (!result) {
-        LOG(ERROR) << "BatchRemoveReplica RPC failed: "
-                   << toString(result.error());
-        std::vector<tl::expected<void, ErrorCode>> fallback;
-        for (size_t i = 0; i < req.segment_ids.size(); i++) {
-            fallback.push_back(tl::make_unexpected(result.error()));
+auto P2PMasterClient::BatchRouteExists(
+    const std::vector<std::string_view>& keys)
+    -> std::vector<tl::expected<bool, ErrorCode>> {
+    P2PBatchRouteExistsRequest request;
+    request.keys.reserve(keys.size());
+    for (std::string_view key : keys) {
+        request.keys.emplace_back(key);
+    }
+    auto result = Invoke<&P2PMasterRpcService::BatchRouteExists,
+                         P2PBatchRouteExistsResponse>(request);
+    std::vector<tl::expected<bool, ErrorCode>> response;
+    response.reserve(keys.size());
+    if (!result.has_value() || result->responses.size() != keys.size() ||
+        result->error_codes.size() != keys.size()) {
+        const auto error = result.has_value() ? ErrorCode::RPC_FAIL
+                                              : result.error();
+        response.assign(keys.size(), tl::make_unexpected(error));
+        return response;
+    }
+    for (size_t i = 0; i < keys.size(); ++i) {
+        if (result->error_codes[i] == ErrorCode::OK) {
+            response.emplace_back(result->responses[i].exists);
+        } else {
+            response.emplace_back(
+                tl::make_unexpected(result->error_codes[i]));
         }
-        return fallback;
     }
-    return *result;
+    return response;
 }
 
-tl::expected<BatchSyncReplicaResponse, ErrorCode>
-P2PMasterClient::BatchSyncReplica(const BatchSyncReplicaRequest& req) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::BatchSyncReplica");
-    timer.LogRequest("adds=", req.add_keys.size(),
-                     ", removes=", req.remove_keys.size());
-
-    auto result = invoke_rpc<&WrappedP2PMasterService::BatchSyncReplica,
-                             BatchSyncReplicaResponse>(req);
-    timer.LogResponseExpected(result);
-    return result;
+auto P2PMasterClient::GetReadRoute(std::string_view key,
+                                   const P2PReadRouteConfig& config)
+    -> tl::expected<P2PGetReadRouteResponse, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::GetReadRoute,
+                  P2PGetReadRouteResponse>(
+        P2PGetReadRouteRequest{.key = std::string(key), .config = config});
 }
 
-tl::expected<void, ErrorCode> P2PMasterClient::SetSyncCompleted(
-    UUID client_id) {
-    ScopedVLogTimer timer(1, "P2PMasterClient::SetSyncCompleted");
-    timer.LogRequest("client_id=", client_id);
+auto P2PMasterClient::AsyncGetReadRoute(
+    std::string_view key, const P2PReadRouteConfig& config)
+    -> async_simple::coro::Lazy<
+        tl::expected<P2PGetReadRouteResponse, ErrorCode>> {
+    return InvokeAsync<&P2PMasterRpcService::GetReadRoute,
+                       P2PGetReadRouteResponse>(
+        P2PGetReadRouteRequest{.key = std::string(key), .config = config});
+}
 
-    auto result =
-        invoke_rpc<&WrappedP2PMasterService::SetSyncCompleted, void>(client_id);
-    timer.LogResponseExpected(result);
-    return result;
+auto P2PMasterClient::BatchGetReadRoute(
+    const std::vector<std::string_view>& keys,
+    const P2PReadRouteConfig& config)
+    -> std::vector<tl::expected<P2PGetReadRouteResponse, ErrorCode>> {
+    P2PBatchGetReadRouteRequest request;
+    request.config = config;
+    request.keys.reserve(keys.size());
+    for (std::string_view key : keys) {
+        request.keys.emplace_back(key);
+    }
+    auto result = Invoke<&P2PMasterRpcService::BatchGetReadRoute,
+                         P2PBatchGetReadRouteResponse>(request);
+    std::vector<tl::expected<P2PGetReadRouteResponse, ErrorCode>> response;
+    response.reserve(keys.size());
+    if (!result.has_value() || result->responses.size() != keys.size() ||
+        result->error_codes.size() != keys.size()) {
+        const auto error = result.has_value() ? ErrorCode::RPC_FAIL
+                                              : result.error();
+        response.assign(keys.size(), tl::make_unexpected(error));
+        return response;
+    }
+    for (size_t i = 0; i < keys.size(); ++i) {
+        if (result->error_codes[i] == ErrorCode::OK) {
+            response.push_back(std::move(result->responses[i]));
+        } else {
+            response.emplace_back(
+                tl::make_unexpected(result->error_codes[i]));
+        }
+    }
+    return response;
+}
+
+auto P2PMasterClient::GetWriteRoute(
+    const P2PGetWriteRouteRequest& request)
+    -> tl::expected<P2PGetWriteRouteResponse, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::GetWriteRoute,
+                  P2PGetWriteRouteResponse>(request);
+}
+
+auto P2PMasterClient::BatchGetWriteRoute(
+    const P2PBatchGetWriteRouteRequest& request)
+    -> tl::expected<P2PBatchGetWriteRouteResponse, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::BatchGetWriteRoute,
+                  P2PBatchGetWriteRouteResponse>(request);
+}
+
+auto P2PMasterClient::PublishRoute(const P2PPublishRouteRequest& request)
+    -> tl::expected<void, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::PublishRoute, void>(request);
+}
+
+auto P2PMasterClient::WithdrawRoute(const P2PWithdrawRouteRequest& request)
+    -> tl::expected<void, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::WithdrawRoute, void>(request);
+}
+
+auto P2PMasterClient::BatchWithdrawRoute(
+    const P2PBatchWithdrawRouteRequest& request)
+    -> std::vector<tl::expected<void, ErrorCode>> {
+    auto result = Invoke<&P2PMasterRpcService::BatchWithdrawRoute,
+                         P2PBatchWithdrawRouteResponse>(request);
+    std::vector<tl::expected<void, ErrorCode>> response;
+    response.reserve(request.segment_ids.size());
+    if (!result.has_value() ||
+        result->error_codes.size() != request.segment_ids.size()) {
+        const auto error = result.has_value() ? ErrorCode::RPC_FAIL
+                                              : result.error();
+        response.assign(request.segment_ids.size(),
+                        tl::make_unexpected(error));
+        return response;
+    }
+    for (auto error : result->error_codes) {
+        if (error == ErrorCode::OK) {
+            response.emplace_back();
+        } else {
+            response.emplace_back(tl::make_unexpected(error));
+        }
+    }
+    return response;
+}
+
+auto P2PMasterClient::BatchSyncRoutes(
+    const P2PBatchSyncRoutesRequest& request)
+    -> tl::expected<P2PBatchSyncRoutesResponse, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::BatchSyncRoutes,
+                  P2PBatchSyncRoutesResponse>(request);
+}
+
+auto P2PMasterClient::CompleteRouteSync(const UUID& client_id)
+    -> tl::expected<void, ErrorCode> {
+    return Invoke<&P2PMasterRpcService::CompleteRouteSync, void>(
+        P2PCompleteRouteSyncRequest{.client_id = client_id});
 }
 
 }  // namespace mooncake

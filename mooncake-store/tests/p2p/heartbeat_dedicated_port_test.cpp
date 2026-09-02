@@ -106,8 +106,8 @@ class HeartbeatTestClient {
         return client_.Heartbeat(request);
     }
 
-    tl::expected<bool, ErrorCode> ExistKey(std::string_view key) {
-        return client_.ExistKey(key);
+    tl::expected<bool, ErrorCode> RouteExists(std::string_view key) {
+        return client_.RouteExists(key);
     }
 
    private:
@@ -196,7 +196,7 @@ TEST_F(HeartbeatDedicatedPortTest, NonHeartbeatRpcStillServedOnMainPort) {
     client->SetHeartbeatRpcPort(PortOf(master_->heartbeat_rpc_port()));
     ASSERT_EQ(client->Connect(master_->master_address()), ErrorCode::OK);
 
-    auto exists = client->ExistKey("nonexistent_key_for_heartbeat_test");
+    auto exists = client->RouteExists("nonexistent_key_for_heartbeat_test");
     EXPECT_TRUE(exists.has_value())
         << "ExistKey should reach the main port and succeed";
 }

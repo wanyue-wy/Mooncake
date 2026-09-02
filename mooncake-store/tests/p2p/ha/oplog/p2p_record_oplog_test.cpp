@@ -121,7 +121,6 @@ class P2PRecordOplogTest : public ::testing::Test {
                           const UUID& client_id) const {
         P2PUnregisterClientRequest req;
         req.client_id = client_id;
-        req.deployment_mode = DeploymentMode::P2P;
         auto result = service.UnregisterClient(req);
         ASSERT_TRUE(result.has_value()) << toString(result.error());
     }

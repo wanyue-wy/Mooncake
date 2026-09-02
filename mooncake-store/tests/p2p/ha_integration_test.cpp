@@ -500,7 +500,6 @@ TEST_F(HAIntegrationTest, ReRegisterReportsCurrentTierSegments) {
     auto& svc = master_.GetWrapped().GetMasterService();
     P2PUnregisterClientRequest unreg;
     unreg.client_id = client1_->GetClientID();
-    unreg.deployment_mode = DeploymentMode::P2P;
     auto unreg_result = svc.UnregisterClient(unreg);
     ASSERT_TRUE(unreg_result.has_value())
         << "UnregisterClient failed: " << unreg_result.error();

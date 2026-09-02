@@ -858,7 +858,7 @@ TEST_F(P2PMasterServiceTest, UnregisterClientRemovesReplicasAndSegments) {
 
     // Unregister cascades: segment unmount -> replica/object removal.
     auto res = service->UnregisterClient(
-        P2PUnregisterClientRequest{client_id, DeploymentMode::P2P});
+        P2PUnregisterClientRequest{client_id});
     ASSERT_TRUE(res.has_value());
 
     EXPECT_EQ(service->GetClientManager().GetClient(client_id), nullptr);
@@ -882,7 +882,7 @@ TEST_F(P2PMasterServiceTest, UnregisterClientPartialKeepsOtherOwner) {
     // Unregister client1 -> only its replica is removed.
     ASSERT_TRUE(service
                     ->UnregisterClient(
-                        P2PUnregisterClientRequest{client1, DeploymentMode::P2P})
+                        P2PUnregisterClientRequest{client1})
                     .has_value());
 
     EXPECT_EQ(service->GetClientManager().GetClient(client1), nullptr);
@@ -912,7 +912,7 @@ TEST_F(P2PMasterServiceTest,
 
     ASSERT_TRUE(service
                     ->UnregisterClient(
-                        P2PUnregisterClientRequest{client1, DeploymentMode::P2P})
+                        P2PUnregisterClientRequest{client1})
                     .has_value());
 
     auto route = service->GetReplicaList("key1");
@@ -930,12 +930,12 @@ TEST_F(P2PMasterServiceTest, UnregisterClientIdempotent) {
 
     ASSERT_TRUE(service
                     ->UnregisterClient(
-                        P2PUnregisterClientRequest{client_id, DeploymentMode::P2P})
+                        P2PUnregisterClientRequest{client_id})
                     .has_value());
     // Second call: client already gone -> still OK (idempotent).
     EXPECT_TRUE(service
                     ->UnregisterClient(
-                        P2PUnregisterClientRequest{client_id, DeploymentMode::P2P})
+                        P2PUnregisterClientRequest{client_id})
                     .has_value());
 }
 

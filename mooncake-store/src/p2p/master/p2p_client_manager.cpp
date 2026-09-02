@@ -84,19 +84,19 @@ auto P2PClientManager::GetAllClients() const
     return clients;
 }
 
-auto P2PClientManager::ListClients(ObjectIterateStrategy strategy) const
+auto P2PClientManager::ListClients(P2PClientSelectionStrategy strategy) const
     -> tl::expected<std::vector<std::shared_ptr<P2PClientMeta>>, ErrorCode> {
     auto clients = GetAllClients();
     switch (strategy) {
-        case ObjectIterateStrategy::ORDERED:
+        case P2PClientSelectionStrategy::ORDERED:
             break;
-        case ObjectIterateStrategy::RANDOM: {
+        case P2PClientSelectionStrategy::RANDOM: {
             std::random_device device;
             std::mt19937 generator(device());
             std::shuffle(clients.begin(), clients.end(), generator);
             break;
         }
-        case ObjectIterateStrategy::CAPACITY_PRIORITY:
+        case P2PClientSelectionStrategy::CAPACITY_PRIORITY:
             std::sort(clients.begin(), clients.end(),
                       [](const auto& lhs, const auto& rhs) {
                           return lhs->GetAvailableCapacity() >
@@ -111,7 +111,7 @@ auto P2PClientManager::ListClients(ObjectIterateStrategy strategy) const
     return clients;
 }
 
-auto P2PClientManager::ForEachClient(ObjectIterateStrategy strategy,
+auto P2PClientManager::ForEachClient(P2PClientSelectionStrategy strategy,
                                      const ClientVisitor& visitor)
     -> tl::expected<void, ErrorCode> {
     auto clients = ListClients(strategy);
@@ -259,10 +259,6 @@ void P2PClientManager::CleanupRoutes(
 
 auto P2PClientManager::UnregisterClient(const P2PUnregisterClientRequest& req)
     -> tl::expected<P2PUnregisterClientResponse, ErrorCode> {
-    if (req.deployment_mode != DeploymentMode::P2P) {
-        return tl::make_unexpected(ErrorCode::ILLEGAL_CLIENT);
-    }
-
     std::shared_ptr<P2PClientMeta> client;
     P2PClientStatus status = P2PClientStatus::UNREGISTERED;
     {
