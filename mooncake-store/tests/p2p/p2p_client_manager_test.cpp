@@ -2,6 +2,8 @@
 #include <glog/logging.h>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 #include <vector>
 #define private public
@@ -120,7 +122,7 @@ TEST_F(P2PClientManagerTest, RegisterComplexScenario) {
     ASSERT_NE(client3, nullptr);
     auto segments_res = client3->GetSegments();
     ASSERT_TRUE(segments_res.has_value());
-    EXPECT_EQ(segments_res.value().size(), 5);
+    EXPECT_EQ(segments_res->size(), 5);
 }
 
 // ============================================================
@@ -224,7 +226,7 @@ TEST_F(P2PClientManagerTest, HealthTransitionMetrics) {
     auto mgr = CreateManager(disconnect_sec, crash_sec);
     // Manual control over status transitions (mirror
     // ForEachClientHealthEffect).
-    mgr->StopClientMonitor();
+    mgr->Stop();
 
     ASSERT_TRUE(
         mgr->RegisterClient(MakeP2PRegisterRequest({1, 0})).has_value());
@@ -516,10 +518,10 @@ TEST_F(P2PClientManagerTest, QuerySegmentAndGetClientSegments) {
     auto seg_res = mgr->QuerySegment(client_id1, {1, 2});
     ASSERT_TRUE(seg_res.has_value());
     auto found_seg = seg_res.value();
-    EXPECT_EQ(found_seg->id, (UUID{1, 2}));
-    EXPECT_EQ(found_seg->name, "c1_seg2");
-    EXPECT_EQ(found_seg->size, 2048);
-    EXPECT_EQ(found_seg->priority, 20);
+    EXPECT_EQ(found_seg.id, (UUID{1, 2}));
+    EXPECT_EQ(found_seg.name, "c1_seg2");
+    EXPECT_EQ(found_seg.size, 2048);
+    EXPECT_EQ(found_seg.priority, 20);
 
     // Verify QuerySegment for non-existent segment or cross-client query
     EXPECT_FALSE(mgr->QuerySegment(client_id1, {2, 1}).has_value());
@@ -535,7 +537,7 @@ TEST_F(P2PClientManagerTest, QueryInterfacesNonHealth) {
     auto req = MakeP2PRegisterRequest({100, 200}, "10.0.0.1", 50051, {seg});
     ASSERT_TRUE(mgr->RegisterClient(req).has_value());
 
-    // Wait for DISCONNECTED
+    // Wait for DISCONNECTION
     std::this_thread::sleep_for(std::chrono::seconds(disconnect_sec + 1));
 
     EXPECT_FALSE(mgr->QuerySegments("seg1").has_value());
@@ -639,7 +641,7 @@ TEST_F(P2PClientManagerTest, ForEachClientHealthEffect) {
     const int crash_sec = 2;
     auto mgr = CreateManager(disconnect_sec, crash_sec);
     // STOP the background monitor thread to manually control status transitions
-    mgr->StopClientMonitor();
+    mgr->Stop();
 
     // Register 4 clients
     for (int i = 1; i <= 4; ++i) {
@@ -647,7 +649,7 @@ TEST_F(P2PClientManagerTest, ForEachClientHealthEffect) {
             MakeP2PRegisterRequest({static_cast<uint64_t>(i), 0}));
     }
 
-    // Phase 1: All HEALTHY initially
+    // Phase 1: All HEALTH initially
     // Phase 2: Wait 1.1s. (1s < 1.1s < 2s)
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
 
@@ -657,7 +659,7 @@ TEST_F(P2PClientManagerTest, ForEachClientHealthEffect) {
     mgr->Heartbeat(P2PHeartbeatRequest{.client_id = UUID{4, 0}, .tasks = {}});
 
     // Manually trigger monitor.
-    // Client 1, 3, 4: HEALTHY
+    // Client 1, 3, 4: HEALTH
     // Client 2: transition to DISCONNECTION
     mgr->ClientMonitorFunc();
 
@@ -669,7 +671,7 @@ TEST_F(P2PClientManagerTest, ForEachClientHealthEffect) {
     mgr->Heartbeat(P2PHeartbeatRequest{.client_id = UUID{4, 0}, .tasks = {}});
 
     // Manually trigger monitor again.
-    // Client 1, 4: HEALTHY (HB recently)
+    // Client 1, 4: HEALTH (HB recently)
     // Client 2: transition to CRASHED (and removed)
     // Client 3: transition to DISCONNECTION (no HB in last 1.1s)
     mgr->ClientMonitorFunc();
@@ -685,7 +687,7 @@ TEST_F(P2PClientManagerTest, ForEachClientHealthEffect) {
             return false;
         });
 
-    // 3 clients should be visible (HEALTHY 1, 4 and DISCONNECTED 3)
+    // 3 clients should be visible (HEALTHY 1, 4 and DISCONNECTION 3)
     // Client 2 should be removed because it transitioned to CRASHED.
     EXPECT_EQ(count, 3);
     EXPECT_TRUE(found_ids.count({1, 0}));
@@ -781,6 +783,7 @@ TEST_F(P2PClientManagerTest, ConcurrentHeartbeat) {
 }
 
 TEST_F(P2PClientManagerTest, ConcurrentRegisterSameClient) {
+    P2PMasterMetricManager::instance().reset_all_metrics();
     auto mgr = CreateManager();
     mgr->Start();
 
@@ -806,7 +809,10 @@ TEST_F(P2PClientManagerTest, ConcurrentRegisterSameClient) {
         t.join();
     }
 
-    EXPECT_GE(success_count.load(), 1);
+    EXPECT_EQ(success_count.load(), 1);
+    EXPECT_EQ(P2PMasterMetricManager::instance().get_active_clients(), 1);
+    EXPECT_EQ(P2PMasterMetricManager::instance().get_total_mem_capacity(),
+              seg.size);
 
     int count = 0;
     auto res =
@@ -819,6 +825,74 @@ TEST_F(P2PClientManagerTest, ConcurrentRegisterSameClient) {
                            });
     EXPECT_TRUE(res.has_value());
     EXPECT_EQ(count, 1);
+}
+
+TEST_F(P2PClientManagerTest, MonitorDoesNotEraseReRegisteredClient) {
+    auto mgr = CreateManager(/*disconnect_sec=*/1, /*crash_sec=*/2);
+    mgr->Stop();
+
+    std::mutex mutex;
+    std::condition_variable callback_started;
+    std::condition_variable release_callback;
+    bool entered = false;
+    bool release = false;
+    mgr->SetSegmentRemovalCallback([&](const P2PRouteLocation&) {
+        std::unique_lock lock(mutex);
+        entered = true;
+        callback_started.notify_one();
+        release_callback.wait(lock, [&] { return release; });
+    });
+
+    const UUID client_id{42, 42};
+    auto old_segment = MakeP2PSegment({1, 1}, "old");
+    ASSERT_TRUE(mgr->RegisterClient(MakeP2PRegisterRequest(
+                                      client_id, "10.0.0.1", 50051,
+                                      {old_segment}))
+                    .has_value());
+    auto old_client = mgr->GetClient(client_id);
+    ASSERT_NE(old_client, nullptr);
+    old_client->health_state_.last_heartbeat =
+        std::chrono::steady_clock::now() - std::chrono::seconds(3);
+
+    std::thread monitor([&] { mgr->ClientMonitorFunc(); });
+    {
+        std::unique_lock lock(mutex);
+        ASSERT_TRUE(callback_started.wait_for(lock, std::chrono::seconds(2),
+                                              [&] { return entered; }));
+    }
+
+    ASSERT_TRUE(mgr->UnregisterClient(P2PUnregisterClientRequest{
+                                        client_id, DeploymentMode::P2P})
+                    .has_value());
+    auto new_segment = MakeP2PSegment({2, 2}, "new");
+    ASSERT_TRUE(mgr->RegisterClient(MakeP2PRegisterRequest(
+                                      client_id, "10.0.0.2", 50052,
+                                      {new_segment}))
+                    .has_value());
+    auto new_client = mgr->GetClient(client_id);
+    ASSERT_NE(new_client, nullptr);
+    ASSERT_NE(new_client, old_client);
+
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    release_callback.notify_one();
+    monitor.join();
+
+    EXPECT_EQ(mgr->GetClient(client_id), new_client);
+    auto segment = new_client->QuerySegment(new_segment.id);
+    ASSERT_TRUE(segment.has_value());
+    EXPECT_EQ(segment->name, "new");
+}
+
+TEST_F(P2PClientManagerTest, StopInterruptsMonitorWait) {
+    auto mgr = CreateManager();
+    mgr->Start();
+    const auto start = std::chrono::steady_clock::now();
+    mgr->Stop();
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(elapsed, std::chrono::milliseconds(200));
 }
 
 TEST_F(P2PClientManagerTest, HeartbeatSyncSegmentMeta) {
@@ -846,7 +920,7 @@ TEST_F(P2PClientManagerTest, HeartbeatSyncSegmentMeta) {
     ASSERT_NE(p2p_meta, nullptr);
     auto seg_res = p2p_meta->QuerySegment({1, 1});
     ASSERT_TRUE(seg_res.has_value());
-    EXPECT_EQ(seg_res.value()->usage, 1 * 1024 * 1024);
+    EXPECT_EQ(seg_res.value().usage, 1 * 1024 * 1024);
 }
 
 TEST_F(P2PClientManagerTest, HeartbeatSyncSegmentMetaErrorPaths) {
@@ -900,14 +974,14 @@ TEST_F(P2PClientManagerTest, HeartbeatSyncSegmentMetaErrorPaths) {
                   ErrorCode::SEGMENT_NOT_FOUND);
 
         auto p2p_meta = mgr->GetClient(client_id);
-        EXPECT_EQ(p2p_meta->QuerySegment({1, 1}).value()->usage, 100);
+        EXPECT_EQ(p2p_meta->QuerySegment({1, 1}).value().usage, 100);
     }
 
     // 3. Not supported task type (Force casting)
     {
         HeartbeatTask task;
         task.type_ = static_cast<HeartbeatTaskType>(999);
-        auto res = mgr->ProcessTask(client_id, task);
+        auto res = mgr->ProcessTask(mgr->GetClient(client_id), task);
         EXPECT_EQ(res.error, ErrorCode::NOT_IMPLEMENTED);
     }
 }

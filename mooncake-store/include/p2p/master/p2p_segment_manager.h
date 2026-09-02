@@ -1,8 +1,8 @@
 #pragma once
 
 #include <boost/functional/hash.hpp>
+#include <cstddef>
 #include <functional>
-#include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -28,27 +28,14 @@ class P2PSegmentManager {
     auto QuerySegments(const std::string& segment)
         -> tl::expected<std::pair<size_t, size_t>, ErrorCode>;
     auto QuerySegment(const UUID& segment_id)
-        -> tl::expected<std::shared_ptr<P2PSegment>, ErrorCode>;
+        -> tl::expected<P2PSegment, ErrorCode>;
     auto GetSegments() -> tl::expected<std::vector<P2PSegment>, ErrorCode>;
 
-    using SegmentRemovalCallback = std::function<void(const UUID& segment_id)>;
-    void SetSegmentRemovalCallback(SegmentRemovalCallback cb);
-
-    using OnSegmentAddedCallback =
-        std::function<void(const P2PSegment& segment)>;
-    using OnSegmentRemovedCallback =
-        std::function<void(const P2PSegment& segment)>;
-
-    void SetSegmentChangeCallbacks(OnSegmentAddedCallback on_add,
-                                   OnSegmentRemovedCallback on_remove) {
-        on_segment_added_ = std::move(on_add);
-        on_segment_removed_ = std::move(on_remove);
-    }
     /**
      * @brief update segment usage and return old usage
      */
-    tl::expected<size_t, ErrorCode> UpdateSegmentUsage(const UUID& segment_id,
-                                                       size_t usage);
+    auto UpdateSegmentUsage(const UUID& segment_id, size_t usage)
+        -> tl::expected<size_t, ErrorCode>;
 
     /**
      * @brief get segment usage
@@ -62,16 +49,14 @@ class P2PSegmentManager {
     using SegmentVisitor = std::function<bool(const P2PSegment& segment)>;
     void ForEachSegment(const SegmentVisitor& visitor) const;
 
+    std::pair<size_t, size_t> GetCapacityUsage() const;
+
    private:
-    OnSegmentAddedCallback on_segment_added_;
-    OnSegmentRemovedCallback on_segment_removed_;
-
     mutable SharedMutex segment_mutex_;
-    SegmentRemovalCallback segment_removal_cb_;
-
-    std::unordered_map<UUID, std::shared_ptr<P2PSegment>, boost::hash<UUID>>
-        mounted_segments_
-            GUARDED_BY(segment_mutex_);  // segment_id -> mounted segment
+    std::unordered_map<UUID, P2PSegment, boost::hash<UUID>> mounted_segments_
+        GUARDED_BY(segment_mutex_);  // segment_id -> mounted segment
+    size_t total_capacity_ GUARDED_BY(segment_mutex_){0};
+    size_t total_usage_ GUARDED_BY(segment_mutex_){0};
 };
 
 }  // namespace mooncake

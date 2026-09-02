@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <boost/functional/hash.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +9,6 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 #include <ylt/util/tl/expected.hpp>
 
@@ -27,8 +25,8 @@ namespace mooncake {
  */
 class P2PClientManager final {
    public:
-    P2PClientManager(int64_t disconnect_timeout_sec,
-                     int64_t crash_timeout_sec, ViewVersionId view_version);
+    P2PClientManager(int64_t disconnect_timeout_sec, int64_t crash_timeout_sec,
+                     ViewVersionId view_version);
     ~P2PClientManager();
 
     void Start();
@@ -52,7 +50,7 @@ class P2PClientManager final {
     auto QuerySegments(const std::string& segment)
         -> tl::expected<std::pair<size_t, size_t>, ErrorCode>;
     auto QuerySegment(const UUID& client_id, const UUID& segment_id)
-        -> tl::expected<std::shared_ptr<P2PSegment>, ErrorCode>;
+        -> tl::expected<P2PSegment, ErrorCode>;
     auto QueryIp(const UUID& client_id)
         -> tl::expected<std::vector<std::string>, ErrorCode>;
 
@@ -72,22 +70,20 @@ class P2PClientManager final {
         std::function<void(const P2PRouteLocation& location)>;
     void SetSegmentRemovalCallback(SegmentRemovalCallback cb);
 
-   protected:
+   private:
+    static constexpr uint64_t kClientMonitorSleepMs = 1000;
+
     void ClientMonitorFunc();
-
-    HeartbeatTaskResult ProcessTask(const UUID& client_id,
-                                    const HeartbeatTask& task);
-
+    HeartbeatTaskResult ProcessTask(
+        const std::shared_ptr<P2PClientMeta>& client,
+        const HeartbeatTask& task);
     auto BuildClientList(ObjectIterateStrategy strategy) const
         -> std::optional<std::vector<std::shared_ptr<P2PClientMeta>>>;
-
-    static constexpr uint64_t kClientMonitorSleepMs = 1000;
 
     mutable SharedMutex clients_mutex_;
     std::unordered_map<UUID, std::shared_ptr<P2PClientMeta>, boost::hash<UUID>>
         client_metas_ GUARDED_BY(clients_mutex_);
-    std::thread client_monitor_thread_;
-    std::atomic<bool> client_monitor_running_{false};
+    std::jthread client_monitor_thread_;
     const ViewVersionId view_version_;
     SegmentRemovalCallback segment_removal_cb_;
 };

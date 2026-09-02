@@ -42,9 +42,8 @@ class P2PClientMeta final {
     auto QuerySegments(const std::string& segment_name)
         -> tl::expected<std::pair<size_t, size_t>, ErrorCode>;
     auto QuerySegment(const UUID& segment_id)
-        -> tl::expected<std::shared_ptr<P2PSegment>, ErrorCode>;
-    auto QueryIp(const UUID& client_id)
-        -> tl::expected<std::vector<std::string>, ErrorCode>;
+        -> tl::expected<P2PSegment, ErrorCode>;
+    auto QueryIp() -> tl::expected<std::vector<std::string>, ErrorCode>;
 
     using SegmentRemovalCallback = std::function<void(const UUID& segment_id)>;
     void SetSegmentRemovalCallback(SegmentRemovalCallback cb);
@@ -54,19 +53,17 @@ class P2PClientMeta final {
     /**
      * @brief Update heartbeat timestamp and health status.
      * Attention: if client is CRASHED, the heartbeat will not be updated.
-     * @return std::pair<P2PClientStatus, P2PClientStatus> {old_status, new_status}
+     * @return std::pair<P2PClientStatus, P2PClientStatus> {old_status,
+     * new_status}
      */
     std::pair<P2PClientStatus, P2PClientStatus> Heartbeat();
 
     /**
      * @brief Update health status based on the last heartbeat timestamp.
-     * @return std::pair<P2PClientStatus, P2PClientStatus> {old_status, new_status}
+     * @return std::pair<P2PClientStatus, P2PClientStatus> {old_status,
+     * new_status}
      */
     std::pair<P2PClientStatus, P2PClientStatus> CheckHealth();
-
-    void OnDisconnected();
-    void OnRecovered();
-    void OnCrashed();
     void RecycleMeta();
 
     UUID get_client_id() const { return client_id_; }
@@ -75,11 +72,12 @@ class P2PClientMeta final {
 
     auto UpdateSegmentUsages(const std::vector<TierUsageInfo>& usages)
         -> SyncSegmentMetaResult;
-
     size_t GetAvailableCapacity() const;
 
     const std::string& get_ip_address() const { return ip_address_; }
     uint16_t get_rpc_port() const { return rpc_port_; }
+
+    void MarkRegistered() { registered_ = true; }
 
     /**
      * @brief Evaluate this client as a write-route candidate.
@@ -103,20 +101,19 @@ class P2PClientMeta final {
         return is_syncing_.load(std::memory_order_acquire);
     }
 
-   protected:
+   private:
     auto InnerStatusCheck() const -> tl::expected<void, ErrorCode>;
     void InnerUpdateHeartbeat();
     std::pair<P2PClientStatus, P2PClientStatus> InnerUpdateHealthStatus();
+    void ApplyHealthTransition(P2PClientStatus old_status,
+                               P2PClientStatus new_status);
     std::string HealthToString(P2PClientStatus status) const;
-
-    std::shared_ptr<P2PSegmentManager> GetSegmentManager();
-
-   private:
     /// Free/total capacity over the segments eligible for write-route scoring.
     struct CapacityStat {
         size_t free = 0;
         size_t total = 0;
     };
+
     /**
      * @brief Aggregate free/total over the eligible segments for write-route
      *        scoring. A segment is eligible when it carries no tag in
@@ -129,7 +126,7 @@ class P2PClientMeta final {
         const std::vector<std::string>& tag_filters, int priority_limit,
         bool top_tier_only) const;
 
-   protected:
+   private:
     static int64_t disconnect_timeout_sec_;
     static int64_t crash_timeout_sec_;
 
@@ -137,16 +134,14 @@ class P2PClientMeta final {
     UUID client_id_;
     P2PClientHealthState health_state_ GUARDED_BY(client_mutex_);
     std::atomic<bool> recycled_{false};
-
-   private:
+    // A temporary meta may be destroyed after losing a registration race. It
+    // must not remove metric series owned by the registered meta with the same
+    // client ID.
+    bool registered_{false};
     std::string ip_address_;
     uint16_t rpc_port_ = 0;
-    std::shared_ptr<P2PSegmentManager> segment_manager_;
-
-    mutable SpinRWLock capacity_mutex_;
-    size_t client_capacity_ GUARDED_BY(capacity_mutex_) = 0;
-    size_t client_usage_ GUARDED_BY(capacity_mutex_) = 0;
-
+    P2PSegmentManager segment_manager_;
+    SegmentRemovalCallback segment_removal_cb_;
     std::atomic<bool> is_syncing_{false};
 };
 

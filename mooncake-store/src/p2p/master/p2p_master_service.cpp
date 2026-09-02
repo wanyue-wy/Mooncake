@@ -518,7 +518,7 @@ std::vector<Replica::Descriptor> P2PMasterService::FilterRoutes(
                          << ", error=" << toString(segment_result.error());
             continue;
         }
-        const auto& segment = *segment_result.value();
+        const auto& segment = segment_result.value();
 
         // 1.1 Exclude routes whose segment contains a filtered tag.
         bool excluded_by_tag = false;

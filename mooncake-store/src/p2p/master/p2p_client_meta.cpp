@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <glog/logging.h>
 #include <limits>
-
 #include "p2p/master/p2p_master_metric_manager.h"
 
 namespace mooncake {
@@ -15,27 +14,15 @@ P2PClientMeta::P2PClientMeta(const UUID& client_id,
                              const std::string& ip_address, uint16_t rpc_port)
     : client_id_(client_id),
       ip_address_(ip_address),
-      rpc_port_(rpc_port),
-      segment_manager_(std::make_shared<P2PSegmentManager>()) {
+      rpc_port_(rpc_port) {
     health_state_.status = P2PClientStatus::HEALTH;
     health_state_.last_heartbeat = std::chrono::steady_clock::now();
-    segment_manager_->SetSegmentChangeCallbacks(
-        [this](const P2PSegment& segment) {
-            // OnSegmentAddedCallback
-            SpinRWLockLocker lock(&capacity_mutex_);
-            client_capacity_ += segment.size;
-            client_usage_ += segment.usage;
-        },
-        [this](const P2PSegment& segment) {
-            // OnSegmentRemovedCallback
-            SpinRWLockLocker lock(&capacity_mutex_);
-            client_capacity_ -= segment.size;
-            client_usage_ -= segment.usage;
-        });
 }
 
 P2PClientMeta::~P2PClientMeta() {
-    P2PMasterMetricManager::instance().OnClientRemoved(client_id_);
+    if (registered_) {
+        P2PMasterMetricManager::instance().OnClientRemoved(client_id_);
+    }
 }
 
 tl::expected<void, ErrorCode> P2PClientMeta::MountSegment(
@@ -49,7 +36,7 @@ tl::expected<void, ErrorCode> P2PClientMeta::MountSegment(
         return check_ret;
     }
 
-    auto ret = segment_manager_->MountSegment(segment);
+    auto ret = segment_manager_.MountSegment(segment);
     if (!ret.has_value()) {
         if (ret.error() == ErrorCode::SEGMENT_ALREADY_EXISTS) {
             LOG(WARNING) << "attempt to mount segment but it already exists"
@@ -74,33 +61,39 @@ tl::expected<void, ErrorCode> P2PClientMeta::MountSegment(
 
 tl::expected<void, ErrorCode> P2PClientMeta::UnmountSegment(
     const UUID& segment_id) {
-    SharedMutexLocker lock(&client_mutex_, shared_lock);
-    auto check_ret = InnerStatusCheck();
-    if (!check_ret.has_value()) {
-        LOG(ERROR) << "fail to inner check client status"
-                   << ", client_id=" << client_id_
-                   << ", ret=" << check_ret.error();
-        return check_ret;
+    {
+        SharedMutexLocker lock(&client_mutex_, shared_lock);
+        auto check_ret = InnerStatusCheck();
+        if (!check_ret.has_value()) {
+            LOG(ERROR) << "fail to inner check client status"
+                       << ", client_id=" << client_id_
+                       << ", ret=" << check_ret.error();
+            return check_ret;
+        }
+
+        auto ret = segment_manager_.UnmountSegment(segment_id);
+        if (!ret.has_value()) {
+            if (ret.error() == ErrorCode::SEGMENT_NOT_FOUND) {
+                LOG(WARNING)
+                    << "attempt to unmount segment but it does not exist"
+                    << ", client_id=" << client_id_
+                    << ", segment_id=" << segment_id
+                    << ", ret=" << ret.error();
+                return {};
+            }
+            LOG(ERROR) << "fail to unmount segment"
+                       << ", client_id=" << client_id_
+                       << ", segment_id=" << segment_id
+                       << ", ret=" << ret.error();
+            return ret;
+        }
     }
 
-    auto ret = segment_manager_->UnmountSegment(segment_id);
-    if (!ret.has_value()) {
-        if (ret.error() == ErrorCode::SEGMENT_NOT_FOUND) {
-            LOG(WARNING) << "attempt to unmount segment but it does not exist"
-                         << ", client_id=" << client_id_
-                         << ", segment_id=" << segment_id
-                         << ", ret=" << ret.error();
-            return {};
-        }
-        LOG(ERROR) << "fail to unmount segment"
-                   << ", client_id=" << client_id_
-                   << ", segment_id=" << segment_id
-                   << ", ret=" << ret.error();
-        return ret;
-    }
     LOG(INFO) << "Unmount segment success"
-              << ", client_id=" << client_id_
-              << ", segment_id =" << segment_id;
+              << ", client_id=" << client_id_ << ", segment_id =" << segment_id;
+    if (segment_removal_cb_) {
+        segment_removal_cb_(segment_id);
+    }
     return {};
 }
 
@@ -114,7 +107,7 @@ P2PClientMeta::GetSegments() {
                    << ", ret=" << check_ret.error();
         return tl::make_unexpected(check_ret.error());
     }
-    return segment_manager_->GetSegments();
+    return segment_manager_.GetSegments();
 }
 
 tl::expected<std::pair<size_t, size_t>, ErrorCode>
@@ -127,11 +120,11 @@ P2PClientMeta::QuerySegments(const std::string& segment_name) {
                    << ", ret=" << check_ret.error();
         return tl::make_unexpected(check_ret.error());
     }
-    return segment_manager_->QuerySegments(segment_name);
+    return segment_manager_.QuerySegments(segment_name);
 }
 
-tl::expected<std::shared_ptr<P2PSegment>, ErrorCode>
-P2PClientMeta::QuerySegment(const UUID& segment_id) {
+tl::expected<P2PSegment, ErrorCode> P2PClientMeta::QuerySegment(
+    const UUID& segment_id) {
     SharedMutexLocker lock(&client_mutex_, shared_lock);
     auto check_ret = InnerStatusCheck();
     if (!check_ret.has_value()) {
@@ -140,14 +133,15 @@ P2PClientMeta::QuerySegment(const UUID& segment_id) {
                    << ", ret=" << check_ret.error();
         return tl::make_unexpected(check_ret.error());
     }
-    return segment_manager_->QuerySegment(segment_id);
+    return segment_manager_.QuerySegment(segment_id);
 }
 
 void P2PClientMeta::SetSegmentRemovalCallback(SegmentRemovalCallback cb) {
-    segment_manager_->SetSegmentRemovalCallback(std::move(cb));
+    segment_removal_cb_ = std::move(cb);
 }
 
-void P2PClientMeta::SetTimeouts(int64_t disconnect_sec, int64_t crash_sec) {
+void P2PClientMeta::SetTimeouts(int64_t disconnect_sec,
+                                int64_t crash_sec) {
     disconnect_timeout_sec_ = disconnect_sec;
     crash_timeout_sec_ = crash_sec;
 }
@@ -165,12 +159,16 @@ bool P2PClientMeta::is_health() const {
 std::pair<P2PClientStatus, P2PClientStatus> P2PClientMeta::Heartbeat() {
     SharedMutexLocker lock(&client_mutex_);
     InnerUpdateHeartbeat();
-    return InnerUpdateHealthStatus();
+    auto transition = InnerUpdateHealthStatus();
+    ApplyHealthTransition(transition.first, transition.second);
+    return transition;
 }
 
 std::pair<P2PClientStatus, P2PClientStatus> P2PClientMeta::CheckHealth() {
     SharedMutexLocker lock(&client_mutex_);
-    return InnerUpdateHealthStatus();
+    auto transition = InnerUpdateHealthStatus();
+    ApplyHealthTransition(transition.first, transition.second);
+    return transition;
 }
 
 void P2PClientMeta::InnerUpdateHeartbeat() {
@@ -195,7 +193,6 @@ P2PClientMeta::InnerUpdateHealthStatus() {
         std::chrono::duration_cast<std::chrono::milliseconds>(
             now - health_state_.last_heartbeat)
             .count();
-
     const int64_t disconnect_timeout_ms = disconnect_timeout_sec_ * 1000;
     const int64_t crash_timeout_ms = crash_timeout_sec_ * 1000;
 
@@ -220,7 +217,6 @@ P2PClientMeta::InnerUpdateHealthStatus() {
         case P2PClientStatus::UNDEFINED:
             break;
     }
-
     if (health_state_.status != old_status) {
         LOG(INFO) << "Client status changed"
                   << ", client_id=" << client_id_
@@ -228,6 +224,39 @@ P2PClientMeta::InnerUpdateHealthStatus() {
                   << ", new_status=" << HealthToString(health_state_.status);
     }
     return {old_status, health_state_.status};
+}
+
+void P2PClientMeta::ApplyHealthTransition(P2PClientStatus old_status,
+                                          P2PClientStatus new_status) {
+    if (old_status == new_status || !registered_) {
+        return;
+    }
+    auto& metrics = P2PMasterMetricManager::instance();
+    if (old_status == P2PClientStatus::HEALTH &&
+        new_status == P2PClientStatus::DISCONNECTION) {
+        LOG(INFO) << "the client is disconnected"
+                  << ", client_id=" << client_id_;
+        metrics.dec_active_clients();
+        metrics.inc_clients_disconnected_total();
+    } else if (old_status == P2PClientStatus::DISCONNECTION &&
+               new_status == P2PClientStatus::HEALTH) {
+        LOG(INFO) << "the client is recovered"
+                  << ", client_id=" << client_id_;
+        metrics.inc_active_clients();
+        metrics.inc_clients_recovered_total();
+    } else if (new_status == P2PClientStatus::CRASHED) {
+        LOG(INFO) << "the client is crashed"
+                  << ", client_id=" << client_id_;
+        if (old_status == P2PClientStatus::HEALTH) {
+            metrics.dec_active_clients();
+        }
+        metrics.inc_clients_crashed_total();
+    } else {
+        LOG(WARNING) << "unexpected P2P client health transition"
+                     << ", client_id=" << client_id_
+                     << ", old_status=" << old_status
+                     << ", new_status=" << new_status;
+    }
 }
 
 tl::expected<void, ErrorCode> P2PClientMeta::InnerStatusCheck() const {
@@ -240,64 +269,35 @@ tl::expected<void, ErrorCode> P2PClientMeta::InnerStatusCheck() const {
     return {};
 }
 
-void P2PClientMeta::OnDisconnected() {
-    SharedMutexLocker lock(&client_mutex_, shared_lock);
-    if (health_state_.status == P2PClientStatus::HEALTH) {
-        return;
-    } else if (health_state_.status != P2PClientStatus::DISCONNECTION) {
-        LOG(ERROR) << "unexpected hook calling"
-                   << ", client_id=" << client_id_ << ", current status="
-                   << HealthToString(health_state_.status)
-                   << ", expected status="
-                   << HealthToString(P2PClientStatus::DISCONNECTION);
-        return;
-    }
-    LOG(INFO) << "the client is disconnected"
-              << ", client_id=" << client_id_;
-    P2PMasterMetricManager::instance().dec_active_clients();
-    P2PMasterMetricManager::instance().inc_clients_disconnected_total();
-}
-
-void P2PClientMeta::OnRecovered() {
-    SharedMutexLocker lock(&client_mutex_, shared_lock);
-    if (health_state_.status != P2PClientStatus::HEALTH) {
-        LOG(ERROR) << "unexpected hook calling"
-                   << ", client_id=" << client_id_ << ", current status="
-                   << HealthToString(health_state_.status)
-                   << ", expected status="
-                   << HealthToString(P2PClientStatus::HEALTH);
-        return;
-    }
-    LOG(INFO) << "the client is recovered"
-              << ", client_id=" << client_id_;
-    P2PMasterMetricManager::instance().inc_active_clients();
-    P2PMasterMetricManager::instance().inc_clients_recovered_total();
-}
-
-void P2PClientMeta::OnCrashed() {
-    LOG(INFO) << "the client is crashed"
-              << ", client_id=" << client_id_;
-    P2PMasterMetricManager::instance().inc_clients_crashed_total();
-    RecycleMeta();
-}
-
 void P2PClientMeta::RecycleMeta() {
     if (recycled_.exchange(true, std::memory_order_acq_rel)) {
         return;
     }
     LOG(INFO) << "start to recycle client meta"
               << ", client_id=" << client_id_;
-    SharedMutexLocker lock(&client_mutex_, shared_lock);
-    auto segments_res = segment_manager_->GetSegments();
-    if (segments_res) {
-        for (const auto& segment : *segments_res) {
-            auto ret = segment_manager_->UnmountSegment(segment.id);
-            if (!ret.has_value()) {
-                LOG(ERROR) << "Failed to unmount segment"
-                           << ", client_id=" << client_id_
-                           << ", segment_id=" << segment.id
-                           << " error=" << ret.error();
+
+    std::vector<UUID> removed_segments;
+    {
+        SharedMutexLocker lock(&client_mutex_, shared_lock);
+        auto segments_res = segment_manager_.GetSegments();
+        if (segments_res) {
+            removed_segments.reserve(segments_res->size());
+            for (const auto& segment : *segments_res) {
+                auto ret = segment_manager_.UnmountSegment(segment.id);
+                if (!ret.has_value()) {
+                    LOG(ERROR) << "Failed to unmount segment"
+                               << ", client_id=" << client_id_
+                               << ", segment_id=" << segment.id
+                               << " error=" << ret.error();
+                    continue;
+                }
+                removed_segments.push_back(segment.id);
             }
+        }
+    }
+    if (segment_removal_cb_) {
+        for (const auto& segment_id : removed_segments) {
+            segment_removal_cb_(segment_id);
         }
     }
     LOG(INFO) << "the client meta is recycled over"
@@ -318,12 +318,7 @@ std::string P2PClientMeta::HealthToString(P2PClientStatus status) const {
     return "UNKNOWN";
 }
 
-std::shared_ptr<P2PSegmentManager> P2PClientMeta::GetSegmentManager() {
-    return segment_manager_;
-}
-
-tl::expected<std::vector<std::string>, ErrorCode> P2PClientMeta::QueryIp(
-    const UUID& client_id) {
+tl::expected<std::vector<std::string>, ErrorCode> P2PClientMeta::QueryIp() {
     SharedMutexLocker lock(&client_mutex_, shared_lock);
     auto check_ret = InnerStatusCheck();
     if (!check_ret.has_value()) {
@@ -338,13 +333,12 @@ tl::expected<std::vector<std::string>, ErrorCode> P2PClientMeta::QueryIp(
 SyncSegmentMetaResult P2PClientMeta::UpdateSegmentUsages(
     const std::vector<TierUsageInfo>& usages) {
     SyncSegmentMetaResult result;
-    int64_t usage_delta = 0;
     for (const auto& usage : usages) {
         SyncSegmentMetaResult::SubResult sub_res;
         sub_res.segment_id = usage.segment_id;
 
         auto old_usage =
-            segment_manager_->UpdateSegmentUsage(usage.segment_id, usage.usage);
+            segment_manager_.UpdateSegmentUsage(usage.segment_id, usage.usage);
         if (!old_usage.has_value()) {
             LOG(WARNING) << "fail to update segment usage"
                          << ", client_id: " << client_id_
@@ -355,32 +349,15 @@ SyncSegmentMetaResult P2PClientMeta::UpdateSegmentUsages(
             result.sub_results.push_back(sub_res);
             continue;
         }
-
-        usage_delta += static_cast<int64_t>(usage.usage) -
-                       static_cast<int64_t>(old_usage.value());
         sub_res.error = ErrorCode::OK;
         result.sub_results.push_back(sub_res);
-    }
-
-    if (usage_delta != 0) {
-        SpinRWLockLocker lock(&capacity_mutex_);
-        const int64_t new_usage =
-            static_cast<int64_t>(client_usage_) + usage_delta;
-        if (new_usage < 0) {
-            LOG(ERROR) << "client usage would go negative, clamp to 0"
-                       << ", client_id=" << client_id_
-                       << ", client_usage=" << client_usage_
-                       << ", usage_delta=" << usage_delta;
-        }
-        client_usage_ = new_usage > 0 ? static_cast<size_t>(new_usage) : 0;
     }
     return result;
 }
 
 size_t P2PClientMeta::GetAvailableCapacity() const {
-    SpinRWLockLocker lock(&capacity_mutex_, shared_lock);
-    if (client_capacity_ <= client_usage_) return 0;
-    return client_capacity_ - client_usage_;
+    const auto [capacity, usage] = segment_manager_.GetCapacityUsage();
+    return capacity > usage ? capacity - usage : 0;
 }
 
 P2PClientMeta::CapacityStat P2PClientMeta::GetWriteScoreCapacity(
@@ -401,7 +378,7 @@ P2PClientMeta::CapacityStat P2PClientMeta::GetWriteScoreCapacity(
 
     CapacityStat all, top;
     int max_priority = std::numeric_limits<int>::min();
-    segment_manager_->ForEachSegment([&](const P2PSegment& seg) -> bool {
+    segment_manager_.ForEachSegment([&](const P2PSegment& seg) -> bool {
         if (!eligible(seg)) return false;
         const size_t free = seg.size > seg.usage ? seg.size - seg.usage : 0;
         all.total += seg.size;

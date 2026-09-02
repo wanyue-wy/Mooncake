@@ -4,7 +4,6 @@
 #include <chrono>
 #include <glog/logging.h>
 #include <random>
-
 #include "p2p/master/p2p_master_metric_manager.h"
 
 namespace mooncake {
@@ -21,13 +20,18 @@ P2PClientManager::~P2PClientManager() { Stop(); }
 void P2PClientManager::Start() { StartClientMonitor(); }
 
 void P2PClientManager::StartClientMonitor() {
-    if (client_monitor_running_) return;
-    client_monitor_running_ = true;
-    client_monitor_thread_ = std::thread([this]() {
-        while (client_monitor_running_) {
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(kClientMonitorSleepMs));
-            if (client_monitor_running_) ClientMonitorFunc();
+    client_monitor_thread_ = std::jthread([this](std::stop_token stop_token) {
+        while (!stop_token.stop_requested()) {
+            constexpr auto kPollInterval = std::chrono::milliseconds(10);
+            uint64_t waited_ms = 0;
+            while (!stop_token.stop_requested() &&
+                   waited_ms < kClientMonitorSleepMs) {
+                std::this_thread::sleep_for(kPollInterval);
+                waited_ms += kPollInterval.count();
+            }
+            if (!stop_token.stop_requested()) {
+                ClientMonitorFunc();
+            }
         }
     });
     VLOG(1) << "action=start_client_monitor_thread";
@@ -36,10 +40,11 @@ void P2PClientManager::StartClientMonitor() {
 void P2PClientManager::Stop() { StopClientMonitor(); }
 
 void P2PClientManager::StopClientMonitor() {
-    client_monitor_running_ = false;
-    if (client_monitor_thread_.joinable()) {
-        client_monitor_thread_.join();
+    if (!client_monitor_thread_.joinable()) {
+        return;
     }
+    client_monitor_thread_.request_stop();
+    client_monitor_thread_.join();
 }
 
 auto P2PClientManager::GetClient(const UUID& client_id)
@@ -52,8 +57,7 @@ auto P2PClientManager::GetClient(const UUID& client_id)
     return it->second;
 }
 
-std::vector<std::shared_ptr<P2PClientMeta>>
-P2PClientManager::GetAllClients() {
+std::vector<std::shared_ptr<P2PClientMeta>> P2PClientManager::GetAllClients() {
     SharedMutexLocker lock(&clients_mutex_, shared_lock);
     std::vector<std::shared_ptr<P2PClientMeta>> clients;
     clients.reserve(client_metas_.size());
@@ -89,8 +93,8 @@ auto P2PClientManager::BuildClientList(ObjectIterateStrategy strategy) const
                 clients_with_capacity;
             clients_with_capacity.reserve(client_metas_.size());
             for (const auto& [id, meta] : client_metas_) {
-                clients_with_capacity.emplace_back(
-                    meta->GetAvailableCapacity(), meta);
+                clients_with_capacity.emplace_back(meta->GetAvailableCapacity(),
+                                                   meta);
             }
             std::sort(clients_with_capacity.begin(),
                       clients_with_capacity.end(),
@@ -147,7 +151,7 @@ P2PClientManager::GetAllSegments() {
             continue;
         }
         for (const auto& segment : segments_res.value()) {
-            all_segments.emplace_back(std::move(segment.name));
+            all_segments.emplace_back(segment.name);
         }
     }
     return all_segments;
@@ -172,7 +176,7 @@ P2PClientManager::GetClientSegments(const UUID& client_id) {
     std::vector<std::string> segment_names;
     segment_names.reserve(segments_res.value().size());
     for (const auto& segment : segments_res.value()) {
-        segment_names.emplace_back(std::move(segment.name));
+        segment_names.emplace_back(segment.name);
     }
     return segment_names;
 }
@@ -184,10 +188,11 @@ P2PClientManager::QuerySegments(const std::string& segment) {
         auto ret = meta->QuerySegments(segment);
         if (ret.has_value()) {
             return ret;
-        } else if (ret.error() != ErrorCode::SEGMENT_NOT_FOUND) {
-            LOG(ERROR)
-                << "QuerySegments: failed to query segments for client_id="
-                << id << ", error=" << ret.error();
+        }
+        if (ret.error() != ErrorCode::SEGMENT_NOT_FOUND) {
+            LOG(ERROR) << "QuerySegments: failed to query segments for "
+                          "client_id="
+                       << id << ", error=" << ret.error();
             return ret;
         }
     }
@@ -207,9 +212,13 @@ tl::expected<UUID, ErrorCode> P2PClientManager::GetClientIdBySegmentName(
     SharedMutexLocker lock(&clients_mutex_, shared_lock);
     for (const auto& [client_id, meta] : client_metas_) {
         auto segments = meta->GetSegments();
-        if (!segments.has_value()) continue;
+        if (!segments.has_value()) {
+            continue;
+        }
         for (const auto& segment : segments.value()) {
-            if (segment.name == segment_name) return client_id;
+            if (segment.name == segment_name) {
+                return client_id;
+            }
         }
     }
     LOG(WARNING) << "GetClientIdBySegmentName: segment not found"
@@ -226,12 +235,11 @@ tl::expected<std::vector<std::string>, ErrorCode> P2PClientManager::QueryIp(
                      << ", client_id=" << client_id;
         return tl::make_unexpected(ErrorCode::CLIENT_NOT_FOUND);
     }
-    return it->second->QueryIp(client_id);
+    return it->second->QueryIp();
 }
 
-tl::expected<std::shared_ptr<P2PSegment>, ErrorCode>
-P2PClientManager::QuerySegment(const UUID& client_id,
-                               const UUID& segment_id) {
+tl::expected<P2PSegment, ErrorCode> P2PClientManager::QuerySegment(
+    const UUID& client_id, const UUID& segment_id) {
     SharedMutexLocker lock(&clients_mutex_, shared_lock);
     auto it = client_metas_.find(client_id);
     if (it == client_metas_.end()) {
@@ -280,14 +288,6 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
 
     auto meta = std::make_shared<P2PClientMeta>(req.client_id, req.ip_address,
                                                 req.rpc_port);
-    if (segment_removal_cb_) {
-        meta->SetSegmentRemovalCallback(
-            [callback = segment_removal_cb_, client_id](
-                const UUID& segment_id) {
-                callback(P2PRouteLocation{.client_id = client_id,
-                                          .segment_id = segment_id});
-            });
-    }
     for (const auto& segment : req.segments) {
         auto result = meta->MountSegment(segment);
         if (!result) {
@@ -295,22 +295,37 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
                        << ", segment_name=" << segment.name
                        << ", client_id=" << client_id
                        << ", error=" << result.error();
+            meta->RecycleMeta();
             return tl::make_unexpected(result.error());
         }
     }
-
     meta->SetSyncing(true);
 
-    SharedMutexLocker lock(&clients_mutex_);
-    if (client_metas_.count(client_id)) {
+    bool inserted = false;
+    {
+        SharedMutexLocker lock(&clients_mutex_);
+        auto [it, was_inserted] = client_metas_.emplace(client_id, meta);
+        inserted = was_inserted;
+        if (inserted) {
+            if (segment_removal_cb_) {
+                meta->SetSegmentRemovalCallback(
+                    [callback = segment_removal_cb_, client_id](
+                        const UUID& segment_id) {
+                        callback(P2PRouteLocation{.client_id = client_id,
+                                                  .segment_id = segment_id});
+                    });
+            }
+            meta->MarkRegistered();
+            P2PMasterMetricManager::instance().inc_active_clients();
+        }
+    }
+    if (!inserted) {
         LOG(WARNING)
             << "RegisterClient: client already exists (lost registration race)"
             << ", client_id=" << client_id;
+        meta->RecycleMeta();
         return tl::make_unexpected(ErrorCode::CLIENT_ALREADY_EXISTS);
     }
-    client_metas_[client_id] = std::move(meta);
-
-    P2PMasterMetricManager::instance().inc_active_clients();
 
     P2PRegisterClientResponse response;
     response.view_version = view_version_;
@@ -318,7 +333,6 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
     LOG(INFO) << "RegisterClient: client_id=" << client_id
               << ", segments=" << req.segments.size()
               << ", view_version=" << response.view_version;
-
     return response;
 }
 
@@ -347,20 +361,18 @@ auto P2PClientManager::UnregisterClient(const P2PUnregisterClientRequest& req)
             return response;
         }
         meta = std::move(it->second);
-        was_health = (meta->get_health_state().status == P2PClientStatus::HEALTH);
+        was_health = meta->get_health_state().status == P2PClientStatus::HEALTH;
         client_metas_.erase(it);
     }
 
     // The client is out of client_metas_ now. Recycle its segments WITHOUT
     // crash accounting (this is a proactive unregister, not a crash).
     meta->RecycleMeta();
-
     // Decrement the active gauge only if the client was still HEALTH: the
-    // unhealthy path already decremented it in OnDisconnected().
+    // unhealthy path already decremented it during the status transition.
     if (was_health) {
         P2PMasterMetricManager::instance().dec_active_clients();
     }
-
     P2PUnregisterClientResponse response;
     response.view_version = view_version_;
     LOG(INFO) << "UnregisterClient: client_id=" << client_id
@@ -385,21 +397,15 @@ auto P2PClientManager::Heartbeat(const P2PHeartbeatRequest& req)
     }
 
     auto& meta = it->second;
-
     // Update Heartbeat
     auto [old_status, new_status] = meta->Heartbeat();
     response.status = new_status;
     if (new_status == P2PClientStatus::HEALTH) {
-        if (old_status != new_status) {
-            LOG(INFO) << "client recovered"
-                      << ", client_id=" << client_id;
-            meta->OnRecovered();
-        }
+        response.task_results.reserve(req.tasks.size());
         for (const auto& task : req.tasks) {
-            response.task_results.push_back(ProcessTask(client_id, task));
+            response.task_results.push_back(ProcessTask(meta, task));
         }
     }
-
     return response;
 }
 
@@ -410,110 +416,103 @@ auto P2PClientManager::QueryClientStatus(const P2PQueryClientStatusRequest& req)
 
     SharedMutexLocker lock(&clients_mutex_, shared_lock);
     auto it = client_metas_.find(client_id);
-    if (it == client_metas_.end()) {
-        response.status = P2PClientStatus::UNDEFINED;
-    } else {
-        response.status = it->second->get_health_state().status;
-    }
-
+    response.status = it == client_metas_.end()
+                          ? P2PClientStatus::UNDEFINED
+                          : it->second->get_health_state().status;
     return response;
 }
 
-HeartbeatTaskResult P2PClientManager::ProcessTask(const UUID& client_id,
-                                                  const HeartbeatTask& task) {
+HeartbeatTaskResult P2PClientManager::ProcessTask(
+    const std::shared_ptr<P2PClientMeta>& client_meta,
+    const HeartbeatTask& task) {
     HeartbeatTaskResult result;
     result.type = task.type_;
-
     switch (task.type_) {
         case HeartbeatTaskType::SYNC_SEGMENT_META: {
-            auto client_meta = GetClient(client_id);
             const auto* param = std::get_if<SyncSegmentMetaParam>(&task.param_);
-            if (client_meta && param) {
-                auto sync_res =
-                    client_meta->UpdateSegmentUsages(param->tier_usages);
-                result.detail = sync_res;
-                for (const auto& sub : sync_res.sub_results) {
-                    if (sub.error != ErrorCode::OK) {
-                        // result.error means the task is failed.
-                        // here just sub task error, don't affect task result.
-                        LOG(ERROR) << "fail to update segment usages"
-                                   << ", client_id=" << client_id
-                                   << ", segment_id=" << sub.segment_id
-                                   << ", error=" << sub.error;
-                    }
-                }
-            } else {
+            if (!param) {
                 result.error = ErrorCode::INVALID_PARAMS;
+                LOG(ERROR) << "SYNC_SEGMENT_META: invalid param"
+                           << ", client_id=" << client_meta->get_client_id();
+                break;
+            }
+            auto sync_res =
+                client_meta->UpdateSegmentUsages(param->tier_usages);
+            result.detail = sync_res;
+            for (const auto& sub : sync_res.sub_results) {
+                if (sub.error != ErrorCode::OK) {
+                    // result.error means the task is failed.
+                    // here just sub task error, don't affect task result.
+                    LOG(ERROR) << "fail to update segment usages"
+                               << ", client_id=" << client_meta->get_client_id()
+                               << ", segment_id=" << sub.segment_id
+                               << ", error=" << sub.error;
+                }
             }
             break;
         }
         case HeartbeatTaskType::SYNC_CLIENT_METRIC: {
             const auto* param =
                 std::get_if<SyncClientMetricParam>(&task.param_);
-            if (param == nullptr) {
+            if (!param) {
                 result.error = ErrorCode::INVALID_PARAMS;
                 LOG(ERROR) << "SYNC_CLIENT_METRIC: invalid param"
-                           << ", client_id=" << client_id;
+                           << ", client_id=" << client_meta->get_client_id();
                 break;
             }
             P2PMasterMetricManager::instance().UpdateClientMetrics(
-                client_id, param->snapshot);
+                client_meta->get_client_id(), param->snapshot);
             break;
         }
         default:
             result.error = ErrorCode::NOT_IMPLEMENTED;
+            LOG(WARNING) << "unsupported heartbeat task"
+                         << ", client_id=" << client_meta->get_client_id()
+                         << ", task_type=" << static_cast<int>(task.type_);
             break;
     }
     return result;
 }
 
 // 1. Phase 1 (Shared Lock): Check health status
-// 2. Phase 2 (No Lock): Execute crashed client hooks
+// 2. Phase 2 (No Lock): Recycle crashed clients
 // 3. Phase 3 (Write Lock): Clean up crashed clients
 void P2PClientManager::ClientMonitorFunc() {
     // Attention:
-    // 1. DISCONNECTED is not finnal status. The clients in
-    // newly_disconnected might change its status.
-    // 2. CRASHED is finnal status. The clients in newly_crashed will always
-    // be crashed.
-    std::vector<std::shared_ptr<P2PClientMeta>> newly_disconnected;
+    // 1. DISCONNECTION is not final status. A concurrent heartbeat may recover
+    // the client after this health check.
+    // 2. CRASHED is final status. The clients in newly_crashed will remain
+    // crashed.
     std::vector<std::shared_ptr<P2PClientMeta>> newly_crashed;
 
-    // Phase 1: Check health status
+    // Phase 1: Check health status.
     {
         SharedMutexLocker lock(&clients_mutex_, shared_lock);
-        for (auto& [client_id, meta] : client_metas_) {
+        for (const auto& [client_id, meta] : client_metas_) {
             auto [old_status, new_status] = meta->CheckHealth();
-            if (old_status != new_status) {
-                if (new_status == P2PClientStatus::DISCONNECTION) {
-                    newly_disconnected.push_back(meta);
-                } else if (new_status == P2PClientStatus::CRASHED) {
-                    newly_crashed.push_back(meta);
-                }
+            if (old_status != new_status &&
+                new_status == P2PClientStatus::CRASHED) {
+                newly_crashed.push_back(meta);
             }
         }
     }
 
-    // Phase 2: Execute hooks (No clients_mutex_ lock)
-    // We can safely execute hooks because we hold shared_ptrs to
-    // P2PClientMeta, so they won't be destroyed.
-    // And hooks don't need clients_mutex_ because they are protected by
-    // P2PClientMeta itself.
-    for (const auto& client : newly_disconnected) {
-        // The client might change to Healthy by concurrent heartbeat.
-        // So OnDisconnected() need to check the status again.
-        client->OnDisconnected();
+    // Phase 2: Recycle segments without clients_mutex_. The shared_ptr keeps
+    // the client alive while callbacks remove its routes.
+    for (const auto& meta : newly_crashed) {
+        meta->RecycleMeta();
     }
 
-    for (const auto& client : newly_crashed) {
-        client->OnCrashed();
-    }
-
-    // Phase 3: Clean up crashed clients (Write Lock)
+    // Phase 3: Remove only the same crashed object observed in phase 1. This
+    // prevents an old monitor result from deleting a concurrently re-registered
+    // client with the same UUID.
     if (!newly_crashed.empty()) {
         SharedMutexLocker lock(&clients_mutex_);
-        for (const auto& client : newly_crashed) {
-            client_metas_.erase(client->get_client_id());
+        for (const auto& meta : newly_crashed) {
+            auto it = client_metas_.find(meta->get_client_id());
+            if (it != client_metas_.end() && it->second == meta) {
+                client_metas_.erase(it);
+            }
         }
     }
 }
