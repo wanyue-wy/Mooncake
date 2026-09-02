@@ -33,6 +33,8 @@ class P2POpLogApplier : public OpLogApplier {
                              const std::string& cluster_id = std::string(),
                              OpLogStore* oplog_store = nullptr);
 
+    bool ApplyOpLogEntry(const OpLogEntry& entry) override;
+
     /// Get the underlying P2P metadata store.
     P2PStandbyMetadataStore* GetP2PMetadataStore() const { return p2p_store_; }
 
@@ -44,8 +46,8 @@ class P2POpLogApplier : public OpLogApplier {
 
    private:
     // Apply individual P2P OpTypes. Return true on success.
-    bool ApplyAddReplica(const OpLogEntry& entry);
-    bool ApplyRemoveReplica(const OpLogEntry& entry);
+    bool ApplyPublishRoute(const OpLogEntry& entry);
+    bool ApplyWithdrawRoute(const OpLogEntry& entry);
     bool ApplyMountSegment(const OpLogEntry& entry);
     bool ApplyUnmountSegment(const OpLogEntry& entry);
     bool ApplyRemoveAll(const OpLogEntry& entry);

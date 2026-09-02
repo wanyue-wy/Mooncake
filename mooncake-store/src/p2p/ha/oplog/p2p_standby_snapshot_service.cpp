@@ -42,6 +42,13 @@ P2PStandbySnapshotService::~P2PStandbySnapshotService() {
 BeginStandbySnapshotResponse P2PStandbySnapshotService::BeginSnapshot(
     const BeginStandbySnapshotRequest& request) {
     BeginStandbySnapshotResponse response;
+    if (request.schema_version != kP2PHAProtocolSchemaVersion) {
+        LOG(ERROR) << "Standby snapshot schema mismatch"
+                   << ", request_version=" << request.schema_version
+                   << ", expected=" << kP2PHAProtocolSchemaVersion;
+        response.error_code = toInt(ErrorCode::INVALID_VERSION);
+        return response;
+    }
     const bool has_standby = standby_ != nullptr;
     const std::string local_cluster_id =
         has_standby ? standby_->GetClusterId() : "";
@@ -72,7 +79,7 @@ BeginStandbySnapshotResponse P2PStandbySnapshotService::BeginSnapshot(
     // reconciles the snapshot for the asynchronous HA consistency model.
     session.baseline_sequence_id = standby_->GetLatestAppliedSequenceId();
     auto* store = standby_->GetMetadataStore();
-    session.object_keys = store->ListObjectKeys();
+    session.object_keys = store->ListRouteKeys();
     session.client_ids = store->ListClientIds();
     session.last_access = std::chrono::steady_clock::now();
 
@@ -102,6 +109,13 @@ BeginStandbySnapshotResponse P2PStandbySnapshotService::BeginSnapshot(
 StandbySnapshotChunkResponse P2PStandbySnapshotService::GetSnapshotChunk(
     const StandbySnapshotChunkRequest& request) {
     StandbySnapshotChunkResponse response;
+    if (request.schema_version != kP2PHAProtocolSchemaVersion) {
+        LOG(ERROR) << "Standby snapshot chunk schema mismatch"
+                   << ", request_version=" << request.schema_version
+                   << ", expected=" << kP2PHAProtocolSchemaVersion;
+        response.error_code = toInt(ErrorCode::INVALID_VERSION);
+        return response;
+    }
     if (!standby_ || request.limit == 0 ||
         request.limit > kMaxStandbySnapshotChunkSize) {
         LOG(WARNING) << "Standby snapshot: GetSnapshotChunk rejected, invalid "
@@ -147,11 +161,11 @@ StandbySnapshotChunkResponse P2PStandbySnapshotService::GetSnapshotChunk(
         std::min<size_t>(request.limit,
                          session.object_keys.size() - object_offset);
     for (size_t i = object_offset; i < object_end; ++i) {
-        auto metadata =
-            standby_->GetMetadataStore()->GetMetadata(session.object_keys[i]);
-        if (metadata) {
+        auto route =
+            standby_->GetMetadataStore()->GetRoute(session.object_keys[i]);
+        if (route) {
             response.objects.push_back(
-                {session.object_keys[i], std::move(*metadata)});
+                {session.object_keys[i], std::move(*route)});
         }
     }
     response.next_object_offset = object_end;
@@ -258,13 +272,20 @@ ErrorCode P2PStandbySnapshotClient::Bootstrap(const std::string& endpoint,
 
     auto begin = async_simple::coro::syncAwait(
         client.call_for<&P2PStandbySnapshotService::BeginSnapshot>(
-            std::chrono::seconds(10), BeginStandbySnapshotRequest{cluster_id}));
+            std::chrono::seconds(10),
+            BeginStandbySnapshotRequest{.cluster_id = cluster_id}));
     if (!begin || fromInt(begin->error_code) != ErrorCode::OK) {
         LOG(WARNING) << "Standby snapshot: BeginSnapshot RPC failed"
                      << ", endpoint=" << endpoint << ", error="
                      << (begin ? toString(fromInt(begin->error_code))
                                : toString(ErrorCode::RPC_FAIL));
         return begin ? fromInt(begin->error_code) : ErrorCode::RPC_FAIL;
+    }
+    if (begin->schema_version != kP2PHAProtocolSchemaVersion) {
+        LOG(ERROR) << "Standby snapshot response schema mismatch"
+                   << ", response_version=" << begin->schema_version
+                   << ", expected=" << kP2PHAProtocolSchemaVersion;
+        return ErrorCode::INVALID_VERSION;
     }
 
     const std::string session_id = begin->session_id;
@@ -300,12 +321,19 @@ ErrorCode P2PStandbySnapshotClient::Bootstrap(const std::string& endpoint,
                          << ", error=" << toString(result);
             break;
         }
+        if (chunk->schema_version != kP2PHAProtocolSchemaVersion) {
+            LOG(ERROR) << "Standby snapshot chunk response schema mismatch"
+                       << ", response_version=" << chunk->schema_version
+                       << ", expected=" << kP2PHAProtocolSchemaVersion;
+            result = ErrorCode::INVALID_VERSION;
+            break;
+        }
         for (const auto& record : chunk->clients) {
             target->RegisterClient(record.client_id, record.info.ip_address,
                                    record.info.rpc_port, record.info.segments);
         }
         for (const auto& record : chunk->objects) {
-            target->RestoreMetadata(record.key, record.metadata);
+            target->RestoreRoute(record.key, record.route);
         }
         object_offset = chunk->next_object_offset;
         client_offset = chunk->next_client_offset;
