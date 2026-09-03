@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include <boost/functional/hash.hpp>
+
 #include "types.h"
 
 namespace mooncake {
@@ -46,11 +48,9 @@ YLT_REFL(P2PReadRouteConfigExtra, tag_filters, priority_limit);
  * This is not a master RPC DTO. The centralized baseline API has no
  * read-route config parameter.
  *
- * TODO(C4 / external interface): After C4 separates the concrete
- * ClientService business APIs, rename this to P2PReadRouteConfig and remove it
- * from all centralized Query/Get/Batch methods. The external-interface phase
- * must then update RealClient/PyClient/DummyClient deployment-mode dispatch
- * and delete the shared ReadRouteConfig name.
+ * TODO(C4 / external interface; see p2p-split-plan-v2.md): Rename this to
+ * P2PReadRouteConfig and remove it from centralized Query/Get/Batch methods
+ * once the public client facade has architecture-specific business APIs.
  */
 struct ReadRouteConfig {
     static constexpr size_t RETURN_ALL_CANDIDATES = 0;
@@ -76,5 +76,34 @@ struct P2PSegment {
     size_t usage{0};
 };
 YLT_REFL(P2PSegment, id, name, size, priority, tags, memory_type, usage);
+
+/**
+ * @brief Stable identity of a P2P route inside the master.
+ *
+ * Segment IDs are client-local. The pair, rather than segment_id alone, is
+ * therefore the only valid identity for indexing and cleanup.
+ */
+struct P2PRouteLocation {
+    UUID client_id{0, 0};
+    UUID segment_id{0, 0};
+
+    bool operator==(const P2PRouteLocation&) const = default;
+};
+YLT_REFL(P2PRouteLocation, client_id, segment_id);
+
+struct P2PRouteLocationHash {
+    size_t operator()(const P2PRouteLocation& location) const noexcept {
+        size_t seed = 0;
+        boost::hash_combine(seed, boost::hash<UUID>{}(location.client_id));
+        boost::hash_combine(seed, boost::hash<UUID>{}(location.segment_id));
+        return seed;
+    }
+};
+
+struct P2PRouteEntry {
+    uint64_t object_size{0};
+    std::vector<P2PRouteLocation> locations;
+};
+YLT_REFL(P2PRouteEntry, object_size, locations);
 
 }  // namespace mooncake

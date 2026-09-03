@@ -114,6 +114,7 @@ target_link_libraries(mooncake_store
 # links the whole mooncake_store because base-class inheritance is severed only
 # in Phase 2; the leaf-only layering constraint (§3.2) is enforced in Phase 3.
 list(APPEND MOONCAKE_STORE_P2P_SOURCES
+    p2p/master/p2p_route_table.cpp
     p2p/master/p2p_master_service.cpp
     p2p/master/p2p_master_client.cpp
     p2p/master/p2p_master_metric_manager.cpp

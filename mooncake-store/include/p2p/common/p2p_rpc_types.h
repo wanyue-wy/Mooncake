@@ -24,9 +24,9 @@ struct P2PRegisterClientRequest {
 };
 YLT_REFL(P2PRegisterClientRequest, client_id, segments, ip_address, rpc_port);
 
-// TODO(M8): Replace the lifecycle DTOs below with the final owning P2P
-// protocol types. The current field order is retained during M6 so this change
-// only establishes architecture ownership.
+// TODO(M8.3; see p2p-master-final-refactor-plan.md): Replace the lifecycle DTO
+// fields with fully owning P2P protocol types. The current field order is
+// retained for wire compatibility.
 struct P2PRegisterClientResponse {
     ViewVersionId view_version = 0;
 };
@@ -74,7 +74,8 @@ YLT_REFL(P2PQueryClientStatusResponse, status);
 /**
  * @brief Current P2P read-route filter.
  *
- * TODO(M8): Replace with P2PReadRouteConfig and owning request DTOs.
+ * TODO(M8.3; see p2p-master-final-refactor-plan.md): Replace with
+ * P2PReadRouteConfig and owning request DTOs.
  */
 struct P2PGetReplicaListRequestConfig {
     static constexpr size_t RETURN_ALL_CANDIDATES = 0;
@@ -84,6 +85,8 @@ struct P2PGetReplicaListRequestConfig {
 YLT_REFL(P2PGetReplicaListRequestConfig, max_candidates, p2p_config);
 
 struct P2PGetReplicaListResponse {
+    // TODO(M8.3; see p2p-master-final-refactor-plan.md): Replace
+    // Replica::Descriptor with a P2P-owned route descriptor.
     std::vector<Replica::Descriptor> replicas;
 };
 YLT_REFL(P2PGetReplicaListResponse, replicas);
@@ -91,8 +94,8 @@ YLT_REFL(P2PGetReplicaListResponse, replicas);
 /**
  * @brief Request config for write route.
  *
- * TODO(M8): Replace with P2PWriteRouteConfig as part of the owning P2P wire
- * protocol.
+ * TODO(M8.3; see p2p-master-final-refactor-plan.md): Replace with
+ * P2PWriteRouteConfig in the owning P2P wire protocol.
  */
 struct WriteRouteRequestConfig {
     static constexpr size_t RETURN_ALL_CANDIDATES = 0;
@@ -118,7 +121,6 @@ struct WriteRouteRequestConfig {
     bool early_return = true;  // whether to return immediately once candidates
                                // meet conditions of config
 
-    // segment level (TODO)
     // filter the segment with tag
     std::vector<std::string> tag_filters;
     // filter the segments whose priority is lower than priority_limit
@@ -161,7 +163,8 @@ inline std::ostream& operator<<(std::ostream& os,
 /**
  * @brief Request structure for getting write route.
  *
- * TODO(M8): Rename to P2PGetWriteRouteRequest
+ * TODO(M8.3; see p2p-master-final-refactor-plan.md): Rename to
+ * P2PGetWriteRouteRequest and make the key owning.
  */
 struct WriteRouteRequest {
     // used for pre-filter with limitation of replica number
@@ -196,7 +199,8 @@ YLT_REFL(WriteRouteResponse, candidates);
 /**
  * @brief Request for batch write route lookup.
  *
- * TODO(M8): Rename to P2PBatchGetWriteRouteRequest and use owning keys.
+ * TODO(M8.3; see p2p-master-final-refactor-plan.md): Rename to
+ * P2PBatchGetWriteRouteRequest and use owning keys.
  */
 struct BatchGetWriteRouteRequest {
     UUID client_id;
@@ -220,7 +224,8 @@ YLT_REFL(BatchGetWriteRouteResponse, responses, error_codes);
  * @brief Request to add a replica.
  *        Master resolves ip_address/rpc_port from registered client info.
  *
- * TODO(M8): Replace with P2PPublishRouteRequest.
+ * TODO(M8.3; see p2p-master-final-refactor-plan.md): Replace with
+ * P2PPublishRouteRequest using an owning key.
  */
 struct AddReplicaRequest {
     std::string_view key;
@@ -233,7 +238,8 @@ YLT_REFL(AddReplicaRequest, key, size, client_id, segment_id);
 /**
  * @brief Request to remove a replica.
  *
- * TODO(M8): Replace with P2PWithdrawRouteRequest.
+ * TODO(M8.3; see p2p-master-final-refactor-plan.md): Replace with
+ * P2PWithdrawRouteRequest using an owning key.
  */
 struct RemoveReplicaRequest {
     std::string_view key;
@@ -245,7 +251,8 @@ YLT_REFL(RemoveReplicaRequest, key, client_id, segment_id);
 /**
  * @brief Request to remove replicas from multiple segments in one call.
  *
- * TODO(M8): Replace with P2PBatchWithdrawRouteRequest.
+ * TODO(M8.3; see p2p-master-final-refactor-plan.md): Replace with
+ * P2PBatchWithdrawRouteRequest using owning keys.
  */
 struct BatchRemoveReplicaRequest {
     std::string_view key;
@@ -258,7 +265,8 @@ YLT_REFL(BatchRemoveReplicaRequest, key, client_id, segment_ids);
  * @brief Request to batch sync replicas (mixed ADD and REMOVE ops).
  *        Master only needs client_id + segment_id to identify replicas
  *
- * TODO(M8): Replace with P2PBatchSyncRoutesRequest and owning keys.
+ * TODO(M8.3; see p2p-master-final-refactor-plan.md): Replace with
+ * P2PBatchSyncRoutesRequest and owning keys.
  */
 struct BatchSyncReplicaRequest {
     UUID client_id;

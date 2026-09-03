@@ -68,7 +68,8 @@ class P2PClientManager final {
                        const ClientVisitor& visitor)
         -> tl::expected<void, ErrorCode>;
 
-    using SegmentRemovalCallback = std::function<void(const UUID& segment_id)>;
+    using SegmentRemovalCallback =
+        std::function<void(const P2PRouteLocation& location)>;
     void SetSegmentRemovalCallback(SegmentRemovalCallback cb);
 
    protected:

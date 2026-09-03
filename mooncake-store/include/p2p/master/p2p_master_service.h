@@ -1,44 +1,38 @@
 #pragma once
 
-#include <algorithm>
-#include <array>
 #include <boost/functional/hash.hpp>
-#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
 #include <ylt/util/tl/expected.hpp>
 
-#include "mutex.h"
 #include "p2p/common/p2p_master_config.h"
 #include "p2p/common/p2p_rpc_types.h"
 #include "p2p/ha/oplog/oplog_manager.h"
 #include "p2p/ha/oplog/p2p_standby_metadata_store.h"
 #include "p2p/master/p2p_client_manager.h"
+#include "p2p/master/p2p_route_table.h"
 #include "replica.h"
 #include "types.h"
-#include "utils.h"
 
 namespace mooncake {
 
 /**
  * @brief Standalone P2P master service.
  *
- * P2PMasterService owns P2P object metadata and delegates client and segment
+ * P2PMasterService owns P2P route metadata and delegates client and segment
  * metadata to P2PClientManager.
  *
  * Lock order:
- * 1. MetadataShard::mutex
+ * 1. P2PRouteTable route shard mutex
  * 2. P2PClientManager::clients_mutex_
  * 3. P2PSegmentManager::segments_mutex_
  */
 class P2PMasterService {
-   protected:
-    struct ObjectMetadata;
-
    public:
     explicit P2PMasterService(const P2PMasterConfig& config,
                               ViewVersionId view_version = 0);
@@ -78,6 +72,8 @@ class P2PMasterService {
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>;
 
+    // TODO(M8.3; see p2p-master-final-refactor-plan.md): Return P2P-owned route
+    // descriptors instead of Replica::Descriptor.
     auto GetReplicaListByRegex(const std::string& regex_pattern)
         -> tl::expected<
             std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
@@ -139,7 +135,7 @@ class P2PMasterService {
      * @brief Restore P2P metadata exported by P2PHotStandbyService promotion.
      *
      * The target service must be empty. Restore registers clients/segments and
-     * rebuilds object metadata plus segment reverse indexes without recording
+     * rebuilds route metadata plus location reverse indexes without recording
      * new OpLog entries. If last_applied_sequence_id is provided, the target
      * OpLogManager starts future writes after that sequence.
      */
@@ -150,197 +146,41 @@ class P2PMasterService {
     ErrorCode RecordOplog(OpType type, const std::string& key,
                           const std::string& payload = std::string());
 
-   protected:
-    struct ObjectMetadata {
-       public:
-        ~ObjectMetadata();
-
-        ObjectMetadata(size_t value_length, std::vector<Replica>&& replicas);
-        ObjectMetadata() = delete;
-        ObjectMetadata(const ObjectMetadata&) = delete;
-        ObjectMetadata& operator=(const ObjectMetadata&) = delete;
-        ObjectMetadata(ObjectMetadata&&) = delete;
-        ObjectMetadata& operator=(ObjectMetadata&&) = delete;
-
-        bool IsValid() const { return CountReplicas() > 0 && size_ > 0; }
-
-        bool HasReplica(
-            const std::function<bool(const Replica&)>& pred_fn) const {
-            return std::any_of(replicas_.begin(), replicas_.end(), pred_fn);
-        }
-
-        size_t CountReplicas(
-            const std::function<bool(const Replica&)>& pred_fn) const {
-            return std::count_if(replicas_.begin(), replicas_.end(), pred_fn);
-        }
-
-        size_t CountReplicas() const { return replicas_.size(); }
-
-        bool IsObjectAccessible() const {
-            return HasReplica(&Replica::fn_is_completed);
-        }
-
-        std::vector<Replica> replicas_;
-        size_t size_;
-    };
-
-    struct MetadataShard {
-        mutable SharedMutex mutex;
-        std::unordered_map<std::string, std::unique_ptr<ObjectMetadata>,
-                           StringHash, std::equal_to<>>
-            metadata GUARDED_BY(mutex);
-
-        std::unordered_map<UUID, std::unordered_map<std::string_view, size_t>,
-                           boost::hash<UUID>>
-            segment_key_index GUARDED_BY(mutex);
-    };
-
-    class MetadataShardAccessorRW {
-       public:
-        MetadataShardAccessorRW(P2PMasterService* master_service,
-                                size_t shard_index)
-            : shard_(master_service->GetShard(shard_index)),
-              lock_(&shard_.mutex) {}
-
-        MetadataShard* operator->() { return &shard_; }
-        const MetadataShard* operator->() const { return &shard_; }
-        MetadataShard& GetRef() NO_THREAD_SAFETY_ANALYSIS { return shard_; }
-
-       private:
-        MetadataShard& shard_;
-        SharedMutexLocker lock_;
-    };
-
-    class MetadataShardAccessorRO {
-       public:
-        MetadataShardAccessorRO(const P2PMasterService* master_service,
-                                size_t shard_index)
-            : shard_(master_service->GetShard(shard_index)),
-              lock_(&shard_.mutex, shared_lock) {}
-
-        const MetadataShard* operator->() const { return &shard_; }
-
-       private:
-        const MetadataShard& shard_;
-        SharedMutexLocker lock_;
-    };
-
-    void AddReplicaToSegmentIndex(MetadataShard& shard, const std::string& key,
-                                  const Replica& replica)
-        NO_THREAD_SAFETY_ANALYSIS;
-    void RemoveReplicaFromSegmentIndex(
-        MetadataShard& shard, const std::string& key,
-        const std::vector<Replica>& replicas) NO_THREAD_SAFETY_ANALYSIS;
-    void RemoveReplicaFromSegmentIndex(MetadataShard& shard,
-                                       const std::string& key,
-                                       const Replica& replica)
-        NO_THREAD_SAFETY_ANALYSIS;
-
-    MetadataShard& GetShard(size_t idx) { return metadata_shards_[idx]; }
-    const MetadataShard& GetShard(size_t idx) const {
-        return metadata_shards_[idx];
-    }
-
-    static constexpr size_t kNumShards = 1024;
-
-    size_t GetShardIndex(std::string_view key) const {
-        return std::hash<std::string_view>{}(key) % kNumShards;
-    }
-
-    size_t GetShardCount() const { return kNumShards; }
-
-    class MetadataAccessorRW {
-       public:
-        MetadataAccessorRW(P2PMasterService* service, std::string_view key)
-            : service_(service),
-              shard_guard_(service_, service_->GetShardIndex(key)),
-              it_(shard_guard_->metadata.find(key)) {}
-
-        bool Exists() const NO_THREAD_SAFETY_ANALYSIS {
-            return it_ != shard_guard_->metadata.end() &&
-                   it_->second->IsValid();
-        }
-
-        ObjectMetadata& Get() NO_THREAD_SAFETY_ANALYSIS { return *it_->second; }
-
-        MetadataShardAccessorRW& GetShard() NO_THREAD_SAFETY_ANALYSIS {
-            return shard_guard_;
-        }
-
-        void Erase() NO_THREAD_SAFETY_ANALYSIS {
-            if (it_ == shard_guard_->metadata.end()) {
-                return;
-            }
-            service_->RemoveReplicaFromSegmentIndex(
-                shard_guard_.GetRef(), it_->first, it_->second->replicas_);
-            shard_guard_->metadata.erase(it_);
-            it_ = shard_guard_->metadata.end();
-        }
-
-       private:
-        P2PMasterService* service_;
-        MetadataShardAccessorRW shard_guard_;
-        using MetadataMap =
-            std::unordered_map<std::string, std::unique_ptr<ObjectMetadata>,
-                               StringHash, std::equal_to<>>;
-        MetadataMap::iterator it_;
-    };
-
-    class MetadataAccessorRO {
-       public:
-        MetadataAccessorRO(const P2PMasterService* service,
-                           std::string_view key)
-            : shard_guard_(service, service->GetShardIndex(key)),
-              it_(shard_guard_->metadata.find(key)) {}
-
-        bool Exists() const NO_THREAD_SAFETY_ANALYSIS {
-            return it_ != shard_guard_->metadata.end() &&
-                   it_->second->IsValid();
-        }
-
-        const ObjectMetadata& Get() const NO_THREAD_SAFETY_ANALYSIS {
-            return *it_->second;
-        }
-
-       private:
-        MetadataShardAccessorRO shard_guard_;
-        using MetadataMap =
-            std::unordered_map<std::string, std::unique_ptr<ObjectMetadata>,
-                               StringHash, std::equal_to<>>;
-        MetadataMap::const_iterator it_;
-    };
-
-    void OnSegmentRemoved(const UUID& segment_id);
-    void InitializeClientManager();
-
    private:
     using OwnerClientSet = std::unordered_set<UUID, boost::hash<UUID>>;
 
-    static auto CollectReplicaOwnerClients(const ObjectMetadata& metadata,
-                                           std::string_view key)
-        -> tl::expected<OwnerClientSet, ErrorCode>;
+    void InitializeClientManager();
+    void OnSegmentRemoved(const P2PRouteLocation& location);
+    static OwnerClientSet CollectRouteOwnerClients(
+        const P2PRouteEntry& route);
 
-    std::vector<Replica::Descriptor> FilterReplicas(
+    // TODO(M8.3; see p2p-master-final-refactor-plan.md): Return a P2P-owned
+    // route descriptor instead of Replica::Descriptor.
+    auto BuildReplicaDescriptor(const P2PRouteLocation& location,
+                                uint64_t object_size) const
+        -> tl::expected<Replica::Descriptor, ErrorCode>;
+
+    // TODO(M8.3; see p2p-master-final-refactor-plan.md): Return P2P-owned route
+    // descriptors instead of Replica::Descriptor.
+    std::vector<Replica::Descriptor> FilterRoutes(
         const P2PGetReplicaListRequestConfig& config,
-        const ObjectMetadata& metadata);
+        const P2PRouteEntry& route) const;
 
-    tl::expected<void, ErrorCode> InnerAddReplica(
-        MetadataShard& shard, std::string_view key, const UUID& client_id,
-        const UUID& segment_id, size_t size,
-        const std::shared_ptr<P2PClientMeta>& client) NO_THREAD_SAFETY_ANALYSIS;
-    tl::expected<void, ErrorCode> InnerRemoveReplica(
-        MetadataShard& shard, std::string_view key, const UUID& client_id,
-        const UUID& segment_id) NO_THREAD_SAFETY_ANALYSIS;
+    auto InnerAddReplica(std::string_view key, const UUID& client_id,
+                         const UUID& segment_id, size_t size,
+                         const std::shared_ptr<P2PClientMeta>& client)
+        -> tl::expected<void, ErrorCode>;
+    auto InnerRemoveReplica(std::string_view key, const UUID& client_id,
+                            const UUID& segment_id)
+        -> tl::expected<void, ErrorCode>;
 
-    std::array<MetadataShard, kNumShards> metadata_shards_;
+    P2PRouteTable route_table_;
     uint64_t max_client_per_key_;
     bool enable_async_oplog_write_{false};
     ViewVersionId view_version_;
     std::unique_ptr<OpLogManager> oplog_manager_;
+    // Declared last so the monitor and its callbacks stop before route state.
     std::shared_ptr<P2PClientManager> client_manager_;
-
-    friend class MetadataAccessorRW;
-    friend class MetadataAccessorRO;
 };
 
 }  // namespace mooncake
