@@ -403,6 +403,42 @@ TEST_F(P2PRecordOplogTest, BatchSyncRoutesRecordsSuccessfulOps) {
 }
 
 TEST_F(P2PRecordOplogTest,
+       BatchSyncRoutesPreservesMutationPolicyWhenPersistenceFails) {
+    P2PMasterService service(MakeConfig());
+    const UUID client_id{20, 20};
+    const UUID segment_id{21, 21};
+    RegisterClient(service, client_id, MakeSegment(segment_id));
+    AddReplica(service, "old-key", client_id, segment_id);
+    InjectFailingOpLogStore(service);
+
+    P2PBatchSyncRoutesRequest req;
+    req.client_id = client_id;
+    req.publish_operations = {{
+        .key = "new-key",
+        .object_size = 2048,
+        .segment_id = segment_id,
+    }};
+    req.withdraw_operations = {{
+        .key = "old-key",
+        .segment_id = segment_id,
+    }};
+
+    auto response = service.BatchSyncRoutes(req);
+    ASSERT_EQ(response.publish_results.size(), 1);
+    ASSERT_EQ(response.withdraw_results.size(), 1);
+    EXPECT_EQ(response.publish_results[0], ErrorCode::OK);
+    EXPECT_EQ(response.withdraw_results[0], ErrorCode::INTERNAL_ERROR);
+
+    auto published = service.GetReadRoute("new-key");
+    ASSERT_TRUE(published.has_value());
+    EXPECT_EQ(published->size(), 1);
+
+    auto retained = service.GetReadRoute("old-key");
+    ASSERT_TRUE(retained.has_value());
+    EXPECT_EQ(retained->size(), 1);
+}
+
+TEST_F(P2PRecordOplogTest,
        RegisterClientReturnsErrorWhenOplogPersistenceFails) {
     P2PMasterService service(MakeConfig());
     InjectFailingOpLogStore(service);

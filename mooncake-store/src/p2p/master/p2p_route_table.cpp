@@ -129,9 +129,18 @@ auto P2PRouteTable::Withdraw(std::string_view key,
 
 auto P2PRouteTable::WithdrawLocked(
     RouteShard& shard, std::string_view key,
-    const P2PRouteLocation& location,
-    const P2PWithdrawRouteOperation* operation,
-    BatchSyncHandler* handler) -> Mutation {
+    const P2PRouteLocation& location) -> Mutation {
+    auto target = FindWithdrawTargetLocked(shard, key, location);
+    if (!target.has_value()) {
+        return tl::make_unexpected(target.error());
+    }
+    return CommitWithdrawLocked(shard, *target);
+}
+
+auto P2PRouteTable::FindWithdrawTargetLocked(
+    RouteShard& shard, std::string_view key,
+    const P2PRouteLocation& location)
+    -> tl::expected<WithdrawTarget, ErrorCode> {
     auto route_it = shard.routes.find(key);
     if (route_it == shard.routes.end()) {
         LOG(WARNING) << "Withdraw route rejected: key not found"
@@ -148,99 +157,50 @@ auto P2PRouteTable::WithdrawLocked(
                      << ", segment_id=" << location.segment_id;
         return tl::make_unexpected(ErrorCode::REPLICA_NOT_FOUND);
     }
+    return WithdrawTarget{.route = route_it, .location = location_it};
+}
 
-    if (handler != nullptr && operation != nullptr) {
-        const auto error = handler->BeforeWithdraw(*operation);
-        if (error != ErrorCode::OK) {
-            LOG(ERROR) << "Withdraw route rejected by pre-mutation callback"
-                       << ", key=" << key
-                       << ", client_id=" << location.client_id
-                       << ", segment_id=" << location.segment_id
-                       << ", error=" << toString(error);
-            return tl::make_unexpected(error);
-        }
-    }
-
-    RemoveReverseIndex(shard, route_it->first, location);
-    locations.erase(location_it);
+auto P2PRouteTable::CommitWithdrawLocked(RouteShard& shard,
+                                         WithdrawTarget target) -> Mutation {
+    auto& locations = target.route->second.locations;
+    RemoveReverseIndex(shard, target.route->first, *target.location);
+    locations.erase(target.location);
     if (locations.empty()) {
-        shard.routes.erase(route_it);
+        shard.routes.erase(target.route);
         return MutationResult{.removed_key = true};
     }
     return MutationResult{};
 }
 
-void P2PRouteTable::BatchPublish(
-    const UUID& client_id,
-    std::span<const P2PPublishRouteOperation> operations,
-    BatchSyncHandler& handler) {
-    BatchSync(client_id, operations,
-              std::span<const P2PWithdrawRouteOperation>{}, handler);
+P2PRouteTable::OperationsByShard P2PRouteTable::GroupOperationsByShard(
+    std::span<const P2PPublishRouteOperation> operations) const {
+    OperationsByShard operations_by_shard;
+    operations_by_shard.reserve(std::min(operations.size(), kShardCount));
+    for (size_t index = 0; index < operations.size(); ++index) {
+        operations_by_shard[GetShardIndex(operations[index].key)].push_back(
+            index);
+    }
+    return operations_by_shard;
 }
 
-void P2PRouteTable::BatchWithdraw(
-    const UUID& client_id,
-    std::span<const P2PWithdrawRouteOperation> operations,
-    BatchSyncHandler& handler) {
-    BatchSync(client_id, std::span<const P2PPublishRouteOperation>{},
-              operations, handler);
+P2PRouteTable::OperationsByShard P2PRouteTable::GroupOperationsByShard(
+    std::span<const P2PWithdrawRouteOperation> operations) const {
+    OperationsByShard operations_by_shard;
+    operations_by_shard.reserve(std::min(operations.size(), kShardCount));
+    for (size_t index = 0; index < operations.size(); ++index) {
+        operations_by_shard[GetShardIndex(operations[index].key)].push_back(
+            index);
+    }
+    return operations_by_shard;
 }
 
-void P2PRouteTable::BatchSync(
-    const UUID& client_id,
-    std::span<const P2PPublishRouteOperation> publish_operations,
-    std::span<const P2PWithdrawRouteOperation> withdraw_operations,
-    BatchSyncHandler& handler) {
-    std::unordered_map<size_t, std::vector<std::pair<size_t, bool>>>
-        operations_by_shard;
-    for (size_t index = 0; index < publish_operations.size(); ++index) {
-        operations_by_shard[GetShardIndex(publish_operations[index].key)]
-            .emplace_back(index, true);
-    }
-    for (size_t index = 0; index < withdraw_operations.size(); ++index) {
-        operations_by_shard[GetShardIndex(withdraw_operations[index].key)]
-            .emplace_back(index, false);
-    }
-
-    for (const auto& [shard_index, operations] : operations_by_shard) {
-        auto& shard = shards_[shard_index];
-        SharedMutexLocker lock(&shard.mutex);
-        for (const auto& [operation_index, is_publish] : operations) {
-            if (is_publish) {
-                const auto& operation = publish_operations[operation_index];
-                const P2PRouteLocation location{
-                    .client_id = client_id,
-                    .segment_id = operation.segment_id,
-                };
-                const auto error = handler.BeforePublish(operation);
-                if (error != ErrorCode::OK) {
-                    LOG(ERROR) << "Publish route rejected by pre-mutation "
-                                  "callback"
-                               << ", key=" << operation.key
-                               << ", client_id=" << client_id
-                               << ", segment_id=" << operation.segment_id
-                               << ", error=" << toString(error);
-                    const Mutation result = tl::make_unexpected(error);
-                    handler.AfterPublish(operation_index, operation, result);
-                    continue;
-                }
-                auto result = PublishLocked(shard, operation.key,
-                                            operation.object_size, location);
-                handler.AfterPublish(operation_index, operation, result);
-                continue;
-            }
-
-            const auto& operation = withdraw_operations[operation_index];
-            const P2PRouteLocation location{
-                .client_id = client_id,
-                .segment_id = operation.segment_id,
-            };
-            auto result =
-                WithdrawLocked(shard, operation.key, location, &operation,
-                               &handler);
-            handler.AfterWithdraw(operation_index, operation, result);
-        }
-    }
+void P2PRouteTable::LogBatchPreconditionFailure(
+    std::string_view action, std::string_view key,
+    const UUID& client_id, const UUID& segment_id, ErrorCode error) {
+    LOG(ERROR) << action << " rejected by pre-mutation hook"
+               << ", key=" << key << ", client_id=" << client_id
+               << ", segment_id=" << segment_id
+               << ", error=" << toString(error);
 }
 
 bool P2PRouteTable::RouteExists(std::string_view key) const {

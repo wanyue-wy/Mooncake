@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <regex>
+#include <span>
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
@@ -19,103 +20,36 @@
 namespace mooncake {
 namespace {
 
-class RouteBatchSyncHandler final : public P2PRouteTable::BatchSyncHandler {
-   public:
-    RouteBatchSyncHandler(P2PMasterService& master_service,
-                          std::shared_ptr<P2PClientMeta> client,
-                          const UUID& client_id,
-                          P2PBatchSyncRoutesResponse& response)
-        : master_service_(master_service),
-          client_(std::move(client)),
-          client_id_(client_id),
-          response_(response) {}
-
-    ErrorCode BeforePublish(
-        const P2PPublishRouteOperation& operation) override {
-        auto segment = client_->QuerySegment(operation.segment_id);
-        if (!segment.has_value()) {
-            LOG(ERROR) << "BatchSyncRoutes: segment not found"
-                       << ", client_id=" << client_id_
-                       << ", segment_id=" << operation.segment_id
-                       << ", key=" << operation.key
-                       << ", error=" << toString(segment.error());
-            return segment.error();
-        }
-        return ErrorCode::OK;
-    }
-
-    void AfterPublish(size_t index,
-                      const P2PPublishRouteOperation& operation,
-                      const P2PRouteTable::Mutation& result) override {
-        if (!result.has_value()) {
-            response_.publish_results[index] = result.error();
-            return;
-        }
-        if (result->created_key) {
-            P2PMasterMetricManager::instance().inc_key_count(1);
-            P2PMasterMetricManager::instance().observe_value_size(
-                operation.object_size);
-        }
-
+std::vector<std::string> BuildPublishOplogPayloads(
+    const UUID& client_id,
+    std::span<const P2PPublishRouteOperation> operations) {
+    std::vector<std::string> payloads;
+    payloads.reserve(operations.size());
+    for (const auto& operation : operations) {
         AddReplicaPayload payload;
         payload.object_key = operation.key;
-        payload.client_id = client_id_;
+        payload.client_id = client_id;
         payload.segment_id = operation.segment_id;
         payload.size = operation.object_size;
-        const auto error = master_service_.RecordOplog(
-            OpType_ADD_REPLICA, payload.object_key,
-            SerializeP2PPayload(payload));
-        if (error != ErrorCode::OK) {
-            LOG(ERROR) << "BatchSyncRoutes: failed to record publish oplog"
-                       << ", client_id=" << client_id_
-                       << ", segment_id=" << operation.segment_id
-                       << ", key=" << operation.key
-                       << ", error=" << toString(error)
-                       << "; keeping the in-memory route";
-        }
+        payloads.push_back(SerializeP2PPayload(payload));
     }
+    return payloads;
+}
 
-    ErrorCode BeforeWithdraw(
-        const P2PWithdrawRouteOperation& operation) override {
+std::vector<std::string> BuildWithdrawOplogPayloads(
+    const UUID& client_id,
+    std::span<const P2PWithdrawRouteOperation> operations) {
+    std::vector<std::string> payloads;
+    payloads.reserve(operations.size());
+    for (const auto& operation : operations) {
         RemoveReplicaPayload payload;
         payload.object_key = operation.key;
-        payload.client_id = client_id_;
+        payload.client_id = client_id;
         payload.segment_id = operation.segment_id;
-        const auto error = master_service_.RecordOplog(
-            OpType_REMOVE_REPLICA, payload.object_key,
-            SerializeP2PPayload(payload));
-        if (error != ErrorCode::OK) {
-            LOG(ERROR) << "BatchSyncRoutes: failed to record withdraw oplog"
-                       << ", client_id=" << client_id_
-                       << ", segment_id=" << operation.segment_id
-                       << ", key=" << operation.key
-                       << ", error=" << toString(error);
-        }
-        return error;
+        payloads.push_back(SerializeP2PPayload(payload));
     }
-
-    void AfterWithdraw(size_t index,
-                       const P2PWithdrawRouteOperation& operation,
-                       const P2PRouteTable::Mutation& result) override {
-        (void)operation;
-        if (!result.has_value()) {
-            if (result.error() != ErrorCode::OBJECT_NOT_FOUND &&
-                result.error() != ErrorCode::REPLICA_NOT_FOUND) {
-                response_.withdraw_results[index] = result.error();
-            }
-            return;
-        }
-        if (result->removed_key) {
-            P2PMasterMetricManager::instance().dec_key_count(1);
-        }
-    }
-
-   private:
-    P2PMasterService& master_service_;
-    std::shared_ptr<P2PClientMeta> client_;
-    UUID client_id_;
-    P2PBatchSyncRoutesResponse& response_;
-};
+    return payloads;
+}
 
 }  // namespace
 
@@ -942,10 +876,103 @@ auto P2PMasterService::BatchSyncRoutes(
         return response;
     }
 
-    RouteBatchSyncHandler handler(*this, std::move(client), request.client_id,
-                                  response);
-    route_table_.BatchSync(request.client_id, request.publish_operations,
-                           request.withdraw_operations, handler);
+    const bool oplog_enabled = GetOpLogManager() != nullptr;
+    const auto publish_payloads =
+        oplog_enabled
+            ? BuildPublishOplogPayloads(request.client_id,
+                                        request.publish_operations)
+            : std::vector<std::string>{};
+    const auto withdraw_payloads =
+        oplog_enabled
+            ? BuildWithdrawOplogPayloads(request.client_id,
+                                         request.withdraw_operations)
+            : std::vector<std::string>{};
+
+    auto validate_publish =
+        [&](size_t, const P2PPublishRouteOperation& operation) {
+            auto segment = client->QuerySegment(operation.segment_id);
+            if (!segment.has_value()) {
+                LOG(ERROR) << "BatchSyncRoutes: segment not found"
+                           << ", client_id=" << request.client_id
+                           << ", segment_id=" << operation.segment_id
+                           << ", key=" << operation.key
+                           << ", error=" << toString(segment.error());
+                return segment.error();
+            }
+            return ErrorCode::OK;
+        };
+    auto finish_publish =
+        [&](size_t index, const P2PPublishRouteOperation& operation,
+            const P2PRouteTable::MutationResult& result) {
+            if (result.created_key) {
+                P2PMasterMetricManager::instance().inc_key_count(1);
+                P2PMasterMetricManager::instance().observe_value_size(
+                    operation.object_size);
+            }
+            if (!oplog_enabled) {
+                return;
+            }
+            const auto error = RecordOplog(OpType_ADD_REPLICA, operation.key,
+                                           publish_payloads[index]);
+            if (error != ErrorCode::OK) {
+                LOG(ERROR)
+                    << "BatchSyncRoutes: failed to record publish oplog"
+                    << ", client_id=" << request.client_id
+                    << ", segment_id=" << operation.segment_id
+                    << ", key=" << operation.key
+                    << ", error=" << toString(error)
+                    << "; keeping the in-memory route";
+            }
+        };
+    auto publish_results = route_table_.BatchPublish(
+        request.client_id, request.publish_operations, validate_publish,
+        finish_publish);
+
+    for (size_t index = 0; index < publish_results.size(); ++index) {
+        const auto& result = publish_results[index];
+        if (!result.has_value()) {
+            response.publish_results[index] = result.error();
+        }
+    }
+
+    auto prepare_withdraw =
+        [&](size_t index, const P2PWithdrawRouteOperation& operation) {
+            if (!oplog_enabled) {
+                return ErrorCode::OK;
+            }
+            const auto error = RecordOplog(OpType_REMOVE_REPLICA,
+                                           operation.key,
+                                           withdraw_payloads[index]);
+            if (error != ErrorCode::OK) {
+                LOG(ERROR)
+                    << "BatchSyncRoutes: failed to record withdraw oplog"
+                    << ", client_id=" << request.client_id
+                    << ", segment_id=" << operation.segment_id
+                    << ", key=" << operation.key
+                    << ", error=" << toString(error);
+            }
+            return error;
+        };
+    auto finish_withdraw =
+        [](size_t, const P2PWithdrawRouteOperation&,
+           const P2PRouteTable::MutationResult& result) {
+            if (result.removed_key) {
+                P2PMasterMetricManager::instance().dec_key_count(1);
+            }
+        };
+    auto withdraw_results = route_table_.BatchWithdraw(
+        request.client_id, request.withdraw_operations, prepare_withdraw,
+        finish_withdraw);
+
+    for (size_t index = 0; index < withdraw_results.size(); ++index) {
+        const auto& result = withdraw_results[index];
+        if (!result.has_value()) {
+            if (result.error() != ErrorCode::OBJECT_NOT_FOUND &&
+                result.error() != ErrorCode::REPLICA_NOT_FOUND) {
+                response.withdraw_results[index] = result.error();
+            }
+        }
+    }
     return response;
 }
 
