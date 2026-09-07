@@ -43,13 +43,13 @@ class P2PMasterService {
     }
 
     auto RegisterClient(const P2PRegisterClientRequest& req)
-        -> tl::expected<P2PRegisterClientResponse, ErrorCode>;
-    auto UnregisterClient(const P2PUnregisterClientRequest& req)
-        -> tl::expected<P2PUnregisterClientResponse, ErrorCode>;
+        -> tl::expected<ViewVersionId, ErrorCode>;
+    auto UnregisterClient(const UUID& client_id)
+        -> tl::expected<ViewVersionId, ErrorCode>;
     auto Heartbeat(const P2PHeartbeatRequest& req)
         -> tl::expected<P2PHeartbeatResponse, ErrorCode>;
-    auto QueryClientStatus(const P2PQueryClientStatusRequest& req)
-        -> tl::expected<P2PQueryClientStatusResponse, ErrorCode>;
+    auto QueryClientStatus(const UUID& client_id)
+        -> tl::expected<P2PClientStatus, ErrorCode>;
 
     auto MountSegment(const P2PSegment& segment, const UUID& client_id)
         -> tl::expected<void, ErrorCode>;
@@ -79,7 +79,7 @@ class P2PMasterService {
     auto GetReadRoute(std::string_view key,
                         const P2PReadRouteConfig& config =
                             P2PReadRouteConfig())
-        -> tl::expected<P2PGetReadRouteResponse, ErrorCode>;
+        -> tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>;
 
     auto Remove(std::string_view key, bool force = false)
         -> tl::expected<void, ErrorCode>;
@@ -91,7 +91,7 @@ class P2PMasterService {
     OpLogManager* GetOpLogManager() const { return oplog_manager_.get(); }
 
     auto GetWriteRoute(const P2PGetWriteRouteRequest& req)
-        -> tl::expected<P2PGetWriteRouteResponse, ErrorCode>;
+        -> tl::expected<std::vector<P2PWriteCandidate>, ErrorCode>;
 
     /**
      * @brief Batch get write routes for multiple keys.

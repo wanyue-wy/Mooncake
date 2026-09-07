@@ -953,7 +953,7 @@ P2PClientService::InnerRegisterClient() {
                    << register_result.error() << ", client_id=" << client_id_;
         return tl::make_unexpected(register_result.error());
     } else {
-        view_version_ = register_result.value().view_version;
+        view_version_ = register_result.value();
         registered_.store(true, std::memory_order_release);
 
         // A successful register means the master did not have us — drive HA
@@ -968,7 +968,7 @@ P2PClientService::InnerRegisterClient() {
             }
         }
     }
-    return register_result->view_version;
+    return *register_result;
 }
 
 tl::expected<void, ErrorCode> P2PClientService::UnregisterClient() {
@@ -990,9 +990,7 @@ tl::expected<void, ErrorCode> P2PClientService::InnerUnregisterClient() {
     tl::expected<void, ErrorCode> ret;  // OK unless an attempted RPC fails
     bool is_local_service = ha_manager_ && ha_manager_->IsLocalService();
     if (was_registered && !is_local_service) {
-        P2PUnregisterClientRequest req;
-        req.client_id = client_id_;
-        auto result = master_client_.UnregisterClient(req);
+        auto result = master_client_.UnregisterClient(client_id_);
         if (!result) {
             LOG(ERROR) << "UnregisterClient RPC failed: " << result.error()
                        << ", client_id=" << client_id_
@@ -1344,7 +1342,7 @@ P2PClientService::CreatePutHandlesFromRoute(
         }
         auto ops =
             BuildWriteOps(keys[i], batched_slices[i], sizes[i], route_config,
-                          std::move(batch_resp.responses[i].candidates));
+                          std::move(batch_resp.responses[i]));
         if (!ops) {
             LOG(ERROR) << "fail to build write ops"
                        << ", key=" << keys[i] << ", error=" << ops.error();
@@ -1969,7 +1967,8 @@ P2PClientService::BatchFetchReadRoutes(
     }
 
     // Single batch RPC to master
-    std::vector<tl::expected<P2PGetReadRouteResponse, ErrorCode>> responses;
+    std::vector<tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>>
+        responses;
     responses = master_client_.BatchGetReadRoute(
         miss_keys, ToP2PReadRouteConfig(config));
     for (size_t k = 0; k < responses.size(); ++k) {
@@ -1981,8 +1980,7 @@ P2PClientService::BatchFetchReadRoutes(
             result[miss_pos[k]] = tl::unexpected(responses[k].error());
             continue;
         }
-        auto routes =
-            RouteDescriptorsToRoutes(responses[k].value().routes);
+        auto routes = RouteDescriptorsToRoutes(responses[k].value());
         if (routes.empty()) {
             LOG(ERROR) << "invalid route, key=" << miss_keys[k];
             result[miss_pos[k]] = tl::unexpected(ErrorCode::INTERNAL_ERROR);
@@ -2470,7 +2468,7 @@ P2PClientService::AsyncResolveRoutesFromMaster(std::string_view key,
         }
         co_return std::vector<ResolvedRoute>{};
     }
-    auto routes = RouteDescriptorsToRoutes(replica_result.value().routes);
+    auto routes = RouteDescriptorsToRoutes(replica_result.value());
     if (routes.empty()) {
         LOG(ERROR) << "Cannot determine size for key: " << key;
     }
@@ -2603,7 +2601,7 @@ tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
     }
 
     return std::make_unique<QueryResult>(
-        ToFacadeReplicaDescriptors(std::move(result.value().routes)));
+        ToFacadeReplicaDescriptors(std::move(result.value())));
 }
 
 std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
@@ -2643,7 +2641,7 @@ P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
         if (responses[i]) {
             results.emplace_back(std::make_unique<QueryResult>(
                 ToFacadeReplicaDescriptors(
-                    std::move(responses[i].value().routes))));
+                    std::move(responses[i].value()))));
         } else {
             results.emplace_back(tl::unexpected(responses[i].error()));
         }

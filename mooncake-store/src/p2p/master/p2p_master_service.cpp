@@ -175,9 +175,9 @@ auto P2PMasterService::Heartbeat(const P2PHeartbeatRequest& req)
     return client_manager_->Heartbeat(req);
 }
 
-auto P2PMasterService::QueryClientStatus(const P2PQueryClientStatusRequest& req)
-    -> tl::expected<P2PQueryClientStatusResponse, ErrorCode> {
-    return client_manager_->QueryClientStatus(req);
+auto P2PMasterService::QueryClientStatus(const UUID& client_id)
+    -> tl::expected<P2PClientStatus, ErrorCode> {
+    return client_manager_->QueryClientStatus(client_id);
 }
 
 auto P2PMasterService::ExistKey(std::string_view key)
@@ -306,7 +306,7 @@ auto P2PMasterService::GetReadRouteByRegex(const std::string& regex_pattern)
 
 auto P2PMasterService::GetReadRoute(
     std::string_view key, const P2PReadRouteConfig& config)
-    -> tl::expected<P2PGetReadRouteResponse, ErrorCode> {
+    -> tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode> {
     auto route = route_table_.GetRoute(key);
     if (!route.has_value()) {
         LOG(WARNING) << "GetReadRoute failed: key not found"
@@ -320,9 +320,7 @@ auto P2PMasterService::GetReadRoute(
         return tl::make_unexpected(ErrorCode::REPLICA_IS_NOT_READY);
     }
 
-    P2PGetReadRouteResponse response;
-    response.routes = std::move(descriptors);
-    return response;
+    return descriptors;
 }
 
 auto P2PMasterService::Remove(std::string_view key, bool force)
@@ -410,7 +408,7 @@ ErrorCode P2PMasterService::RecordOplog(OpType type, const std::string& key,
 }
 
 auto P2PMasterService::RegisterClient(const P2PRegisterClientRequest& req)
-    -> tl::expected<P2PRegisterClientResponse, ErrorCode> {
+    -> tl::expected<ViewVersionId, ErrorCode> {
     if (req.ip_address.empty() || req.rpc_port == 0) {
         LOG(ERROR) << "RegisterClient(P2P): missing endpoint"
                    << ", client_id=" << req.client_id;
@@ -418,13 +416,11 @@ auto P2PMasterService::RegisterClient(const P2PRegisterClientRequest& req)
     }
 
     auto make_idempotent_response = [&]() {
-        P2PRegisterClientResponse response;
-        response.view_version = view_version_;
         LOG(INFO) << "RegisterClient(P2P): client already registered, "
                      "treating as idempotent re-register"
                   << ", client_id=" << req.client_id
-                  << ", view_version=" << response.view_version;
-        return response;
+                  << ", view_version=" << view_version_;
+        return view_version_;
     };
 
     if (client_manager_->GetClient(req.client_id)) {
@@ -459,23 +455,23 @@ auto P2PMasterService::RegisterClient(const P2PRegisterClientRequest& req)
     return result;
 }
 
-auto P2PMasterService::UnregisterClient(const P2PUnregisterClientRequest& req)
-    -> tl::expected<P2PUnregisterClientResponse, ErrorCode> {
-    auto result = client_manager_->UnregisterClient(req);
+auto P2PMasterService::UnregisterClient(const UUID& client_id)
+    -> tl::expected<ViewVersionId, ErrorCode> {
+    auto result = client_manager_->UnregisterClient(client_id);
     if (!result.has_value()) {
         LOG(ERROR) << "UnregisterClient(P2P): failed"
-                   << ", client_id=" << req.client_id
+                   << ", client_id=" << client_id
                    << ", error=" << result.error();
         return result;
     }
 
     UnregisterClientPayload payload;
-    payload.client_id = req.client_id;
+    payload.client_id = client_id;
     auto err =
         RecordOplog(OpType_UNREGISTER_CLIENT, "", SerializeP2PPayload(payload));
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "UnregisterClient(P2P): failed to record oplog"
-                   << ", client_id=" << req.client_id
+                   << ", client_id=" << client_id
                    << ", error=" << toString(err);
         return tl::make_unexpected(err);
     }
@@ -667,7 +663,7 @@ std::vector<P2PRouteDescriptor> P2PMasterService::FilterRoutes(
 }
 
 auto P2PMasterService::GetWriteRoute(const P2PGetWriteRouteRequest& req)
-    -> tl::expected<P2PGetWriteRouteResponse, ErrorCode> {
+    -> tl::expected<std::vector<P2PWriteCandidate>, ErrorCode> {
     if (!req.config.IsValid()) {
         LOG(ERROR) << "invalid write route config: " << req.config
                    << ", client_id: " << req.client_id;
@@ -743,9 +739,7 @@ auto P2PMasterService::GetWriteRoute(const P2PGetWriteRouteRequest& req)
         candidates.size() > req.config.max_candidates) {
         candidates.resize(req.config.max_candidates);
     }
-    P2PGetWriteRouteResponse response;
-    response.candidates = std::move(candidates);
-    return response;
+    return candidates;
 }
 
 auto P2PMasterService::BatchGetWriteRoute(const P2PBatchGetWriteRouteRequest& req)

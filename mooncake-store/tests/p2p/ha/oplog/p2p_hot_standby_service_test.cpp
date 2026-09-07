@@ -732,8 +732,8 @@ TEST_F(P2PHotStandbyServiceTest, RestoreExportedMetadataIntoP2PMasterService) {
 
     auto replica_result = restored_master.GetReadRoute("key-restore");
     ASSERT_TRUE(replica_result.has_value()) << toString(replica_result.error());
-    ASSERT_EQ(replica_result.value().routes.size(), 1);
-    const auto& route = replica_result.value().routes[0];
+    ASSERT_EQ(replica_result.value().size(), 1);
+    const auto& route = replica_result.value()[0];
     EXPECT_EQ(route.client_id, client_id);
     EXPECT_EQ(route.segment_id, segment_id);
     EXPECT_EQ(route.ip_address, "127.0.0.1");
@@ -746,8 +746,8 @@ TEST_F(P2PHotStandbyServiceTest, RestoreExportedMetadataIntoP2PMasterService) {
     route_req.object_size = 1024;
     auto route_result = restored_master.GetWriteRoute(route_req);
     ASSERT_TRUE(route_result.has_value()) << toString(route_result.error());
-    ASSERT_FALSE(route_result.value().candidates.empty());
-    EXPECT_EQ(route_result.value().candidates[0].client_id, client_id);
+    ASSERT_FALSE(route_result.value().empty());
+    EXPECT_EQ(route_result.value()[0].client_id, client_id);
 
     AddReplica(restored_master, "key-after-restore", client_id, segment_id,
                1024);
@@ -759,7 +759,7 @@ TEST_F(P2PHotStandbyServiceTest, RestoreExportedMetadataIntoP2PMasterService) {
         restored_master.GetReadRoute("key-after-restore");
     ASSERT_TRUE(added_replica_result.has_value())
         << toString(added_replica_result.error());
-    ASSERT_EQ(added_replica_result.value().routes.size(), 1);
+    ASSERT_EQ(added_replica_result.value().size(), 1);
 
     RemoveReplica(restored_master, "key-after-restore", client_id, segment_id);
     EXPECT_EQ(restored_master.GetOpLogManager()->GetLastSequenceId(),
@@ -792,7 +792,7 @@ TEST_F(P2PHotStandbyServiceTest, RestorePromotedMetadataIntoWrappedRuntime) {
     auto replica_result = promoted_runtime.GetReadRoute(
         P2PGetReadRouteRequest{.key = "runtime-key"});
     ASSERT_TRUE(replica_result.has_value()) << toString(replica_result.error());
-    ASSERT_EQ(replica_result.value().routes.size(), 1);
+    ASSERT_EQ(replica_result.value().size(), 1);
 
     P2PGetWriteRouteRequest route_req;
     route_req.client_id = {99, 99};
@@ -800,8 +800,8 @@ TEST_F(P2PHotStandbyServiceTest, RestorePromotedMetadataIntoWrappedRuntime) {
     route_req.object_size = 1024;
     auto route_result = promoted_runtime.GetWriteRoute(route_req);
     ASSERT_TRUE(route_result.has_value()) << toString(route_result.error());
-    ASSERT_FALSE(route_result.value().candidates.empty());
-    EXPECT_EQ(route_result.value().candidates[0].client_id, client_id);
+    ASSERT_FALSE(route_result.value().empty());
+    EXPECT_EQ(route_result.value()[0].client_id, client_id);
 
     P2PPublishRouteRequest add_req;
     add_req.key = "runtime-key-after-promotion";
@@ -843,7 +843,7 @@ TEST_F(P2PHotStandbyServiceTest, PromotedRuntimeContinuesP2PMasterFlow) {
         P2PGetReadRouteRequest{.key = "flow-key-before-promotion"});
     ASSERT_TRUE(restored_replica.has_value())
         << toString(restored_replica.error());
-    ASSERT_EQ(restored_replica.value().routes.size(), 1);
+    ASSERT_EQ(restored_replica.value().size(), 1);
 
     const UUID rejoined_client_id{29, 29};
     const UUID rejoined_segment_id{30, 30};
@@ -856,7 +856,7 @@ TEST_F(P2PHotStandbyServiceTest, PromotedRuntimeContinuesP2PMasterFlow) {
     route_req.object_size = 1024;
     auto route_result = promoted_runtime.GetWriteRoute(route_req);
     ASSERT_TRUE(route_result.has_value()) << toString(route_result.error());
-    ASSERT_FALSE(route_result.value().candidates.empty());
+    ASSERT_FALSE(route_result.value().empty());
 
     P2PPublishRouteRequest add_req;
     add_req.key = route_req.key;
@@ -868,8 +868,8 @@ TEST_F(P2PHotStandbyServiceTest, PromotedRuntimeContinuesP2PMasterFlow) {
     auto added_replica = promoted_runtime.GetReadRoute(
         P2PGetReadRouteRequest{.key = route_req.key});
     ASSERT_TRUE(added_replica.has_value()) << toString(added_replica.error());
-    ASSERT_EQ(added_replica.value().routes.size(), 1);
-    const auto& p2p_desc = added_replica.value().routes[0];
+    ASSERT_EQ(added_replica.value().size(), 1);
+    const auto& p2p_desc = added_replica.value()[0];
     EXPECT_EQ(p2p_desc.client_id, rejoined_client_id);
     EXPECT_EQ(p2p_desc.segment_id, rejoined_segment_id);
 

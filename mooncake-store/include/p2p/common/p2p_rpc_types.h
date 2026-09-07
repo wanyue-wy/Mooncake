@@ -21,21 +21,6 @@ struct P2PRegisterClientRequest {
 };
 YLT_REFL(P2PRegisterClientRequest, client_id, segments, ip_address, rpc_port);
 
-struct P2PRegisterClientResponse {
-    ViewVersionId view_version = 0;
-};
-YLT_REFL(P2PRegisterClientResponse, view_version);
-
-struct P2PUnregisterClientRequest {
-    UUID client_id;
-};
-YLT_REFL(P2PUnregisterClientRequest, client_id);
-
-struct P2PUnregisterClientResponse {
-    ViewVersionId view_version = 0;
-};
-YLT_REFL(P2PUnregisterClientResponse, view_version);
-
 struct P2PHeartbeatRequest {
     UUID client_id;
     std::vector<HeartbeatTask> tasks;
@@ -49,21 +34,6 @@ struct P2PHeartbeatResponse {
 };
 YLT_REFL(P2PHeartbeatResponse, status, view_version, task_results);
 
-struct P2PHeartbeatServiceReadyResponse {
-    uint32_t heartbeat_rpc_port = 0;
-};
-YLT_REFL(P2PHeartbeatServiceReadyResponse, heartbeat_rpc_port);
-
-struct P2PQueryClientStatusRequest {
-    UUID client_id;
-};
-YLT_REFL(P2PQueryClientStatusRequest, client_id);
-
-struct P2PQueryClientStatusResponse {
-    P2PClientStatus status = P2PClientStatus::UNDEFINED;
-};
-YLT_REFL(P2PQueryClientStatusResponse, status);
-
 struct P2PMountSegmentRequest {
     UUID client_id;
     P2PSegment segment;
@@ -76,26 +46,11 @@ struct P2PUnmountSegmentRequest {
 };
 YLT_REFL(P2PUnmountSegmentRequest, client_id, segment_id);
 
-struct P2PRouteExistsRequest {
-    std::string key;
-};
-YLT_REFL(P2PRouteExistsRequest, key);
-
-struct P2PBatchRouteExistsRequest {
-    std::vector<std::string> keys;
-};
-YLT_REFL(P2PBatchRouteExistsRequest, keys);
-
 struct P2PGetReadRouteRequest {
     std::string key;
     P2PReadRouteConfig config;
 };
 YLT_REFL(P2PGetReadRouteRequest, key, config);
-
-struct P2PGetReadRouteResponse {
-    std::vector<P2PRouteDescriptor> routes;
-};
-YLT_REFL(P2PGetReadRouteResponse, routes);
 
 struct P2PBatchGetReadRouteRequest {
     std::vector<std::string> keys;
@@ -104,7 +59,7 @@ struct P2PBatchGetReadRouteRequest {
 YLT_REFL(P2PBatchGetReadRouteRequest, keys, config);
 
 struct P2PBatchGetReadRouteResponse {
-    std::vector<P2PGetReadRouteResponse> responses;
+    std::vector<std::vector<P2PRouteDescriptor>> responses;
     std::vector<ErrorCode> error_codes;
 };
 YLT_REFL(P2PBatchGetReadRouteResponse, responses, error_codes);
@@ -191,11 +146,6 @@ struct P2PWriteCandidate {
 YLT_REFL(P2PWriteCandidate, client_id, ip_address, rpc_port, available_capacity,
          score);
 
-struct P2PGetWriteRouteResponse {
-    std::vector<P2PWriteCandidate> candidates;
-};
-YLT_REFL(P2PGetWriteRouteResponse, candidates);
-
 struct P2PBatchGetWriteRouteRequest {
     UUID client_id;
     std::vector<std::string> keys;
@@ -205,7 +155,7 @@ struct P2PBatchGetWriteRouteRequest {
 YLT_REFL(P2PBatchGetWriteRouteRequest, client_id, keys, object_sizes, config);
 
 struct P2PBatchGetWriteRouteResponse {
-    std::vector<P2PGetWriteRouteResponse> responses;
+    std::vector<std::vector<P2PWriteCandidate>> responses;
     std::vector<ErrorCode> error_codes;
 };
 YLT_REFL(P2PBatchGetWriteRouteResponse, responses, error_codes);
@@ -245,10 +195,5 @@ struct P2PBatchSyncRoutesResponse {
     std::vector<ErrorCode> withdraw_results;
 };
 YLT_REFL(P2PBatchSyncRoutesResponse, publish_results, withdraw_results);
-
-struct P2PCompleteRouteSyncRequest {
-    UUID client_id;
-};
-YLT_REFL(P2PCompleteRouteSyncRequest, client_id);
 
 }  // namespace mooncake

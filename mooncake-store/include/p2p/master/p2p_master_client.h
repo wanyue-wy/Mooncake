@@ -73,21 +73,22 @@ class P2PMasterClient final {
         ErrorCode>
     GetReadRouteByRegex(const std::string& regex);
 
-    [[nodiscard]] tl::expected<P2PGetReadRouteResponse, ErrorCode> GetReadRoute(
-        std::string_view key, const P2PReadRouteConfig& config);
+    [[nodiscard]] tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>
+    GetReadRoute(std::string_view key, const P2PReadRouteConfig& config);
 
     [[nodiscard]] async_simple::coro::Lazy<
-        tl::expected<P2PGetReadRouteResponse, ErrorCode>>
+        tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>>
     AsyncGetReadRoute(std::string_view key, const P2PReadRouteConfig& config);
 
-    [[nodiscard]] std::vector<tl::expected<P2PGetReadRouteResponse, ErrorCode>>
+    [[nodiscard]] std::vector<
+        tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>>
     BatchGetReadRoute(const std::vector<std::string_view>& keys,
                       const P2PReadRouteConfig& config);
 
     [[nodiscard]] tl::expected<void, ErrorCode> UnmountSegment(
         const UUID& segment_id);
 
-    [[nodiscard]] tl::expected<P2PQueryClientStatusResponse, ErrorCode>
+    [[nodiscard]] tl::expected<P2PClientStatus, ErrorCode>
     QueryClientStatus(const UUID& client_id);
 
     [[nodiscard]] tl::expected<P2PHeartbeatResponse, ErrorCode> Heartbeat(
@@ -96,13 +97,13 @@ class P2PMasterClient final {
     [[nodiscard]] tl::expected<void, ErrorCode> MountSegment(
         const P2PSegment& segment);
 
-    [[nodiscard]] tl::expected<P2PRegisterClientResponse, ErrorCode>
+    [[nodiscard]] tl::expected<ViewVersionId, ErrorCode>
     RegisterClient(const P2PRegisterClientRequest& req);
 
-    [[nodiscard]] tl::expected<P2PUnregisterClientResponse, ErrorCode>
-    UnregisterClient(const P2PUnregisterClientRequest& req);
+    [[nodiscard]] tl::expected<ViewVersionId, ErrorCode>
+    UnregisterClient(const UUID& client_id);
 
-    [[nodiscard]] tl::expected<P2PGetWriteRouteResponse, ErrorCode>
+    [[nodiscard]] tl::expected<std::vector<P2PWriteCandidate>, ErrorCode>
     GetWriteRoute(const P2PGetWriteRouteRequest& req);
 
     /**

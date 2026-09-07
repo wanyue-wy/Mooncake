@@ -119,9 +119,7 @@ class P2PRecordOplogTest : public ::testing::Test {
 
     void UnregisterClient(P2PMasterService& service,
                           const UUID& client_id) const {
-        P2PUnregisterClientRequest req;
-        req.client_id = client_id;
-        auto result = service.UnregisterClient(req);
+        auto result = service.UnregisterClient(client_id);
         ASSERT_TRUE(result.has_value()) << toString(result.error());
     }
 
@@ -443,7 +441,7 @@ TEST_F(P2PRecordOplogTest, AddReplicaSucceedsWhenOplogPersistenceFails) {
 
     auto replicas = service.GetReadRoute(req.key);
     ASSERT_TRUE(replicas.has_value());
-    ASSERT_EQ(1u, replicas->routes.size());
+    ASSERT_EQ(1u, replicas.value().size());
 }
 
 TEST_F(P2PRecordOplogTest, RemoveReplicaDoesNotApplyWhenOplogPersistenceFails) {
@@ -465,8 +463,8 @@ TEST_F(P2PRecordOplogTest, RemoveReplicaDoesNotApplyWhenOplogPersistenceFails) {
 
     auto replicas = service.GetReadRoute(req.key);
     ASSERT_TRUE(replicas.has_value()) << toString(replicas.error());
-    ASSERT_EQ(replicas->routes.size(), 1);
-    EXPECT_EQ(replicas->routes[0].client_id, client_id);
+    ASSERT_EQ(replicas.value().size(), 1);
+    EXPECT_EQ(replicas.value()[0].client_id, client_id);
 }
 
 TEST_F(P2PRecordOplogTest, EnabledOplogFailsFastWhenStoreInitFails) {

@@ -73,7 +73,7 @@ TEST_F(P2PClientManagerTest, RegisterClientSuccess) {
 
     auto res = mgr->RegisterClient(req);
     ASSERT_TRUE(res.has_value());
-    EXPECT_EQ(res.value().view_version, 1);
+    EXPECT_EQ(res.value(), 1);
 }
 
 TEST_F(P2PClientManagerTest, RegisterClientDuplicate) {
@@ -146,8 +146,7 @@ TEST_F(P2PClientManagerTest, UnregisterClientSuccess) {
     ASSERT_TRUE(mgr->RegisterClient(req).has_value());
     EXPECT_EQ(mgr->GetAllClients().size(), 1);
 
-    auto res = mgr->UnregisterClient(
-        P2PUnregisterClientRequest{client_id});
+    auto res = mgr->UnregisterClient(client_id);
     ASSERT_TRUE(res.has_value());
 
     // Client and all its segments are gone.
@@ -162,8 +161,7 @@ TEST_F(P2PClientManagerTest, UnregisterClientNotFoundIsIdempotent) {
     mgr->Start();
 
     // Unregistering an absent client is a no-op success.
-    auto res = mgr->UnregisterClient(
-        P2PUnregisterClientRequest{{999, 999}});
+    auto res = mgr->UnregisterClient({999, 999});
     EXPECT_TRUE(res.has_value());
 }
 
@@ -177,9 +175,7 @@ TEST_F(P2PClientManagerTest, UnregisterThenReRegister) {
                                         client_id, "10.0.0.1", 50051, {seg}))
                     .has_value());
 
-    ASSERT_TRUE(mgr->UnregisterClient(
-                       P2PUnregisterClientRequest{client_id})
-                    .has_value());
+    ASSERT_TRUE(mgr->UnregisterClient(client_id).has_value());
     EXPECT_EQ(mgr->GetClient(client_id), nullptr);
 
     // Re-registering the same client_id succeeds (no CLIENT_ALREADY_EXISTS).
@@ -210,9 +206,7 @@ TEST_F(P2PClientManagerTest, RegisterUnregisterActiveGauge) {
     EXPECT_EQ(m.get_active_clients(), 2);
 
     // Proactively unregister a HEALTH client: active-- and NOT counted a crash.
-    ASSERT_TRUE(mgr->UnregisterClient(
-                       P2PUnregisterClientRequest{{1, 0}})
-                    .has_value());
+    ASSERT_TRUE(mgr->UnregisterClient({1, 0}).has_value());
     EXPECT_EQ(m.get_active_clients(), 1);
     EXPECT_EQ(m.get_clients_crashed_total(), 0);
 }
@@ -861,9 +855,7 @@ TEST_F(P2PClientManagerTest, MonitorDoesNotEraseReRegisteredClient) {
                                               [&] { return entered; }));
     }
 
-    ASSERT_TRUE(mgr->UnregisterClient(P2PUnregisterClientRequest{
-                                        client_id})
-                    .has_value());
+    ASSERT_TRUE(mgr->UnregisterClient(client_id).has_value());
     auto new_segment = MakeP2PSegment({2, 2}, "new");
     ASSERT_TRUE(mgr->RegisterClient(MakeP2PRegisterRequest(
                                       client_id, "10.0.0.2", 50052,

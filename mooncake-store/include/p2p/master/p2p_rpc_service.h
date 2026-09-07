@@ -46,17 +46,17 @@ class P2PMasterRpcService final {
     P2PMasterService& GetMasterService() { return master_service_; }
     const P2PMasterService& GetMasterService() const { return master_service_; }
 
-    tl::expected<bool, ErrorCode> ExistKey(const P2PRouteExistsRequest& req);
+    tl::expected<bool, ErrorCode> ExistKey(std::string_view key);
 
     std::vector<tl::expected<bool, ErrorCode>> BatchExistKey(
-        const P2PBatchRouteExistsRequest& req);
+        const std::vector<std::string_view>& keys);
 
     tl::expected<
         std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
         ErrorCode>
     GetReadRouteByRegex(const std::string& regex);
 
-    tl::expected<P2PGetReadRouteResponse, ErrorCode> GetReadRoute(
+    tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode> GetReadRoute(
         const P2PGetReadRouteRequest& req);
     P2PBatchGetReadRouteResponse BatchGetReadRoute(
         const P2PBatchGetReadRouteRequest& req);
@@ -68,18 +68,17 @@ class P2PMasterRpcService final {
 
     tl::expected<P2PHeartbeatResponse, ErrorCode> Heartbeat(
         const P2PHeartbeatRequest& req);
-    tl::expected<P2PQueryClientStatusResponse, ErrorCode> QueryClientStatus(
-        const P2PQueryClientStatusRequest& req);
-    tl::expected<P2PRegisterClientResponse, ErrorCode> RegisterClient(
+    tl::expected<P2PClientStatus, ErrorCode> QueryClientStatus(
+        const UUID& client_id);
+    tl::expected<ViewVersionId, ErrorCode> RegisterClient(
         const P2PRegisterClientRequest& req);
-    tl::expected<P2PUnregisterClientResponse, ErrorCode> UnregisterClient(
-        const P2PUnregisterClientRequest& req);
+    tl::expected<ViewVersionId, ErrorCode> UnregisterClient(
+        const UUID& client_id);
 
     tl::expected<std::string, ErrorCode> ServiceReady();
-    tl::expected<P2PHeartbeatServiceReadyResponse, ErrorCode>
-    HeartbeatServiceReady();
+    tl::expected<uint32_t, ErrorCode> HeartbeatServiceReady();
 
-    tl::expected<P2PGetWriteRouteResponse, ErrorCode> GetWriteRoute(
+    tl::expected<std::vector<P2PWriteCandidate>, ErrorCode> GetWriteRoute(
         const P2PGetWriteRouteRequest& req);
     P2PBatchGetWriteRouteResponse BatchGetWriteRoute(
         const P2PBatchGetWriteRouteRequest& req);
@@ -93,7 +92,7 @@ class P2PMasterRpcService final {
     P2PBatchSyncRoutesResponse BatchSyncRoutes(
         const P2PBatchSyncRoutesRequest& req);
     tl::expected<void, ErrorCode> CompleteRouteSync(
-        const P2PCompleteRouteSyncRequest& req);
+        const UUID& client_id);
 
    private:
     void init_http_server();

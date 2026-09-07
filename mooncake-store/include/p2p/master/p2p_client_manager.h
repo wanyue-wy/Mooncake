@@ -36,13 +36,13 @@ class P2PClientManager final {
     void StopClientMonitor();
 
     auto RegisterClient(const P2PRegisterClientRequest& req)
-        -> tl::expected<P2PRegisterClientResponse, ErrorCode>;
-    auto UnregisterClient(const P2PUnregisterClientRequest& req)
-        -> tl::expected<P2PUnregisterClientResponse, ErrorCode>;
+        -> tl::expected<ViewVersionId, ErrorCode>;
+    auto UnregisterClient(const UUID& client_id)
+        -> tl::expected<ViewVersionId, ErrorCode>;
     auto Heartbeat(const P2PHeartbeatRequest& req)
         -> tl::expected<P2PHeartbeatResponse, ErrorCode>;
-    auto QueryClientStatus(const P2PQueryClientStatusRequest& req)
-        -> tl::expected<P2PQueryClientStatusResponse, ErrorCode>;
+    auto QueryClientStatus(const UUID& client_id)
+        -> tl::expected<P2PClientStatus, ErrorCode>;
 
     auto GetAllSegments() -> tl::expected<std::vector<std::string>, ErrorCode>;
     auto GetClientSegments(const UUID& client_id)

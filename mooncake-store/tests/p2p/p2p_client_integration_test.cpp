@@ -192,8 +192,8 @@ TEST_F(P2PClientIntegrationTest, ForceLocalWriteBypass) {
         auto resp = client_->GetMasterClient().GetReadRoute(
             key, P2PReadRouteConfig{});
         ASSERT_TRUE(resp.has_value());
-        ASSERT_FALSE(resp->routes.empty());
-        EXPECT_EQ(resp->routes[0].client_id, client_->GetClientID());
+        ASSERT_FALSE(resp.value().empty());
+        EXPECT_EQ(resp.value()[0].client_id, client_->GetClientID());
     }
 
     // remote_weight=1: client_ writes to client2_ via master routing.
@@ -221,8 +221,8 @@ TEST_F(P2PClientIntegrationTest, ForceLocalWriteBypass) {
         auto resp = client_->GetMasterClient().GetReadRoute(
             key, P2PReadRouteConfig{});
         ASSERT_TRUE(resp.has_value());
-        ASSERT_FALSE(resp->routes.empty());
-        EXPECT_EQ(resp->routes[0].client_id, client2_->GetClientID());
+        ASSERT_FALSE(resp.value().empty());
+        EXPECT_EQ(resp.value()[0].client_id, client2_->GetClientID());
     }
 }
 
@@ -254,8 +254,8 @@ TEST_F(P2PClientIntegrationTest, WaterlineBypassWritesLocal) {
     auto resp = client_->GetMasterClient().GetReadRoute(
         key, P2PReadRouteConfig{});
     ASSERT_TRUE(resp.has_value());
-    ASSERT_FALSE(resp->routes.empty());
-    EXPECT_EQ(resp->routes[0].client_id, client_->GetClientID());
+    ASSERT_FALSE(resp.value().empty());
+    EXPECT_EQ(resp.value()[0].client_id, client_->GetClientID());
 }
 
 // Contradictory config (waterline=0 + remote_weight=0, a dead-end combo)
@@ -539,10 +539,10 @@ TEST_F(P2PClientIntegrationTest, PutOverwrite) {
         auto routes = master_.GetWrapped().GetReadRoute(
             P2PGetReadRouteRequest{.key = key, .config = config});
         ASSERT_TRUE(routes.has_value());
-        ASSERT_EQ(routes.value().routes.size(), 1);
-        ASSERT_EQ(routes.value().routes[0].client_id,
+        ASSERT_EQ(routes.value().size(), 1);
+        ASSERT_EQ(routes.value()[0].client_id,
                   client_->GetClientID());
-        ASSERT_EQ(routes.value().routes[0].object_size, data1.size());
+        ASSERT_EQ(routes.value()[0].object_size, data1.size());
     }
 
     // Overwrite
@@ -558,10 +558,10 @@ TEST_F(P2PClientIntegrationTest, PutOverwrite) {
         auto routes = master_.GetWrapped().GetReadRoute(
             P2PGetReadRouteRequest{.key = key, .config = config});
         ASSERT_TRUE(routes.has_value());
-        ASSERT_EQ(routes.value().routes.size(), 1);
-        ASSERT_EQ(routes.value().routes[0].client_id,
+        ASSERT_EQ(routes.value().size(), 1);
+        ASSERT_EQ(routes.value()[0].client_id,
                   client_->GetClientID());
-        ASSERT_EQ(routes.value().routes[0].object_size, data1.size());
+        ASSERT_EQ(routes.value()[0].object_size, data1.size());
     }
 
     // Read back – should see data1 (first version)
