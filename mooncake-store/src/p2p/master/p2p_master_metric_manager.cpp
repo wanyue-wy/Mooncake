@@ -73,12 +73,12 @@ P2PMasterMetricManager::P2PMasterMetricManager()
       get_read_route_failures_(
           "master_get_read_route_failures_total",
           "Total number of failed GetReadRoute requests"),
-      get_replica_list_by_regex_requests_(
-          "master_get_replica_list_by_regex_requests_total",
-          "Total number of GetReplicaListByRegex requests received"),
-      get_replica_list_by_regex_failures_(
-          "master_get_replica_list_by_regex_failures_total",
-          "Total number of failed GetReplicaListByRegex requests"),
+      get_read_route_by_regex_requests_(
+          "master_get_read_route_by_regex_requests_total",
+          "Total number of GetReadRouteByRegex requests received"),
+      get_read_route_by_regex_failures_(
+          "master_get_read_route_by_regex_failures_total",
+          "Total number of failed GetReadRouteByRegex requests"),
       exist_key_requests_("master_exist_key_requests_total",
                           "Total number of ExistKey requests received"),
       exist_key_failures_("master_exist_key_failures_total",
@@ -231,8 +231,8 @@ void P2PMasterMetricManager::update_metrics_for_zero_output() {
     clients_crashed_total_.inc(0);
     get_read_route_requests_.inc(0);
     get_read_route_failures_.inc(0);
-    get_replica_list_by_regex_requests_.inc(0);
-    get_replica_list_by_regex_failures_.inc(0);
+    get_read_route_by_regex_requests_.inc(0);
+    get_read_route_by_regex_failures_.inc(0);
     exist_key_requests_.inc(0);
     exist_key_failures_.inc(0);
     remove_requests_.inc(0);
@@ -465,12 +465,12 @@ void P2PMasterMetricManager::inc_get_read_route_failures(int64_t val) {
     get_read_route_failures_.inc(val);
 }
 
-void P2PMasterMetricManager::inc_get_replica_list_by_regex_requests(int64_t val) {
-    get_replica_list_by_regex_requests_.inc(val);
+void P2PMasterMetricManager::inc_get_read_route_by_regex_requests(int64_t val) {
+    get_read_route_by_regex_requests_.inc(val);
 }
 
-void P2PMasterMetricManager::inc_get_replica_list_by_regex_failures(int64_t val) {
-    get_replica_list_by_regex_failures_.inc(val);
+void P2PMasterMetricManager::inc_get_read_route_by_regex_failures(int64_t val) {
+    get_read_route_by_regex_failures_.inc(val);
 }
 
 void P2PMasterMetricManager::inc_remove_requests(int64_t val) {
@@ -570,12 +570,12 @@ int64_t P2PMasterMetricManager::get_get_read_route_failures() {
     return get_read_route_failures_.value();
 }
 
-int64_t P2PMasterMetricManager::get_get_replica_list_by_regex_requests() {
-    return get_replica_list_by_regex_requests_.value();
+int64_t P2PMasterMetricManager::get_get_read_route_by_regex_requests() {
+    return get_read_route_by_regex_requests_.value();
 }
 
-int64_t P2PMasterMetricManager::get_get_replica_list_by_regex_failures() {
-    return get_replica_list_by_regex_failures_.value();
+int64_t P2PMasterMetricManager::get_get_read_route_by_regex_failures() {
+    return get_read_route_by_regex_failures_.value();
 }
 
 int64_t P2PMasterMetricManager::get_exist_key_requests() {
@@ -733,8 +733,8 @@ std::string P2PMasterMetricManager::serialize_metrics() {
     serialize_metric(exist_key_failures_);
     serialize_metric(get_read_route_requests_);
     serialize_metric(get_read_route_failures_);
-    serialize_metric(get_replica_list_by_regex_requests_);
-    serialize_metric(get_replica_list_by_regex_failures_);
+    serialize_metric(get_read_route_by_regex_requests_);
+    serialize_metric(get_read_route_by_regex_failures_);
     serialize_metric(remove_requests_);
     serialize_metric(remove_failures_);
     serialize_metric(remove_by_regex_requests_);

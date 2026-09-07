@@ -85,8 +85,8 @@ class P2PMasterMetricManager {
     int64_t get_clients_crashed_total();
 
     // Operation Statistics (Counters)
-    void inc_get_replica_list_by_regex_requests(int64_t val = 1);
-    void inc_get_replica_list_by_regex_failures(int64_t val = 1);
+    void inc_get_read_route_by_regex_requests(int64_t val = 1);
+    void inc_get_read_route_by_regex_failures(int64_t val = 1);
     void inc_get_read_route_requests(int64_t val = 1);
     void inc_get_read_route_failures(int64_t val = 1);
     void inc_exist_key_requests(int64_t val = 1);
@@ -118,8 +118,8 @@ class P2PMasterMetricManager {
     // Operation Statistics Getters
     int64_t get_get_read_route_requests();
     int64_t get_get_read_route_failures();
-    int64_t get_get_replica_list_by_regex_requests();
-    int64_t get_get_replica_list_by_regex_failures();
+    int64_t get_get_read_route_by_regex_requests();
+    int64_t get_get_read_route_by_regex_failures();
     int64_t get_exist_key_requests();
     int64_t get_exist_key_failures();
     int64_t get_remove_requests();
@@ -252,8 +252,8 @@ class P2PMasterMetricManager {
     // Operation Statistics
     ylt::metric::counter_t get_read_route_requests_;
     ylt::metric::counter_t get_read_route_failures_;
-    ylt::metric::counter_t get_replica_list_by_regex_requests_;
-    ylt::metric::counter_t get_replica_list_by_regex_failures_;
+    ylt::metric::counter_t get_read_route_by_regex_requests_;
+    ylt::metric::counter_t get_read_route_by_regex_failures_;
     ylt::metric::counter_t exist_key_requests_;
     ylt::metric::counter_t exist_key_failures_;
     ylt::metric::counter_t remove_requests_;

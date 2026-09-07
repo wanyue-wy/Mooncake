@@ -71,7 +71,7 @@ class P2PMasterService {
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>;
 
-    auto GetReplicaListByRegex(const std::string& regex_pattern)
+    auto GetReadRouteByRegex(const std::string& regex_pattern)
         -> tl::expected<
             std::unordered_map<std::string,
                                std::vector<P2PRouteDescriptor>>,

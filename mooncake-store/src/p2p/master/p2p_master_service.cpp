@@ -260,7 +260,7 @@ auto P2PMasterService::BatchQueryIp(const std::vector<UUID>& client_ids)
     return results;
 }
 
-auto P2PMasterService::GetReplicaListByRegex(const std::string& regex_pattern)
+auto P2PMasterService::GetReadRouteByRegex(const std::string& regex_pattern)
     -> tl::expected<
         std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
         ErrorCode> {

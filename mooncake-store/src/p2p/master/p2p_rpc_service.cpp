@@ -212,6 +212,24 @@ std::vector<tl::expected<bool, ErrorCode>> P2PMasterRpcService::BatchExistKey(
     return result;
 }
 
+tl::expected<
+    std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
+    ErrorCode>
+P2PMasterRpcService::GetReadRouteByRegex(const std::string& regex) {
+    return execute_rpc(
+        "GetReadRouteByRegex",
+        [&] { return master_service_.GetReadRouteByRegex(regex); },
+        [&](auto& timer) { timer.LogRequest("Regex=", regex); },
+        [] {
+            P2PMasterMetricManager::instance()
+                .inc_get_read_route_by_regex_requests();
+        },
+        [] {
+            P2PMasterMetricManager::instance()
+                .inc_get_read_route_by_regex_failures();
+        });
+}
+
 tl::expected<P2PGetReadRouteResponse, ErrorCode>
 P2PMasterRpcService::GetReadRoute(
     const P2PGetReadRouteRequest& req) {
@@ -528,6 +546,8 @@ void RegisterP2PRpcService(
     server.register_handler<&P2PMasterRpcService::ExistKey>(
         &wrapped_master_service);
     server.register_handler<&P2PMasterRpcService::BatchExistKey>(
+        &wrapped_master_service);
+    server.register_handler<&P2PMasterRpcService::GetReadRouteByRegex>(
         &wrapped_master_service);
     server.register_handler<&P2PMasterRpcService::GetReadRoute>(
         &wrapped_master_service);

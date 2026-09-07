@@ -382,9 +382,21 @@ P2PClientService::QueryByRegex(const std::string& regex) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
-    (void)regex;
-    LOG(ERROR) << "QueryByRegex is not part of the P2P route protocol";
-    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+    auto result = master_client_.GetReadRouteByRegex(regex);
+    if (!result.has_value()) {
+        LOG(ERROR) << "GetReadRouteByRegex RPC failed"
+                   << ", regex=" << regex
+                   << ", error=" << toString(result.error());
+        return tl::make_unexpected(result.error());
+    }
+
+    std::unordered_map<std::string, std::vector<Replica::Descriptor>> response;
+    response.reserve(result->size());
+    for (auto& [key, routes] : *result) {
+        response.emplace(std::move(key),
+                         ToFacadeReplicaDescriptors(std::move(routes)));
+    }
+    return response;
 }
 
 tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>

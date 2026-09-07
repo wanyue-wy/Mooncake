@@ -209,9 +209,8 @@ class P2PClientService final : public ClientService {
         ErrorCode>
     BatchQueryIp(const std::vector<UUID>& client_ids) override;
 
-    // TODO(C4 / external interface; see p2p-split-plan-v2.md): Implement the
-    // P2P regex query facade with P2PRouteDescriptor results after QueryResult
-    // is split by architecture.
+    // TODO(C4 / external interface; see p2p-split-plan-v2.md): Return
+    // P2PRouteDescriptor directly after QueryResult is split by architecture.
     tl::expected<
         std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
         ErrorCode>

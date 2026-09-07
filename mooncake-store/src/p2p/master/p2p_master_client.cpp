@@ -17,6 +17,11 @@ struct RpcNameTraits<&P2PMasterRpcService::BatchExistKey> {
 };
 
 template <>
+struct RpcNameTraits<&P2PMasterRpcService::GetReadRouteByRegex> {
+    static constexpr const char* value = "GetReadRouteByRegex";
+};
+
+template <>
 struct RpcNameTraits<&P2PMasterRpcService::GetReadRoute> {
     static constexpr const char* value = "GetReadRoute";
 };
@@ -275,6 +280,20 @@ P2PMasterClient::BatchGetReadRoute(
     }
     timer.LogResponse("result=", response.size(), " requests");
     return response;
+}
+
+tl::expected<
+    std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
+    ErrorCode>
+P2PMasterClient::GetReadRouteByRegex(const std::string& regex) {
+    ScopedVLogTimer timer(1, "P2PMasterClient::GetReadRouteByRegex");
+    timer.LogRequest("Regex=", regex);
+    auto result = invoke_rpc<
+        &P2PMasterRpcService::GetReadRouteByRegex,
+        std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>>(
+        regex);
+    timer.LogResponseExpected(result);
+    return result;
 }
 
 tl::expected<void, ErrorCode> P2PMasterClient::UnmountSegment(

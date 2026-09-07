@@ -994,7 +994,7 @@ TEST_F(P2PMasterServiceTest, GetReplicaListNotFound) {
     EXPECT_EQ(ErrorCode::OBJECT_NOT_FOUND, res.error());
 }
 
-TEST_F(P2PMasterServiceTest, GetReplicaListByRegexReturnsMatchingRoutes) {
+TEST_F(P2PMasterServiceTest, GetReadRouteByRegexReturnsMatchingRoutes) {
     auto service = CreateService();
     auto segment = MakeP2PSegment();
     auto client_id = generate_uuid();
@@ -1003,7 +1003,7 @@ TEST_F(P2PMasterServiceTest, GetReplicaListByRegexReturnsMatchingRoutes) {
     AddReplicaHelper(*service, "prefix-b", 1024, client_id, segment.id);
     AddReplicaHelper(*service, "other", 1024, client_id, segment.id);
 
-    auto result = service->GetReplicaListByRegex("^prefix-");
+    auto result = service->GetReadRouteByRegex("^prefix-");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->size(), 2);
     EXPECT_TRUE(result->contains("prefix-a"));

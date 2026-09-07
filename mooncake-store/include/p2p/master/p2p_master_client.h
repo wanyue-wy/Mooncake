@@ -68,6 +68,11 @@ class P2PMasterClient final {
     [[nodiscard]] std::vector<tl::expected<bool, ErrorCode>> BatchExistKey(
         const std::vector<std::string_view>& object_keys);
 
+    [[nodiscard]] tl::expected<
+        std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
+        ErrorCode>
+    GetReadRouteByRegex(const std::string& regex);
+
     [[nodiscard]] tl::expected<P2PGetReadRouteResponse, ErrorCode> GetReadRoute(
         std::string_view key, const P2PReadRouteConfig& config);
 

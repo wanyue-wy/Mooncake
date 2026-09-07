@@ -51,6 +51,11 @@ class P2PMasterRpcService final {
     std::vector<tl::expected<bool, ErrorCode>> BatchExistKey(
         const P2PBatchRouteExistsRequest& req);
 
+    tl::expected<
+        std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
+        ErrorCode>
+    GetReadRouteByRegex(const std::string& regex);
+
     tl::expected<P2PGetReadRouteResponse, ErrorCode> GetReadRoute(
         const P2PGetReadRouteRequest& req);
     P2PBatchGetReadRouteResponse BatchGetReadRoute(
