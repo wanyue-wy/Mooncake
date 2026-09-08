@@ -804,7 +804,7 @@ auto P2PMasterService::ApplyWithdrawLocked(
     const UUID& segment_id) -> tl::expected<void, ErrorCode> {
     const P2PRouteLocation location{.client_id = client_id,
                                     .segment_id = segment_id};
-    auto mutation = table.Withdraw(key, location, [&] {
+    auto record_oplog = [&] {
         if (GetOpLogManager() == nullptr) {
             return ErrorCode::OK;
         }
@@ -822,8 +822,13 @@ auto P2PMasterService::ApplyWithdrawLocked(
                        << ", error=" << toString(error);
         }
         return error;
-    });
+    };
+    auto mutation = table.Withdraw(key, location, record_oplog);
     if (!mutation.has_value()) {
+        LOG(ERROR) << "Route changed while withdrawing after OpLog persistence"
+                   << ", key=" << key << ", client_id=" << client_id
+                   << ", segment_id=" << segment_id
+                   << ", error=" << toString(mutation.error());
         return tl::make_unexpected(mutation.error());
     }
     if (mutation->removed_key) {
