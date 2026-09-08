@@ -1,8 +1,12 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
+#include <functional>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #define private public
@@ -869,6 +873,64 @@ TEST_F(P2PMasterServiceTest, BatchSyncRoutesAppliesMixedOperations) {
     EXPECT_TRUE(*service->ExistKey("new"));
     EXPECT_FALSE(*service->ExistKey("existing"));
     EXPECT_FALSE(*service->ExistKey("cycle"));
+}
+
+TEST_F(P2PMasterServiceTest, RouteShardLockSerializesConcurrentMutations) {
+    constexpr size_t kReplicaCount = 16;
+    auto service = CreateService();
+    auto client_id = generate_uuid();
+    std::vector<P2PSegment> segments;
+    segments.reserve(kReplicaCount);
+    for (size_t index = 0; index < kReplicaCount; ++index) {
+        segments.push_back(MakeP2PSegment("segment-" +
+                                         std::to_string(index)));
+    }
+    RegisterP2PClient(*service, client_id, segments);
+
+    const std::string key = "concurrent-route";
+    std::vector<ErrorCode> errors(kReplicaCount, ErrorCode::INTERNAL_ERROR);
+    std::vector<std::thread> workers;
+    workers.reserve(kReplicaCount);
+    for (size_t index = 0; index < kReplicaCount; ++index) {
+        workers.emplace_back([&, index] {
+            P2PPublishRouteRequest request;
+            request.key = key;
+            request.object_size = 1024;
+            request.client_id = client_id;
+            request.segment_id = segments[index].id;
+            auto result = service->AddReplica(request);
+            errors[index] =
+                result.has_value() ? ErrorCode::OK : result.error();
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    EXPECT_TRUE(std::all_of(errors.begin(), errors.end(), [](ErrorCode error) {
+        return error == ErrorCode::OK;
+    }));
+    EXPECT_TRUE(*service->ExistKey(key));
+
+    std::fill(errors.begin(), errors.end(), ErrorCode::INTERNAL_ERROR);
+    workers.clear();
+    for (size_t index = 0; index < kReplicaCount; ++index) {
+        workers.emplace_back([&, index] {
+            P2PWithdrawRouteRequest request;
+            request.key = key;
+            request.client_id = client_id;
+            request.segment_id = segments[index].id;
+            auto result = service->RemoveReplica(request);
+            errors[index] =
+                result.has_value() ? ErrorCode::OK : result.error();
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    EXPECT_TRUE(std::all_of(errors.begin(), errors.end(), [](ErrorCode error) {
+        return error == ErrorCode::OK;
+    }));
+    EXPECT_FALSE(*service->ExistKey(key));
 }
 
 // ============================================================

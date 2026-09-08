@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "p2p/master/p2p_route_table.h"
@@ -64,107 +65,35 @@ TEST(P2PRouteTableTest, RejectsInvalidSizeAndDuplicateLocation) {
 }
 
 TEST(P2PRouteTableTest, CountsUniqueClientsForRouteLimit) {
-    P2PRouteTable table(/*max_client_per_key=*/1);
+    P2PRouteTable table;
     ASSERT_TRUE(
-        table.Publish("key", 1024, Location(kClientA, UUID{11, 11}))
+        table.Publish("key", 1024, Location(kClientA, UUID{11, 11}),
+                      /*max_client_per_key=*/1)
             .has_value());
     EXPECT_TRUE(
-        table.Publish("key", 1024, Location(kClientA, UUID{12, 12}))
+        table.Publish("key", 1024, Location(kClientA, UUID{12, 12}),
+                      /*max_client_per_key=*/1)
             .has_value());
 
-    auto second_client =
-        table.Publish("key", 1024, Location(kClientB, UUID{13, 13}));
+    auto second_client = table.Publish(
+        "key", 1024, Location(kClientB, UUID{13, 13}),
+        /*max_client_per_key=*/1);
     ASSERT_FALSE(second_client.has_value());
     EXPECT_EQ(second_client.error(), ErrorCode::REPLICA_NUM_EXCEEDED);
 }
 
-TEST(P2PRouteTableTest, BatchPublishAndWithdrawPreserveResultsAndHookOrder) {
-    P2PRouteTable table;
-    const UUID segment_id{11, 11};
-    const std::vector<P2PPublishRouteOperation> publishes{
-        {.key = "key", .object_size = 1024, .segment_id = segment_id},
-        {.key = "key", .object_size = 1024, .segment_id = segment_id},
-    };
-    const std::vector<P2PWithdrawRouteOperation> withdrawals{
-        {.key = "key", .segment_id = segment_id},
-        {.key = "missing", .segment_id = segment_id},
-    };
-    std::vector<std::string> hooks;
-
-    auto publish_results = table.BatchPublish(
-        kClientA, publishes,
-        [](size_t, const P2PPublishRouteOperation&) {
-            return ErrorCode::OK;
-        },
-        [&](size_t, const P2PPublishRouteOperation& operation,
-            const P2PRouteTable::MutationResult&) {
-            hooks.push_back("publish:" + operation.key);
-        });
-    auto withdraw_results = table.BatchWithdraw(
-        kClientA, withdrawals,
-        [&](size_t, const P2PWithdrawRouteOperation& operation) {
-            hooks.push_back("withdraw:" + operation.key);
-            return ErrorCode::OK;
-        },
-        [](size_t, const P2PWithdrawRouteOperation&,
-           const P2PRouteTable::MutationResult&) {});
-
-    ASSERT_EQ(publish_results.size(), 2);
-    EXPECT_TRUE(publish_results[0].has_value());
-    ASSERT_FALSE(publish_results[1].has_value());
-    EXPECT_EQ(publish_results[1].error(),
-              ErrorCode::REPLICA_ALREADY_EXISTS);
-    ASSERT_EQ(withdraw_results.size(), 2);
-    EXPECT_TRUE(withdraw_results[0].has_value());
-    ASSERT_FALSE(withdraw_results[1].has_value());
-    EXPECT_EQ(withdraw_results[1].error(), ErrorCode::OBJECT_NOT_FOUND);
-    EXPECT_EQ(hooks,
-              (std::vector<std::string>{"publish:key", "withdraw:key"}));
-    EXPECT_FALSE(table.RouteExists("key"));
-}
-
-TEST(P2PRouteTableTest, BatchWithdrawPreHookFailureKeepsRoute) {
+TEST(P2PRouteTableTest, PrepareWithdrawKeepsRouteUntilCommit) {
     P2PRouteTable table;
     const UUID segment_id{11, 11};
     const auto location = Location(kClientA, segment_id);
     ASSERT_TRUE(table.Publish("key", 1024, location).has_value());
-    const std::vector<P2PWithdrawRouteOperation> withdrawals{
-        {.key = "key", .segment_id = segment_id},
-    };
-    auto results = table.BatchWithdraw(
-        kClientA, withdrawals,
-        [](size_t, const P2PWithdrawRouteOperation&) {
-            return ErrorCode::INTERNAL_ERROR;
-        },
-        [](size_t, const P2PWithdrawRouteOperation&,
-           const P2PRouteTable::MutationResult&) {});
 
-    ASSERT_EQ(results.size(), 1);
-    ASSERT_FALSE(results[0].has_value());
-    EXPECT_EQ(results[0].error(), ErrorCode::INTERNAL_ERROR);
+    auto handle = table.PrepareWithdraw("key", location);
+    ASSERT_TRUE(handle.has_value());
     EXPECT_TRUE(table.RouteExists("key"));
-}
 
-TEST(P2PRouteTableTest, BatchPublishPreHookFailureDoesNotCreateRoute) {
-    P2PRouteTable table;
-    const std::vector<P2PPublishRouteOperation> publishes{
-        {.key = "key", .object_size = 1024, .segment_id = UUID{11, 11}},
-    };
-    bool post_hook_called = false;
-    auto results = table.BatchPublish(
-        kClientA, publishes,
-        [](size_t, const P2PPublishRouteOperation&) {
-            return ErrorCode::SEGMENT_NOT_FOUND;
-        },
-        [&](size_t, const P2PPublishRouteOperation&,
-            const P2PRouteTable::MutationResult&) {
-            post_hook_called = true;
-        });
-
-    ASSERT_EQ(results.size(), 1);
-    ASSERT_FALSE(results[0].has_value());
-    EXPECT_EQ(results[0].error(), ErrorCode::SEGMENT_NOT_FOUND);
-    EXPECT_FALSE(post_hook_called);
+    auto result = table.CommitWithdraw(std::move(*handle));
+    EXPECT_TRUE(result.removed_key);
     EXPECT_FALSE(table.RouteExists("key"));
 }
 

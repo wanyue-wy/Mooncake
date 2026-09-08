@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include <boost/functional/hash.hpp>
 #include <glog/logging.h>
 
 namespace mooncake {
@@ -16,17 +17,8 @@ size_t P2PRouteTable::CountOwnerClients(const P2PRouteEntry& entry) {
 }
 
 auto P2PRouteTable::Publish(std::string_view key, uint64_t object_size,
-                            const P2PRouteLocation& location)
-    -> Mutation {
-    auto& shard = shards_[GetShardIndex(key)];
-    SharedMutexLocker lock(&shard.mutex);
-    return PublishLocked(shard, key, object_size, location);
-}
-
-auto P2PRouteTable::PublishLocked(RouteShard& shard, std::string_view key,
-                                  uint64_t object_size,
-                                  const P2PRouteLocation& location)
-    -> Mutation {
+                            const P2PRouteLocation& location,
+                            uint64_t max_client_per_key) -> Mutation {
     if (object_size == 0) {
         LOG(ERROR) << "Publish route rejected: object_size must be positive"
                    << ", key=" << key << ", client_id=" << location.client_id
@@ -34,8 +26,8 @@ auto P2PRouteTable::PublishLocked(RouteShard& shard, std::string_view key,
         return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
     }
 
-    auto it = shard.routes.find(key);
-    if (it != shard.routes.end()) {
+    auto it = routes_.find(key);
+    if (it != routes_.end()) {
         auto& entry = it->second;
         if (entry.object_size != object_size) {
             LOG(ERROR) << "Publish route rejected: object size mismatch"
@@ -60,19 +52,19 @@ auto P2PRouteTable::PublishLocked(RouteShard& shard, std::string_view key,
         // A client may publish the same key from multiple segments during
         // tier migration. The configured limit applies to owner clients, not
         // physical route locations.
-        if (new_owner && max_client_per_key_ > 0 &&
-            CountOwnerClients(entry) >= max_client_per_key_) {
+        if (new_owner && max_client_per_key > 0 &&
+            CountOwnerClients(entry) >= max_client_per_key) {
             LOG(WARNING) << "Publish route rejected: owner client limit "
                             "exceeded"
                          << ", key=" << key
                          << ", client_id=" << location.client_id
                          << ", segment_id=" << location.segment_id
-                         << ", max_clients_per_key=" << max_client_per_key_;
+                         << ", max_clients_per_key=" << max_client_per_key;
             return tl::make_unexpected(ErrorCode::REPLICA_NUM_EXCEEDED);
         }
 
         entry.locations.push_back(location);
-        shard.keys_by_location[location].insert(std::string_view(it->first));
+        keys_by_location_[location].insert(std::string_view(it->first));
         return MutationResult{};
     }
 
@@ -80,22 +72,20 @@ auto P2PRouteTable::PublishLocked(RouteShard& shard, std::string_view key,
     entry.object_size = object_size;
     entry.locations.push_back(location);
     auto [inserted_it, inserted] =
-        shard.routes.emplace(std::string(key), std::move(entry));
+        routes_.emplace(std::string(key), std::move(entry));
     if (!inserted) {
         LOG(ERROR) << "Publish route failed to insert a new key"
                    << ", key=" << key;
         return tl::make_unexpected(ErrorCode::INTERNAL_ERROR);
     }
-    shard.keys_by_location[location].insert(
-        std::string_view(inserted_it->first));
+    keys_by_location_[location].insert(std::string_view(inserted_it->first));
     return MutationResult{.created_key = true};
 }
 
 void P2PRouteTable::RemoveReverseIndex(
-    RouteShard& shard, std::string_view key,
-    const P2PRouteLocation& location) {
-    auto location_it = shard.keys_by_location.find(location);
-    if (location_it == shard.keys_by_location.end()) {
+    std::string_view key, const P2PRouteLocation& location) {
+    auto location_it = keys_by_location_.find(location);
+    if (location_it == keys_by_location_.end()) {
         LOG(ERROR) << "Route reverse index is missing a location"
                    << ", key=" << key << ", client_id=" << location.client_id
                    << ", segment_id=" << location.segment_id;
@@ -107,42 +97,22 @@ void P2PRouteTable::RemoveReverseIndex(
                    << ", segment_id=" << location.segment_id;
     }
     if (location_it->second.empty()) {
-        shard.keys_by_location.erase(location_it);
+        keys_by_location_.erase(location_it);
     }
 }
 
-void P2PRouteTable::RemoveAllReverseIndexes(RouteShard& shard,
-                                            std::string_view key,
-                                            const P2PRouteEntry& entry) {
+void P2PRouteTable::RemoveAllReverseIndexes(
+    std::string_view key, const P2PRouteEntry& entry) {
     for (const auto& location : entry.locations) {
-        RemoveReverseIndex(shard, key, location);
+        RemoveReverseIndex(key, location);
     }
 }
 
-auto P2PRouteTable::Withdraw(std::string_view key,
-                             const P2PRouteLocation& location)
-    -> Mutation {
-    auto& shard = shards_[GetShardIndex(key)];
-    SharedMutexLocker lock(&shard.mutex);
-    return WithdrawLocked(shard, key, location);
-}
-
-auto P2PRouteTable::WithdrawLocked(
-    RouteShard& shard, std::string_view key,
-    const P2PRouteLocation& location) -> Mutation {
-    auto target = FindWithdrawTargetLocked(shard, key, location);
-    if (!target.has_value()) {
-        return tl::make_unexpected(target.error());
-    }
-    return CommitWithdrawLocked(shard, *target);
-}
-
-auto P2PRouteTable::FindWithdrawTargetLocked(
-    RouteShard& shard, std::string_view key,
-    const P2PRouteLocation& location)
-    -> tl::expected<WithdrawTarget, ErrorCode> {
-    auto route_it = shard.routes.find(key);
-    if (route_it == shard.routes.end()) {
+auto P2PRouteTable::PrepareWithdraw(
+    std::string_view key, const P2PRouteLocation& location)
+    -> tl::expected<WithdrawHandle, ErrorCode> {
+    auto route_it = routes_.find(key);
+    if (route_it == routes_.end()) {
         LOG(WARNING) << "Withdraw route rejected: key not found"
                      << ", key=" << key << ", client_id=" << location.client_id
                      << ", segment_id=" << location.segment_id;
@@ -157,65 +127,39 @@ auto P2PRouteTable::FindWithdrawTargetLocked(
                      << ", segment_id=" << location.segment_id;
         return tl::make_unexpected(ErrorCode::REPLICA_NOT_FOUND);
     }
-    return WithdrawTarget{.route = route_it, .location = location_it};
+    return WithdrawHandle(route_it, location_it);
 }
 
-auto P2PRouteTable::CommitWithdrawLocked(RouteShard& shard,
-                                         WithdrawTarget target) -> Mutation {
-    auto& locations = target.route->second.locations;
-    RemoveReverseIndex(shard, target.route->first, *target.location);
-    locations.erase(target.location);
+P2PRouteTable::MutationResult P2PRouteTable::CommitWithdraw(
+    WithdrawHandle handle) {
+    auto& locations = handle.route_->second.locations;
+    RemoveReverseIndex(handle.route_->first, *handle.location_);
+    locations.erase(handle.location_);
     if (locations.empty()) {
-        shard.routes.erase(target.route);
+        routes_.erase(handle.route_);
         return MutationResult{.removed_key = true};
     }
     return MutationResult{};
 }
 
-P2PRouteTable::OperationsByShard P2PRouteTable::GroupOperationsByShard(
-    std::span<const P2PPublishRouteOperation> operations) const {
-    OperationsByShard operations_by_shard;
-    operations_by_shard.reserve(std::min(operations.size(), kShardCount));
-    for (size_t index = 0; index < operations.size(); ++index) {
-        operations_by_shard[GetShardIndex(operations[index].key)].push_back(
-            index);
+auto P2PRouteTable::Withdraw(std::string_view key,
+                             const P2PRouteLocation& location) -> Mutation {
+    auto handle = PrepareWithdraw(key, location);
+    if (!handle.has_value()) {
+        return tl::make_unexpected(handle.error());
     }
-    return operations_by_shard;
-}
-
-P2PRouteTable::OperationsByShard P2PRouteTable::GroupOperationsByShard(
-    std::span<const P2PWithdrawRouteOperation> operations) const {
-    OperationsByShard operations_by_shard;
-    operations_by_shard.reserve(std::min(operations.size(), kShardCount));
-    for (size_t index = 0; index < operations.size(); ++index) {
-        operations_by_shard[GetShardIndex(operations[index].key)].push_back(
-            index);
-    }
-    return operations_by_shard;
-}
-
-void P2PRouteTable::LogBatchPreconditionFailure(
-    std::string_view action, std::string_view key,
-    const UUID& client_id, const UUID& segment_id, ErrorCode error) {
-    LOG(ERROR) << action << " rejected by pre-mutation hook"
-               << ", key=" << key << ", client_id=" << client_id
-               << ", segment_id=" << segment_id
-               << ", error=" << toString(error);
+    return CommitWithdraw(std::move(*handle));
 }
 
 bool P2PRouteTable::RouteExists(std::string_view key) const {
-    const auto& shard = shards_[GetShardIndex(key)];
-    SharedMutexLocker lock(&shard.mutex, shared_lock);
-    auto it = shard.routes.find(key);
-    return it != shard.routes.end() && !it->second.locations.empty();
+    auto it = routes_.find(key);
+    return it != routes_.end() && !it->second.locations.empty();
 }
 
 std::optional<P2PRouteEntry> P2PRouteTable::GetRoute(
     std::string_view key) const {
-    const auto& shard = shards_[GetShardIndex(key)];
-    SharedMutexLocker lock(&shard.mutex, shared_lock);
-    auto it = shard.routes.find(key);
-    if (it == shard.routes.end()) {
+    auto it = routes_.find(key);
+    if (it == routes_.end()) {
         return std::nullopt;
     }
     return it->second;
@@ -223,82 +167,63 @@ std::optional<P2PRouteEntry> P2PRouteTable::GetRoute(
 
 std::vector<std::string> P2PRouteTable::ListRouteKeys() const {
     std::vector<std::string> keys;
-    for (const auto& shard : shards_) {
-        SharedMutexLocker lock(&shard.mutex, shared_lock);
-        keys.reserve(keys.size() + shard.routes.size());
-        for (const auto& route : shard.routes) {
-            keys.push_back(route.first);
-        }
+    keys.reserve(routes_.size());
+    for (const auto& route : routes_) {
+        keys.push_back(route.first);
     }
     return keys;
 }
 
-size_t P2PRouteTable::GetRouteKeyCount() const {
-    size_t count = 0;
-    for (const auto& shard : shards_) {
-        SharedMutexLocker lock(&shard.mutex, shared_lock);
-        count += shard.routes.size();
-    }
-    return count;
-}
+size_t P2PRouteTable::GetRouteKeyCount() const { return routes_.size(); }
 
 P2PRouteTable::CleanupResult P2PRouteTable::RemoveLocation(
     const P2PRouteLocation& location) {
     CleanupResult result;
-    for (auto& shard : shards_) {
-        SharedMutexLocker lock(&shard.mutex);
-        auto index_it = shard.keys_by_location.find(location);
-        if (index_it == shard.keys_by_location.end()) {
+    auto index_it = keys_by_location_.find(location);
+    if (index_it == keys_by_location_.end()) {
+        return result;
+    }
+
+    std::vector<std::string> affected_keys;
+    affected_keys.reserve(index_it->second.size());
+    for (std::string_view key : index_it->second) {
+        affected_keys.emplace_back(key);
+    }
+    keys_by_location_.erase(index_it);
+
+    for (const auto& key : affected_keys) {
+        auto route_it = routes_.find(key);
+        if (route_it == routes_.end()) {
+            LOG(ERROR) << "Route reverse index references a missing key"
+                       << ", key=" << key;
             continue;
         }
-
-        std::vector<std::string> affected_keys;
-        affected_keys.reserve(index_it->second.size());
-        for (std::string_view key : index_it->second) {
-            affected_keys.emplace_back(key);
-        }
-        shard.keys_by_location.erase(index_it);
-
-        for (const auto& key : affected_keys) {
-            auto route_it = shard.routes.find(key);
-            if (route_it == shard.routes.end()) {
-                LOG(ERROR) << "Route reverse index references a missing key"
-                           << ", key=" << key;
-                continue;
-            }
-            auto& locations = route_it->second.locations;
-            const size_t old_size = locations.size();
-            std::erase(locations, location);
-            result.removed_routes += old_size - locations.size();
-            if (locations.empty()) {
-                result.removed_keys.push_back(route_it->first);
-                shard.routes.erase(route_it);
-            }
+        auto& locations = route_it->second.locations;
+        const size_t old_size = locations.size();
+        std::erase(locations, location);
+        result.removed_routes += old_size - locations.size();
+        if (locations.empty()) {
+            result.removed_keys.push_back(route_it->first);
+            routes_.erase(route_it);
         }
     }
     return result;
 }
 
 bool P2PRouteTable::RemoveKey(std::string_view key) {
-    auto& shard = shards_[GetShardIndex(key)];
-    SharedMutexLocker lock(&shard.mutex);
-    auto it = shard.routes.find(key);
-    if (it == shard.routes.end()) {
+    auto it = routes_.find(key);
+    if (it == routes_.end()) {
         return false;
     }
-    RemoveAllReverseIndexes(shard, it->first, it->second);
-    shard.routes.erase(it);
+    RemoveAllReverseIndexes(it->first, it->second);
+    routes_.erase(it);
     return true;
 }
 
 size_t P2PRouteTable::Clear() {
-    size_t removed_keys = 0;
-    for (auto& shard : shards_) {
-        SharedMutexLocker lock(&shard.mutex);
-        removed_keys += shard.routes.size();
-        shard.keys_by_location.clear();
-        shard.routes.clear();
-    }
+    const size_t removed_keys = routes_.size();
+    keys_by_location_.clear();
+    routes_.clear();
     return removed_keys;
 }
 
