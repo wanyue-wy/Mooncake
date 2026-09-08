@@ -793,7 +793,7 @@ RemoveReplicaCallback P2PClientService::BuildRemoveReplicaCallback() {
 tl::expected<void, ErrorCode> P2PClientService::SyncAddReplica(
     std::string_view key, const UUID& tier_id, size_t size) {
     P2PPublishRouteRequest req;
-    req.key = std::string(key);
+    req.key = key;
     req.object_size = size;
     req.client_id = client_id_;
     req.segment_id = tier_id;
@@ -809,7 +809,7 @@ tl::expected<void, ErrorCode> P2PClientService::SyncAddReplica(
 tl::expected<void, ErrorCode> P2PClientService::SyncRemoveReplica(
     std::string_view key, const UUID& tier_id) {
     P2PWithdrawRouteRequest req;
-    req.key = std::string(key);
+    req.key = key;
     req.client_id = client_id_;
     req.segment_id = tier_id;
     auto result = master_client_.WithdrawRoute(req);
@@ -825,7 +825,7 @@ std::vector<tl::expected<void, ErrorCode>>
 P2PClientService::SyncBatchRemoveReplica(std::string_view key,
                                          std::vector<UUID> segment_ids) {
     P2PBatchWithdrawRouteRequest req;
-    req.key = std::string(key);
+    req.key = key;
     req.client_id = client_id_;
     req.segment_ids = std::move(segment_ids);
     auto results = master_client_.BatchWithdrawRoute(req);

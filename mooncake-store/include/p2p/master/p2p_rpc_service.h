@@ -54,7 +54,7 @@ class P2PMasterRpcService final {
     tl::expected<
         std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
         ErrorCode>
-    GetReadRouteByRegex(const std::string& regex);
+    GetReadRouteByRegex(std::string_view regex);
 
     tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode> GetReadRoute(
         const P2PGetReadRouteRequest& req);

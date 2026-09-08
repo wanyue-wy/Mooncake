@@ -194,14 +194,15 @@ auto P2PMasterService::BatchQueryIp(const std::vector<UUID>& client_ids)
     return results;
 }
 
-auto P2PMasterService::GetReadRouteByRegex(const std::string& regex_pattern)
+auto P2PMasterService::GetReadRouteByRegex(std::string_view regex_pattern)
     -> tl::expected<
         std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
         ErrorCode> {
     std::regex pattern;
 
     try {
-        pattern = std::regex(regex_pattern, std::regex::ECMAScript);
+        pattern =
+            std::regex(std::string(regex_pattern), std::regex::ECMAScript);
     } catch (const std::regex_error& e) {
         LOG(ERROR) << "Invalid regex pattern: " << regex_pattern
                    << ", error: " << e.what();
@@ -912,8 +913,9 @@ auto P2PMasterService::BatchSyncRoutes(
             if (!oplog_enabled) {
                 return;
             }
-            const auto error = RecordOplog(OpType_ADD_REPLICA, operation.key,
-                                           publish_payloads[index]);
+            const auto error =
+                RecordOplog(OpType_ADD_REPLICA, std::string(operation.key),
+                            publish_payloads[index]);
             if (error != ErrorCode::OK) {
                 LOG(ERROR)
                     << "BatchSyncRoutes: failed to record publish oplog"
@@ -940,9 +942,10 @@ auto P2PMasterService::BatchSyncRoutes(
             if (!oplog_enabled) {
                 return ErrorCode::OK;
             }
-            const auto error = RecordOplog(OpType_REMOVE_REPLICA,
-                                           operation.key,
-                                           withdraw_payloads[index]);
+            const auto error =
+                RecordOplog(OpType_REMOVE_REPLICA,
+                            std::string(operation.key),
+                            withdraw_payloads[index]);
             if (error != ErrorCode::OK) {
                 LOG(ERROR)
                     << "BatchSyncRoutes: failed to record withdraw oplog"

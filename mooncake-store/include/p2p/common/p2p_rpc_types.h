@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "p2p/client/heartbeat_type.h"
@@ -9,6 +10,9 @@
 #include <ylt/reflection/user_reflect_macro.hpp>
 
 namespace mooncake {
+
+// Request-side string views reference the caller or coro_rpc request buffer.
+// RPC handlers must consume them synchronously and must not retain them.
 
 /**
  * @brief Registration data sent by a P2P client to the P2P master.
@@ -47,13 +51,13 @@ struct P2PUnmountSegmentRequest {
 YLT_REFL(P2PUnmountSegmentRequest, client_id, segment_id);
 
 struct P2PGetReadRouteRequest {
-    std::string key;
+    std::string_view key;
     P2PReadRouteConfig config;
 };
 YLT_REFL(P2PGetReadRouteRequest, key, config);
 
 struct P2PBatchGetReadRouteRequest {
-    std::vector<std::string> keys;
+    std::vector<std::string_view> keys;
     P2PReadRouteConfig config;
 };
 YLT_REFL(P2PBatchGetReadRouteRequest, keys, config);
@@ -129,7 +133,7 @@ inline std::ostream& operator<<(std::ostream& output,
 }
 
 struct P2PGetWriteRouteRequest {
-    std::string key;
+    std::string_view key;
     UUID client_id;
     uint64_t object_size{0};
     P2PWriteRouteConfig config;
@@ -148,7 +152,7 @@ YLT_REFL(P2PWriteCandidate, client_id, ip_address, rpc_port, available_capacity,
 
 struct P2PBatchGetWriteRouteRequest {
     UUID client_id;
-    std::vector<std::string> keys;
+    std::vector<std::string_view> keys;
     std::vector<uint64_t> object_sizes;
     P2PWriteRouteConfig config;
 };
@@ -161,7 +165,7 @@ struct P2PBatchGetWriteRouteResponse {
 YLT_REFL(P2PBatchGetWriteRouteResponse, responses, error_codes);
 
 struct P2PPublishRouteRequest {
-    std::string key;
+    std::string_view key;
     uint64_t object_size{0};
     UUID client_id;
     UUID segment_id;
@@ -169,14 +173,14 @@ struct P2PPublishRouteRequest {
 YLT_REFL(P2PPublishRouteRequest, key, object_size, client_id, segment_id);
 
 struct P2PWithdrawRouteRequest {
-    std::string key;
+    std::string_view key;
     UUID client_id;
     UUID segment_id;
 };
 YLT_REFL(P2PWithdrawRouteRequest, key, client_id, segment_id);
 
 struct P2PBatchWithdrawRouteRequest {
-    std::string key;
+    std::string_view key;
     UUID client_id;
     std::vector<UUID> segment_ids;
 };

@@ -222,7 +222,7 @@ P2PMasterClient::GetReadRoute(
     timer.LogRequest("object_key=", key);
     auto result = invoke_rpc<&P2PMasterRpcService::GetReadRoute,
                              std::vector<P2PRouteDescriptor>>(
-        P2PGetReadRouteRequest{.key = std::string(key), .config = config});
+        P2PGetReadRouteRequest{.key = key, .config = config});
     timer.LogResponseExpected(result);
     return result;
 }
@@ -233,7 +233,7 @@ P2PMasterClient::AsyncGetReadRoute(
     std::string_view key, const P2PReadRouteConfig& config) {
     co_return co_await invoke_rpc_async<
         &P2PMasterRpcService::GetReadRoute, std::vector<P2PRouteDescriptor>>(
-        P2PGetReadRouteRequest{.key = std::string(key), .config = config});
+        P2PGetReadRouteRequest{.key = key, .config = config});
 }
 
 std::vector<tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>>
@@ -284,7 +284,7 @@ P2PMasterClient::BatchGetReadRoute(
 tl::expected<
     std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
     ErrorCode>
-P2PMasterClient::GetReadRouteByRegex(const std::string& regex) {
+P2PMasterClient::GetReadRouteByRegex(std::string_view regex) {
     ScopedVLogTimer timer(1, "P2PMasterClient::GetReadRouteByRegex");
     timer.LogRequest("Regex=", regex);
     auto result = invoke_rpc<

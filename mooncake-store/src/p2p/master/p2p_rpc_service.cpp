@@ -214,7 +214,7 @@ std::vector<tl::expected<bool, ErrorCode>> P2PMasterRpcService::BatchExistKey(
 tl::expected<
     std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
     ErrorCode>
-P2PMasterRpcService::GetReadRouteByRegex(const std::string& regex) {
+P2PMasterRpcService::GetReadRouteByRegex(std::string_view regex) {
     return execute_rpc(
         "GetReadRouteByRegex",
         [&] { return master_service_.GetReadRouteByRegex(regex); },

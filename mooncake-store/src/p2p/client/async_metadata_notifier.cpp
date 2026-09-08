@@ -355,13 +355,13 @@ void AsyncMetadataNotifier::SendBatch(std::vector<PendingOp>& batch,
         auto& op = batch[i];
         if (op.type == PendingOp::ADD) {
             req.publish_operations.push_back(P2PPublishRouteOperation{
-                .key = std::move(op.key),
+                .key = op.key,
                 .object_size = op.size,
                 .segment_id = op.segment_id,
             });
         } else {
             req.withdraw_operations.push_back(P2PWithdrawRouteOperation{
-                .key = std::move(op.key),
+                .key = op.key,
                 .segment_id = op.segment_id,
             });
         }

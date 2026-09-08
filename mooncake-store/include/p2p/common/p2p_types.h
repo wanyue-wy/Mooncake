@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <boost/functional/hash.hpp>
@@ -168,14 +169,14 @@ struct P2PRouteEntry {
 YLT_REFL(P2PRouteEntry, object_size, locations);
 
 struct P2PPublishRouteOperation {
-    std::string key;
+    std::string_view key;
     uint64_t object_size{0};
     UUID segment_id{0, 0};
 };
 YLT_REFL(P2PPublishRouteOperation, key, object_size, segment_id);
 
 struct P2PWithdrawRouteOperation {
-    std::string key;
+    std::string_view key;
     UUID segment_id{0, 0};
 };
 YLT_REFL(P2PWithdrawRouteOperation, key, segment_id);
