@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "p2p/master/p2p_route_table.h"
@@ -82,19 +81,17 @@ TEST(P2PRouteTableTest, CountsUniqueClientsForRouteLimit) {
     EXPECT_EQ(second_client.error(), ErrorCode::REPLICA_NUM_EXCEEDED);
 }
 
-TEST(P2PRouteTableTest, PrepareWithdrawKeepsRouteUntilCommit) {
+TEST(P2PRouteTableTest, WithdrawPreconditionFailureKeepsRoute) {
     P2PRouteTable table;
     const UUID segment_id{11, 11};
     const auto location = Location(kClientA, segment_id);
     ASSERT_TRUE(table.Publish("key", 1024, location).has_value());
 
-    auto handle = table.PrepareWithdraw("key", location);
-    ASSERT_TRUE(handle.has_value());
+    auto result = table.Withdraw(
+        "key", location, [] { return ErrorCode::INTERNAL_ERROR; });
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), ErrorCode::INTERNAL_ERROR);
     EXPECT_TRUE(table.RouteExists("key"));
-
-    auto result = table.CommitWithdraw(std::move(*handle));
-    EXPECT_TRUE(result.removed_key);
-    EXPECT_FALSE(table.RouteExists("key"));
 }
 
 TEST(P2PRouteTableTest, CleanupUsesClientAndSegmentIdentity) {

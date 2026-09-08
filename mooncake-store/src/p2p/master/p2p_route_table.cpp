@@ -108,47 +108,9 @@ void P2PRouteTable::RemoveAllReverseIndexes(
     }
 }
 
-auto P2PRouteTable::PrepareWithdraw(
-    std::string_view key, const P2PRouteLocation& location)
-    -> tl::expected<WithdrawHandle, ErrorCode> {
-    auto route_it = routes_.find(key);
-    if (route_it == routes_.end()) {
-        LOG(WARNING) << "Withdraw route rejected: key not found"
-                     << ", key=" << key << ", client_id=" << location.client_id
-                     << ", segment_id=" << location.segment_id;
-        return tl::make_unexpected(ErrorCode::OBJECT_NOT_FOUND);
-    }
-
-    auto& locations = route_it->second.locations;
-    auto location_it = std::find(locations.begin(), locations.end(), location);
-    if (location_it == locations.end()) {
-        LOG(WARNING) << "Withdraw route rejected: location not found"
-                     << ", key=" << key << ", client_id=" << location.client_id
-                     << ", segment_id=" << location.segment_id;
-        return tl::make_unexpected(ErrorCode::REPLICA_NOT_FOUND);
-    }
-    return WithdrawHandle(route_it, location_it);
-}
-
-P2PRouteTable::MutationResult P2PRouteTable::CommitWithdraw(
-    WithdrawHandle handle) {
-    auto& locations = handle.route_->second.locations;
-    RemoveReverseIndex(handle.route_->first, *handle.location_);
-    locations.erase(handle.location_);
-    if (locations.empty()) {
-        routes_.erase(handle.route_);
-        return MutationResult{.removed_key = true};
-    }
-    return MutationResult{};
-}
-
 auto P2PRouteTable::Withdraw(std::string_view key,
                              const P2PRouteLocation& location) -> Mutation {
-    auto handle = PrepareWithdraw(key, location);
-    if (!handle.has_value()) {
-        return tl::make_unexpected(handle.error());
-    }
-    return CommitWithdraw(std::move(*handle));
+    return Withdraw(key, location, [] { return ErrorCode::OK; });
 }
 
 bool P2PRouteTable::RouteExists(std::string_view key) const {

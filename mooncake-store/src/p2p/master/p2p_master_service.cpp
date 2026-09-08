@@ -804,30 +804,29 @@ auto P2PMasterService::ApplyWithdrawLocked(
     const UUID& segment_id) -> tl::expected<void, ErrorCode> {
     const P2PRouteLocation location{.client_id = client_id,
                                     .segment_id = segment_id};
-    auto handle = table.PrepareWithdraw(key, location);
-    if (!handle.has_value()) {
-        return tl::make_unexpected(handle.error());
-    }
-
-    if (GetOpLogManager() != nullptr) {
+    auto mutation = table.Withdraw(key, location, [&] {
+        if (GetOpLogManager() == nullptr) {
+            return ErrorCode::OK;
+        }
         RemoveReplicaPayload payload;
         payload.object_key = std::string(key);
         payload.client_id = client_id;
         payload.segment_id = segment_id;
-        const auto record_error =
+        const auto error =
             RecordOplog(OpType_REMOVE_REPLICA, payload.object_key,
                         SerializeP2PPayload(payload));
-        if (record_error != ErrorCode::OK) {
+        if (error != ErrorCode::OK) {
             LOG(ERROR) << "RemoveReplica(P2P): failed to record oplog"
                        << ", client_id=" << client_id
                        << ", segment_id=" << segment_id
-                       << ", error=" << toString(record_error);
-            return tl::make_unexpected(record_error);
+                       << ", error=" << toString(error);
         }
+        return error;
+    });
+    if (!mutation.has_value()) {
+        return tl::make_unexpected(mutation.error());
     }
-
-    auto mutation = table.CommitWithdraw(std::move(*handle));
-    if (mutation.removed_key) {
+    if (mutation->removed_key) {
         P2PMasterMetricManager::instance().dec_key_count(1);
     }
     return {};

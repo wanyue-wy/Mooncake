@@ -75,14 +75,11 @@ class P2PMasterService {
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>;
 
-    auto GetReadRouteByRegex(std::string_view regex_pattern)
-        -> tl::expected<
-            std::unordered_map<std::string,
-                               std::vector<P2PRouteDescriptor>>,
-            ErrorCode>;
+    auto GetReadRouteByRegex(std::string_view regex_pattern) -> tl::expected<
+        std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
+        ErrorCode>;
     auto GetReadRoute(std::string_view key,
-                        const P2PReadRouteConfig& config =
-                            P2PReadRouteConfig())
+                      const P2PReadRouteConfig& config = P2PReadRouteConfig())
         -> tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>;
 
     auto Remove(std::string_view key, bool force = false)
@@ -151,17 +148,9 @@ class P2PMasterService {
    private:
     using OwnerClientSet = std::unordered_set<UUID, boost::hash<UUID>>;
 
-    static constexpr size_t kRouteShardCount = 1024;
-
-    struct RouteShard {
-        mutable SharedMutex mutex;
-        P2PRouteTable table GUARDED_BY(mutex);
-    };
-
     void InitializeClientManager();
     void OnSegmentRemoved(const P2PRouteLocation& location);
-    static OwnerClientSet CollectRouteOwnerClients(
-        const P2PRouteEntry& route);
+    static OwnerClientSet CollectRouteOwnerClients(const P2PRouteEntry& route);
 
     auto BuildRouteDescriptor(const P2PRouteLocation& location,
                               uint64_t object_size) const
@@ -169,13 +158,6 @@ class P2PMasterService {
 
     std::vector<P2PRouteDescriptor> FilterRoutes(
         const P2PReadRouteConfig& config, const P2PRouteEntry& route) const;
-
-    size_t GetRouteShardIndex(std::string_view key) const {
-        return std::hash<std::string_view>{}(key) % kRouteShardCount;
-    }
-    std::optional<P2PRouteEntry> GetRouteSnapshot(
-        std::string_view key) const;
-    std::vector<std::string> ListRouteKeys() const;
 
     auto InnerAddReplica(std::string_view key, const UUID& client_id,
                          const UUID& segment_id, size_t size,
@@ -194,6 +176,21 @@ class P2PMasterService {
                              const UUID& client_id, const UUID& segment_id)
         -> tl::expected<void, ErrorCode> NO_THREAD_SAFETY_ANALYSIS;
 
+   private:
+    static constexpr size_t kRouteShardCount = 1024;
+
+    struct RouteShard {
+        mutable SharedMutex mutex;
+        P2PRouteTable table GUARDED_BY(mutex);
+    };
+
+    size_t GetRouteShardIndex(std::string_view key) const {
+        return std::hash<std::string_view>{}(key) % kRouteShardCount;
+    }
+    std::optional<P2PRouteEntry> GetRouteSnapshot(std::string_view key) const;
+    std::vector<std::string> ListRouteKeys() const;
+
+   private:
     std::array<RouteShard, kRouteShardCount> route_shards_;
     const uint64_t max_client_per_key_;
     bool enable_async_oplog_write_{false};
