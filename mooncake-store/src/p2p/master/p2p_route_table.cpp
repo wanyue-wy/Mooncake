@@ -110,7 +110,48 @@ void P2PRouteTable::RemoveAllReverseIndexes(
 
 auto P2PRouteTable::Withdraw(std::string_view key,
                              const P2PRouteLocation& location) -> Mutation {
-    return Withdraw(key, location, [] { return ErrorCode::OK; });
+    return Withdraw(key, location, PreWithdraw{});
+}
+
+auto P2PRouteTable::Withdraw(std::string_view key,
+                             const P2PRouteLocation& location,
+                             const PreWithdraw& pre_withdraw) -> Mutation {
+    auto route_it = routes_.find(key);
+    if (route_it == routes_.end()) {
+        LOG(WARNING) << "Withdraw route rejected: key not found"
+                     << ", key=" << key << ", client_id=" << location.client_id
+                     << ", segment_id=" << location.segment_id;
+        return tl::make_unexpected(ErrorCode::OBJECT_NOT_FOUND);
+    }
+
+    auto& locations = route_it->second.locations;
+    auto location_it = std::find(locations.begin(), locations.end(), location);
+    if (location_it == locations.end()) {
+        LOG(WARNING) << "Withdraw route rejected: location not found"
+                     << ", key=" << key << ", client_id=" << location.client_id
+                     << ", segment_id=" << location.segment_id;
+        return tl::make_unexpected(ErrorCode::REPLICA_NOT_FOUND);
+    }
+
+    if (pre_withdraw) {
+        const auto error = pre_withdraw();
+        if (error != ErrorCode::OK) {
+            LOG(ERROR) << "Withdraw route rejected by pre-mutation hook"
+                       << ", key=" << key
+                       << ", client_id=" << location.client_id
+                       << ", segment_id=" << location.segment_id
+                       << ", error=" << toString(error);
+            return tl::make_unexpected(error);
+        }
+    }
+
+    RemoveReverseIndex(route_it->first, location);
+    locations.erase(location_it);
+    if (locations.empty()) {
+        routes_.erase(route_it);
+        return MutationResult{.removed_key = true};
+    }
+    return MutationResult{};
 }
 
 bool P2PRouteTable::RouteExists(std::string_view key) const {

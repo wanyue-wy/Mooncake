@@ -94,6 +94,30 @@ TEST(P2PRouteTableTest, WithdrawPreconditionFailureKeepsRoute) {
     EXPECT_TRUE(table.RouteExists("key"));
 }
 
+TEST(P2PRouteTableTest, WithdrawSkipsPreconditionForMissingTarget) {
+    P2PRouteTable table;
+    const auto location = Location(kClientA, UUID{11, 11});
+    const auto other_location = Location(kClientA, UUID{12, 12});
+    ASSERT_TRUE(table.Publish("key", 1024, location).has_value());
+
+    bool precondition_called = false;
+    const auto precondition = [&] {
+        precondition_called = true;
+        return ErrorCode::OK;
+    };
+    auto missing_key = table.Withdraw("missing", location, precondition);
+    ASSERT_FALSE(missing_key.has_value());
+    EXPECT_EQ(missing_key.error(), ErrorCode::OBJECT_NOT_FOUND);
+    EXPECT_FALSE(precondition_called);
+
+    auto missing_location =
+        table.Withdraw("key", other_location, precondition);
+    ASSERT_FALSE(missing_location.has_value());
+    EXPECT_EQ(missing_location.error(), ErrorCode::REPLICA_NOT_FOUND);
+    EXPECT_FALSE(precondition_called);
+    EXPECT_TRUE(table.RouteExists("key"));
+}
+
 TEST(P2PRouteTableTest, CleanupUsesClientAndSegmentIdentity) {
     P2PRouteTable table;
     const auto location_a = Location(kClientA, kSharedSegment);
