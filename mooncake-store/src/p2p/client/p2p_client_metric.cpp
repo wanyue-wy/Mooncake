@@ -17,8 +17,8 @@ namespace mooncake {
 
 namespace {
 
-using p2p::client_metric::FormatLatencySummary;
-using p2p::client_metric::FormatLatencySummaryFromBuckets;
+using p2p::metric_util::FormatLatencySummary;
+using p2p::metric_util::FormatLatencySummaryFromBuckets;
 
 DataMetricSnapshot SnapshotDataMetric(DataMetric& m) {
     DataMetricSnapshot s;
@@ -35,22 +35,45 @@ DataMetricSnapshot SnapshotDataMetric(DataMetric& m) {
 
 }  // namespace
 
-std::string P2PTransferMetric::summary_metrics() {
-    std::stringstream ss;
-    ss << "=== Transfer Metrics Summary ===\n";
+P2PTransferMetric::P2PTransferMetric(std::map<std::string, std::string> labels)
+    : total_read_bytes("mooncake_transfer_read_bytes", "Total bytes read",
+                       labels),
+      total_write_bytes("mooncake_transfer_write_bytes", "Total bytes written",
+                        labels),
+      batch_put_latency_us("mooncake_transfer_batch_put_latency",
+                           "Batch Put transfer latency (us)",
+                           p2p::metric_util::LatencyBuckets(), labels),
+      batch_get_latency_us("mooncake_transfer_batch_get_latency",
+                           "Batch Get transfer latency (us)",
+                           p2p::metric_util::LatencyBuckets(), labels),
+      get_latency_us("mooncake_transfer_get_latency",
+                     "Get transfer latency (us)",
+                     p2p::metric_util::LatencyBuckets(), labels),
+      put_latency_us("mooncake_transfer_put_latency",
+                     "Put transfer latency (us)",
+                     p2p::metric_util::LatencyBuckets(), labels) {}
 
-    auto read_bytes = total_read_bytes.value();
-    auto write_bytes = total_write_bytes.value();
-    ss << "Total Read: " << byte_size_to_string(read_bytes) << "\n";
-    ss << "Total Write: " << byte_size_to_string(write_bytes) << "\n";
+void P2PTransferMetric::serialize(std::string& str) {
+    total_read_bytes.serialize(str);
+    total_write_bytes.serialize(str);
+    batch_put_latency_us.serialize(str);
+    batch_get_latency_us.serialize(str);
+    get_latency_us.serialize(str);
+    put_latency_us.serialize(str);
+}
 
-    ss << "\n=== Latency Summary (microseconds) ===\n";
-    ss << "Get: " << FormatLatencySummary(get_latency_us) << "\n";
-    ss << "Put: " << FormatLatencySummary(put_latency_us) << "\n";
-    ss << "Batch Get: " << FormatLatencySummary(batch_get_latency_us) << "\n";
-    ss << "Batch Put: " << FormatLatencySummary(batch_put_latency_us) << "\n";
+P2PMasterClientMetric::P2PMasterClientMetric(
+    std::map<std::string, std::string> labels)
+    : rpc_count("mooncake_client_rpc_count",
+                "Total number of RPC calls made by the client", labels,
+                rpc_names),
+      rpc_latency("mooncake_client_rpc_latency",
+                  "Latency of RPC calls made by the client (in us)",
+                  p2p::metric_util::LatencyBuckets(), labels, rpc_names) {}
 
-    return ss.str();
+void P2PMasterClientMetric::serialize(std::string& str) {
+    rpc_count.serialize(str);
+    rpc_latency.serialize(str);
 }
 
 std::string P2PMasterClientMetric::summary_metrics() {
@@ -113,10 +136,10 @@ DataMetric::DataMetric(const std::string& prefix,
       get_bytes(prefix + "_get_bytes_total", "Total bytes read by Get", labels),
       get_latency_success(prefix + "_get_latency_success_us",
                           "Get latency for successful requests (us)",
-                          p2p::client_metric::kLatencyBucket, labels),
+                          p2p::metric_util::LatencyBuckets(), labels),
       get_latency_failure(prefix + "_get_latency_failure_us",
                           "Get latency for failed requests (us)",
-                          p2p::client_metric::kLatencyBucket, labels),
+                          p2p::metric_util::LatencyBuckets(), labels),
       put_requests(prefix + "_put_requests_total",
                    "Total number of Put requests", labels),
       put_failures(prefix + "_put_failures_total",
@@ -125,10 +148,10 @@ DataMetric::DataMetric(const std::string& prefix,
                 labels),
       put_latency_success(prefix + "_put_latency_success_us",
                           "Put latency for successful requests (us)",
-                          p2p::client_metric::kLatencyBucket, labels),
+                          p2p::metric_util::LatencyBuckets(), labels),
       put_latency_failure(prefix + "_put_latency_failure_us",
                           "Put latency for failed requests (us)",
-                          p2p::client_metric::kLatencyBucket, labels) {}
+                          p2p::metric_util::LatencyBuckets(), labels) {}
 
 void DataMetric::serialize(std::string& str) {
     get_requests.serialize(str);
@@ -254,11 +277,11 @@ RollbackMetric::RollbackMetric(const std::string& prefix,
       write_revoke_latency_success(
           prefix + "_write_revoke_latency_success_us",
           "WriteRevoke rollback RPC latency for successful requests (us)",
-          p2p::client_metric::kLatencyBucket, labels),
+          p2p::metric_util::LatencyBuckets(), labels),
       write_revoke_latency_failure(
           prefix + "_write_revoke_latency_failure_us",
           "WriteRevoke rollback RPC latency for failed requests (us)",
-          p2p::client_metric::kLatencyBucket, labels),
+          p2p::metric_util::LatencyBuckets(), labels),
       unpin_key_requests(prefix + "_unpin_key_requests_total",
                          "Total outgoing UnPinKey rollback RPCs", labels),
       unpin_key_failures(prefix + "_unpin_key_failures_total",
@@ -266,11 +289,11 @@ RollbackMetric::RollbackMetric(const std::string& prefix,
       unpin_key_latency_success(prefix + "_unpin_key_latency_success_us",
                                 "UnPinKey rollback RPC latency for successful "
                                 "requests (us)",
-                                p2p::client_metric::kLatencyBucket, labels),
+                                p2p::metric_util::LatencyBuckets(), labels),
       unpin_key_latency_failure(prefix + "_unpin_key_latency_failure_us",
                                 "UnPinKey rollback RPC latency for failed "
                                 "requests (us)",
-                                p2p::client_metric::kLatencyBucket, labels) {}
+                                p2p::metric_util::LatencyBuckets(), labels) {}
 
 void RollbackMetric::serialize(std::string& str) {
     write_revoke_requests.serialize(str);
@@ -305,10 +328,10 @@ RpcHandlerMetric::RpcHandlerMetric(
                "Total failed " + rpc_name + " RPC requests", labels),
       latency_success(metric_prefix + "_" + rpc_name + "_latency_success_us",
                       rpc_name + " RPC latency for successful requests (us)",
-                      p2p::client_metric::kLatencyBucket, labels),
+                      p2p::metric_util::LatencyBuckets(), labels),
       latency_failure(metric_prefix + "_" + rpc_name + "_latency_failure_us",
                       rpc_name + " RPC latency for failed requests (us)",
-                      p2p::client_metric::kLatencyBucket, labels) {}
+                      p2p::metric_util::LatencyBuckets(), labels) {}
 
 void RpcHandlerMetric::serialize(std::string& str) {
     requests.serialize(str);
@@ -734,6 +757,11 @@ std::vector<int64_t> KeyRetentionMetric::BuildLiveAgeBuckets(int64_t t) const {
 // ============================================================================
 // P2PClientMetric
 // ============================================================================
+
+std::unique_ptr<P2PClientMetric> P2PClientMetric::Create(
+    const std::map<std::string, std::string>& labels) {
+    return std::make_unique<P2PClientMetric>(0, merge_labels(labels));
+}
 
 P2PClientMetric::P2PClientMetric(
     uint64_t interval_seconds, const std::map<std::string, std::string>& labels)

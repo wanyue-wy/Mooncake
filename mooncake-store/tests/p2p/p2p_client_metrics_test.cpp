@@ -179,13 +179,12 @@ TEST_F(P2PClientMetricsTest, P2PMasterRpcSummaryPreservesAttemptCounts) {
 }
 
 TEST_F(P2PClientMetricsTest, P2PLatencySummaryPreservesSingleSample) {
-    ylt::metric::histogram_t hist(
-        "test_p2p_single_sample_hist", "test",
-        p2p::client_metric::kLatencyBucket,
-        std::map<std::string, std::string>{});
-    EXPECT_EQ(p2p::client_metric::FormatLatencySummary(hist), "No data");
+    ylt::metric::histogram_t hist("test_p2p_single_sample_hist", "test",
+                                  p2p::metric_util::LatencyBuckets(),
+                                  std::map<std::string, std::string>{});
+    EXPECT_EQ(p2p::metric_util::FormatLatencySummary(hist), "No data");
     hist.observe(5000);
-    EXPECT_EQ(p2p::client_metric::FormatLatencySummary(hist),
+    EXPECT_EQ(p2p::metric_util::FormatLatencySummary(hist),
               "count=1, p95<5000μs, max<5000μs");
 }
 

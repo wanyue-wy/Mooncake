@@ -3,7 +3,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <memory>
+#include <ostream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -12,10 +14,36 @@
 #include <ylt/metric/gauge.hpp>
 
 #include "p2p/client/heartbeat_type.h"
-#include "p2p/client/p2p_client_metric_types.h"
+#include "hybrid_metric.h"
 #include "types.h"
 
 namespace mooncake {
+
+struct P2PTransferMetric {
+    P2PTransferMetric(std::map<std::string, std::string> labels = {});
+
+    ylt::metric::counter_t total_read_bytes;
+    ylt::metric::counter_t total_write_bytes;
+    ylt::metric::histogram_t batch_put_latency_us;
+    ylt::metric::histogram_t batch_get_latency_us;
+    ylt::metric::histogram_t get_latency_us;
+    ylt::metric::histogram_t put_latency_us;
+
+    void serialize(std::string& str);
+};
+
+struct P2PMasterClientMetric {
+    std::array<std::string, 1> rpc_names = {"rpc_name"};
+
+    P2PMasterClientMetric(std::map<std::string, std::string> labels = {});
+
+    ylt::metric::hybrid_counter_1t rpc_count;
+    ylt::metric::hybrid_histogram_1t rpc_latency;
+
+    void serialize(std::string& str);
+
+    std::string summary_metrics();
+};
 
 class CacheTier;  // Defined in tiered_cache/tiers/cache_tier.h
 
@@ -275,10 +303,7 @@ struct P2PClientMetric {
 
    public:
     static std::unique_ptr<P2PClientMetric> Create(
-        const std::map<std::string, std::string>& labels = {}) {
-        return std::make_unique<P2PClientMetric>(
-            0, p2p::client_metric::MergeLabels(labels));
-    }
+        const std::map<std::string, std::string>& labels = {});
 
     explicit P2PClientMetric(
         uint64_t interval_seconds = 0,
