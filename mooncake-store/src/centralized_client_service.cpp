@@ -20,6 +20,7 @@
 #include "config.h"
 #include "types.h"
 #include "file_storage.h"
+#include "utils.h"
 
 namespace mooncake {
 
@@ -62,8 +63,9 @@ CentralizedClientService::CentralizedClientService(
     const std::map<std::string, std::string>& labels,
     bool enable_metric_collection)
     : ClientService(metadata_connstring, http_port, enable_http_server, labels),
-      metrics_(enable_metric_collection ? ClientMetric::Create(labels)
-                                        : nullptr),
+      metrics_(enable_metric_collection
+                   ? ClientMetric::Create(merge_labels(labels))
+                   : nullptr),
       protocol_(protocol),
       master_client_(client_id_,
                      metrics_ ? &metrics_->master_client_metric : nullptr),
@@ -378,10 +380,6 @@ ErrorCode CentralizedClientService::Init(
         LOG(ERROR) << "runtime config validation failed during startup, "
                    << "init aborted";
         return ErrorCode::INVALID_PARAMS;
-    }
-
-    if (metrics_) {
-        metrics_->StartMetricReporting(config.metric_report_interval_seconds);
     }
 
     return ErrorCode::OK;

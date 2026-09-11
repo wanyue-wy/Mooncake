@@ -9,73 +9,53 @@
 
 namespace mooncake {
 
-std::string TransferMetric::summary_metrics() {
-    std::stringstream ss;
-    ss << "=== Transfer Metrics Summary ===\n";
+namespace {
 
-    // Bytes transferred
-    auto read_bytes = total_read_bytes.value();
-    auto write_bytes = total_write_bytes.value();
-    ss << "Total Read: " << byte_size_to_string(read_bytes) << "\n";
-    ss << "Total Write: " << byte_size_to_string(write_bytes) << "\n";
-
-    // Latency summaries
-    ss << "\n=== Latency Summary (microseconds) ===\n";
-    ss << "Get: " << format_latency_summary(get_latency_us) << "\n";
-    ss << "Put: " << format_latency_summary(put_latency_us) << "\n";
-    ss << "Batch Get: " << format_latency_summary(batch_get_latency_us) << "\n";
-    ss << "Batch Put: " << format_latency_summary(batch_put_latency_us) << "\n";
-
-    return ss.str();
+std::string toLower(const std::string& str) {
+    std::string result = str;
+    std::transform(result.begin(), result.end(), result.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return result;
 }
 
-// TODO(C1): Restore the a00f757 successful-call count summary on the
-// centralized side after P2P metric ownership is split.
-std::string MasterClientMetric::summary_metrics() {
-    std::stringstream ss;
-    ss << "=== RPC Metrics Summary ===\n";
+bool parseMetricsEnabled() {
+    const char* metric_env = std::getenv("MC_STORE_CLIENT_METRIC");
+    if (!metric_env) {
+        return true;
+    }
+    std::string value = toLower(metric_env);
+    return (value == "1" || value == "true" || value == "yes" ||
+            value == "on" || value == "enable");
+}
 
-    if (rpc_count.label_value_count() == 0) {
-        ss << "No RPC calls recorded\n";
-        return ss.str();
+uint64_t parseMetricsInterval() {
+    const char* interval_env = std::getenv("MC_STORE_CLIENT_METRIC_INTERVAL");
+    if (!interval_env) {
+        // Default to disabled
+        return 0;
     }
 
-    // Dynamically iterate all recorded RPC names from rpc_count.
-    // rpc_latency only observes successful calls, so its bucket counts
-    // provide both the success count and the success latency distribution.
-    auto count_map = rpc_count.copy();
-    auto bucket_counts = rpc_latency.get_bucket_counts();
-    bool found_any = false;
-
-    for (auto& entry : count_map) {
-        const auto& rpc_name = entry->label[0];
-        std::array<std::string, 1> label_array = {rpc_name};
-
-        int64_t total_calls = entry->value.load(std::memory_order::relaxed);
-        if (total_calls == 0) continue;
-        found_any = true;
-
-        auto success_summary = format_latency_summary_from_buckets(
-            bucket_counts.size(),
-            [&](size_t i) { return bucket_counts[i]->value(label_array); },
-            "success");
-        if (success_summary == "No data") {
-            ss << rpc_name << ": total=" << total_calls << ", success=0\n";
+    try {
+        uint64_t interval = std::stoull(interval_env);
+        if (interval == 0) {
+            LOG(INFO) << "Client metrics reporting disabled (interval=0) via "
+                         "MC_STORE_CLIENT_METRIC_INTERVAL";
         } else {
-            ss << rpc_name << ": total=" << total_calls << ", "
-               << success_summary << "\n";
+            LOG(INFO) << "Client metrics interval set to " << interval
+                      << "s via MC_STORE_CLIENT_METRIC_INTERVAL";
         }
+        return interval;
+    } catch (const std::exception& e) {
+        LOG(WARNING) << "Failed to parse MC_STORE_CLIENT_METRIC_INTERVAL: "
+                     << interval_env << ", disabling metrics reporting";
+        return 0;
     }
-
-    if (!found_any) {
-        ss << "No RPC calls recorded\n";
-    }
-
-    return ss.str();
 }
+
+}  // anonymous namespace
 
 ClientMetric::ClientMetric(uint64_t interval_seconds,
-                           const std::map<std::string, std::string>& labels)
+                           std::map<std::string, std::string> labels)
     : transfer_metric(labels),
       master_client_metric(labels),
       should_stop_metrics_thread_(false),
@@ -86,6 +66,21 @@ ClientMetric::ClientMetric(uint64_t interval_seconds,
 }
 
 ClientMetric::~ClientMetric() { StopMetricsReportingThread(); }
+
+std::unique_ptr<ClientMetric> ClientMetric::Create(
+    std::map<std::string, std::string> labels) {
+    if (!parseMetricsEnabled()) {
+        LOG(INFO) << "Client metrics disabled (set MC_STORE_CLIENT_METRIC=0 to "
+                     "disable)";
+        return nullptr;
+    }
+
+    uint64_t interval = parseMetricsInterval();
+
+    LOG(INFO) << "Client metrics enabled (default enabled)";
+
+    return std::make_unique<ClientMetric>(interval, labels);
+}
 
 void ClientMetric::serialize(std::string& str) {
     transfer_metric.serialize(str);
@@ -99,14 +94,6 @@ std::string ClientMetric::summary_metrics() {
     ss << "\n";
     ss << master_client_metric.summary_metrics();
     return ss.str();
-}
-
-void ClientMetric::StartMetricReporting(uint64_t interval_seconds) {
-    StopMetricsReportingThread();
-    metrics_interval_seconds_ = interval_seconds;
-    if (metrics_interval_seconds_ > 0) {
-        StartMetricsReportingThread();
-    }
 }
 
 void ClientMetric::StartMetricsReportingThread() {
