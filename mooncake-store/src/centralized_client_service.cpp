@@ -72,6 +72,28 @@ CentralizedClientService::CentralizedClientService(
         std::make_unique<RuntimeConfigStore>(DeploymentMode::CENTRALIZATION);
 }
 
+tl::expected<std::string, ErrorCode>
+CentralizedClientService::GetSummaryMetrics() {
+    if (!metrics_) {
+        LOG(ERROR) << "Cannot get centralized client metrics summary: metrics "
+                      "disabled";
+        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    return metrics_->summary_metrics();
+}
+
+tl::expected<std::string, ErrorCode>
+CentralizedClientService::SerializeMetrics() {
+    if (!metrics_) {
+        LOG(ERROR) << "Cannot serialize centralized client metrics: metrics "
+                      "disabled";
+        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    std::string str;
+    metrics_->serialize(str);
+    return str;
+}
+
 CentralizedClientService::~CentralizedClientService() {
     Stop();
     Destroy();

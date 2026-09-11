@@ -91,7 +91,7 @@ ClientRpcService::ReadRemoteData(const RemoteReadRequest& request) {
     if (metrics_) {
         metrics_->peer_request_metrics.read_remote_data.requests.inc();
     }
-    Stopwatch sw;
+    p2p::client_metric::Stopwatch sw;
 
     if (!IsValidRequest(request)) {
         timer.LogResponse("error_code=", ErrorCode::INVALID_PARAMS);
@@ -175,7 +175,7 @@ ClientRpcService::WriteRemoteData(const RemoteWriteRequest& request) {
     if (metrics_) {
         metrics_->peer_request_metrics.write_remote_data.requests.inc();
     }
-    Stopwatch sw;
+    p2p::client_metric::Stopwatch sw;
 
     if (!IsValidRequest(request)) {
         timer.LogResponse("error_code=", ErrorCode::INVALID_PARAMS);
@@ -248,7 +248,7 @@ tl::expected<PreWriteResponse, ErrorCode> ClientRpcService::PreWrite(
     if (metrics_) {
         metrics_->peer_request_metrics.prewrite.requests.inc();
     }
-    Stopwatch sw;
+    p2p::client_metric::Stopwatch sw;
 
     if (request.key.empty() || request.size_bytes == 0) {
         LOG(ERROR) << "PreWriteRequest: invalid key or size";
@@ -299,7 +299,7 @@ tl::expected<void, ErrorCode> ClientRpcService::WriteCommit(
     if (metrics_) {
         metrics_->peer_request_metrics.write_commit.requests.inc();
     }
-    Stopwatch sw;
+    p2p::client_metric::Stopwatch sw;
 
     if (request.key.empty() || IsZeroUUID(request.write_operation_id)) {
         LOG(ERROR) << "WriteCommitRequest: invalid key or token";
@@ -350,7 +350,7 @@ tl::expected<void, ErrorCode> ClientRpcService::WriteRevoke(
     if (metrics_) {
         metrics_->peer_request_metrics.write_revoke.requests.inc();
     }
-    Stopwatch sw;
+    p2p::client_metric::Stopwatch sw;
 
     if (request.key.empty() || IsZeroUUID(request.write_operation_id)) {
         LOG(ERROR) << "WriteRevokeRequest: invalid key or token";
@@ -401,7 +401,7 @@ tl::expected<PinKeyResponse, ErrorCode> ClientRpcService::PinKey(
     if (metrics_) {
         metrics_->peer_request_metrics.pin_key.requests.inc();
     }
-    Stopwatch sw;
+    p2p::client_metric::Stopwatch sw;
 
     if (request.key.empty()) {
         LOG(ERROR) << "PinKeyRequest: empty key";
@@ -456,7 +456,7 @@ tl::expected<void, ErrorCode> ClientRpcService::UnPinKey(
     if (metrics_) {
         metrics_->peer_request_metrics.unpin_key.requests.inc();
     }
-    Stopwatch sw;
+    p2p::client_metric::Stopwatch sw;
 
     if (request.key.empty() || IsZeroUUID(request.read_operation_id)) {
         LOG(ERROR) << "UnPinKeyRequest: invalid key or token";
