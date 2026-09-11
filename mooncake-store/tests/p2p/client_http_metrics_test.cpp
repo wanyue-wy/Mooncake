@@ -120,7 +120,8 @@ TEST_F(ClientHttpMetricsTest, HttpEndpointsTest) {
         19003;  // Use a non-standard port to avoid conflicts
 
     // Create ClientMetric instance
-    auto metrics = ClientMetric::Create({{"test_label", "test_value"}});
+    auto metrics = std::make_unique<ClientMetric>(
+        0, std::map<std::string, std::string>{{"test_label", "test_value"}});
     ASSERT_NE(metrics, nullptr);
 
     // Add some test data to metrics
@@ -384,7 +385,8 @@ TEST_F(ClientHttpMetricsTest, CombinedMetricsHttpEndpointsTest) {
     const uint16_t test_port = 19005;
 
     // Create both ClientMetric and P2PClientMetric instances
-    auto metrics = ClientMetric::Create({{"instance", "combined_test"}});
+    auto metrics = std::make_unique<ClientMetric>(
+        0, std::map<std::string, std::string>{{"instance", "combined_test"}});
     ASSERT_NE(metrics, nullptr);
 
     auto p2p_metrics = P2PClientMetric::Create({{"instance", "combined_test"}});
