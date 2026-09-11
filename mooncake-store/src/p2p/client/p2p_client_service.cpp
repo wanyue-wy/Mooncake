@@ -1,4 +1,5 @@
 #include "p2p/client/p2p_client_service.h"
+#include "p2p/util/metric_util.h"
 
 #include <glog/logging.h>
 
@@ -2212,7 +2213,7 @@ async_simple::coro::Lazy<ErrorCode> P2PClientService::RunForwardReadOnRoute(
         UnPinKeyRequest cleanup;
         cleanup.key = req->key;
         cleanup.read_operation_id = read_operation_id;
-        p2p::client_metric::Stopwatch rollback_sw;
+        p2p::metric_util::Stopwatch rollback_sw;
         bool cleanup_ok = false;
         ErrorCode cleanup_error = ErrorCode::OK;
         for (int attempt = 0; attempt < kRevokeRetryMaxCnt; ++attempt) {
@@ -2912,7 +2913,7 @@ P2PClientService::RemoteForwardWriteOp::RunForwardRemotePut(
             WriteRevokeRequest revoke_req;
             revoke_req.key = write_req->key;
             revoke_req.write_operation_id = pre.value().write_operation_id;
-            p2p::client_metric::Stopwatch rollback_sw;
+            p2p::metric_util::Stopwatch rollback_sw;
             tl::expected<void, ErrorCode> revoke_res;
             for (int attempt = 0; attempt < kRevokeRetryMaxCnt; ++attempt) {
                 if (metrics) {
