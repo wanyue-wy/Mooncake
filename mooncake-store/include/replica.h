@@ -145,9 +145,10 @@ struct LocalDiskDescriptor {
     YLT_REFL(LocalDiskDescriptor, client_id, object_size, transport_endpoint);
 };
 
-// TODO(C4; see p2p-split-plan-v2.md): Migrate the public QueryResult and
-// route-cache facade to P2PRouteDescriptor before removing this Descriptor
-// variant. Master and HA metadata already use the P2P route model.
+// TODO(C3.3 / replica isolation; see p2p-split-plan-v3.md): Remove this
+// Descriptor alternative after native P2P queries and route-cache callers use
+// P2PRouteDescriptor. Master/HA already use routes; Python wrapping belongs
+// to I1.
 struct P2PProxyDescriptor {
     UUID client_id;
     UUID segment_id;

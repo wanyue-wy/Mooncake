@@ -34,7 +34,7 @@ constexpr const char* kRedisPrefix = "redis://";
 // success; a missing owner record is already OK (idempotent).
 constexpr int kRevokeRetryMaxCnt = 3;
 
-// TODO(C4 / external interface; see p2p-split-plan-v2.md): Remove this
+// TODO(C3.3 / read configuration; see p2p-split-plan-v3.md): Remove this
 // adapter after P2PClientService read APIs accept P2PReadRouteConfig directly.
 P2PReadRouteConfig ToP2PReadRouteConfig(const ReadRouteConfig& config) {
     P2PReadRouteConfig rpc_config;
@@ -46,8 +46,8 @@ P2PReadRouteConfig ToP2PReadRouteConfig(const ReadRouteConfig& config) {
     return rpc_config;
 }
 
-// TODO(C4 / external interface; see p2p-split-plan-v2.md): Remove this
-// adapter after the public P2P write APIs use P2PWriteRouteConfig directly.
+// TODO(C3.3 / write configuration; see p2p-split-plan-v3.md): Remove this
+// adapter after native P2P write APIs use P2PWriteRouteConfig directly.
 P2PWriteRouteConfig ToP2PWriteRouteConfig(
     const WriteRouteRequestConfig& config) {
     P2PWriteRouteConfig rpc_config;
@@ -63,8 +63,8 @@ P2PWriteRouteConfig ToP2PWriteRouteConfig(
     return rpc_config;
 }
 
-// TODO(C4 / external interface; see p2p-split-plan-v2.md): Delete this
-// conversion after QueryResult stores P2PRouteDescriptor for the P2P path.
+// TODO(C3.3 / query result isolation; see p2p-split-plan-v3.md): Delete this
+// conversion after native P2P query results use P2PRouteDescriptor directly.
 std::vector<Replica::Descriptor> ToFacadeReplicaDescriptors(
     std::vector<P2PRouteDescriptor> routes) {
     std::vector<Replica::Descriptor> replicas;
@@ -638,9 +638,10 @@ ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
                   << ", queue_size=" << config.async_route_queue_size;
     }
 
-    // TODO(C2): Bind atomically, obtain the actual listener port, and publish
-    // it in registration after runtime ownership is split; config port 0 alone
-    // does not fix the current getFreeTcpPort-to-bind race.
+    // TODO(C3.1 / ClientService listener; see p2p-split-plan-v3.md): Bind
+    // atomically and publish the actual port during registration. Reject peer
+    // data requests until ready; port 0 alone does not fix the probe-to-bind
+    // race.
     // 9. Start P2P client RPC service
     client_rpc_service_.emplace(*data_manager_, metrics_);
     client_rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(
@@ -962,8 +963,8 @@ tl::expected<ViewVersionId, ErrorCode> P2PClientService::InnerRegisterClient() {
     req.client_id = client_id_;
     req.segments = CollectTierSegments();
     req.ip_address = local_ip_;
-    // TODO(C2): Publish the bound listener port, not an unreserved probe
-    // result.
+    // TODO(C3.1 / listener publication; see p2p-split-plan-v3.md): Publish
+    // the actual bound listener port instead of an unreserved probe result.
     req.rpc_port = client_rpc_port_;
 
     auto register_result = master_client_.RegisterClient(req);

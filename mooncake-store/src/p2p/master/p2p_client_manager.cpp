@@ -364,7 +364,8 @@ auto P2PClientManager::UnregisterClient(const UUID& client_id)
         client_metas_.erase(it);
     }
 
-    // TODO(C3): Define cleanup completion before reusing a client/segment
+    // TODO(C3.1 / identity cleanup; see p2p-split-plan-v3.md): Review and
+    // define cleanup completion before reusing a client/segment
     // identity; an old removal callback can otherwise erase newly published
     // routes with the same identity, even when same-key values are immutable.
     // The client is out of client_metas_ now. Recycle its segments WITHOUT

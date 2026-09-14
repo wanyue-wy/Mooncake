@@ -123,10 +123,10 @@ struct RealClientConfigBase {
     // Loaded from file path, inline JSON string, or env MC_RUNTIME_CONFIG
     Json::Value runtime_config_json;
 
-    // TODO(C4 / external interface; see p2p-split-plan-v2.md): Define metric
-    // input and environment precedence in the architecture-specific builders.
-    // Shared effective fields must have identical semantics; split fields that
-    // cannot meet that contract out of RealClientConfigBase.
+    // TODO(C2 / native configuration; see p2p-split-plan-v3.md): Remove
+    // RealClientConfigBase and split the native builders. Keep HTTP/runtime
+    // JSON and metric inputs in the P2P configuration; restore A00 centralized
+    // inputs and environment behavior. Python entry migration belongs to I1.
     // Whether to collect client metrics at all.
     // Centralized clients also honor MC_STORE_CLIENT_METRIC.
     bool enable_metric_collection = true;

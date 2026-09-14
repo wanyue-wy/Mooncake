@@ -137,9 +137,9 @@ tl::expected<void, ErrorCode> StorageTier::Init(
         std::string segment_name = "storage_tier_staging_" +
                                    std::to_string(tier_id_.first) + "-" +
                                    std::to_string(tier_id_.second);
-        // TODO(C5): Finalize shared allocator ownership without centralized
-        // metric side effects, then remove the central temporary observer
-        // wiring.
+        // TODO(C4.3 / tier allocator; see p2p-split-plan-v3.md): Use the
+        // independent P2P allocator from C4.1 without centralized metric side
+        // effects. Preserve staging, storage and cleanup behavior.
         staging_allocator_ = std::make_shared<OffsetBufferAllocator>(
             segment_name, reinterpret_cast<uintptr_t>(staging_memory_.get()),
             staging_buffer_capacity_, segment_name, tier_id_);
