@@ -132,7 +132,7 @@ TEST_F(ClientHttpMetricsTest, ConfigWithLabels) {
 
 // Test HTTP server endpoints directly
 // Serializer fixtures construct metrics directly; factory policy is covered
-// separately below. Runtime handler ownership is covered in C2.
+// separately below. Runtime handler ownership is covered in C3.1.
 TEST_F(ClientHttpMetricsTest, HttpEndpointsTest) {
     // Create a simple HTTP server that mimics the metrics server behavior
     const uint16_t test_port =
@@ -234,8 +234,8 @@ TEST_F(ClientHttpMetricsTest, HttpEndpointsTest) {
 }
 
 // Test P2P client metrics HTTP endpoints
-// TODO(C2): Replace copied P2P handlers with production runtime endpoints
-// after runtime ownership is split; retain P2P output coverage.
+// TODO(C3.1 / production HTTP fixture; see p2p-split-plan-v3.md): Replace
+// copied P2P handlers with service-owned endpoints; retain P2P output coverage.
 TEST_F(ClientHttpMetricsTest, P2PClientMetricsHttpEndpointsTest) {
     const uint16_t test_port = 19004;
 

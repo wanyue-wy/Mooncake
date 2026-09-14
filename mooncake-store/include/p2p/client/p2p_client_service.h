@@ -202,15 +202,16 @@ class P2PClientService final : public ClientService {
 
     P2PMasterClient& GetMasterClient() { return master_client_; }
 
-    // TODO(C4 / external interface; see p2p-split-plan-v2.md): Implement the
-    // P2P BatchQueryIp facade after architecture-specific query APIs are split.
+    // TODO(C3.1 / native query API; see p2p-split-plan-v3.md): Implement the
+    // P2P BatchQueryIp API against the retained P2P Master contract while
+    // removing the shared ClientService interface.
     tl::expected<
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>
     BatchQueryIp(const std::vector<UUID>& client_ids) override;
 
-    // TODO(C4 / external interface; see p2p-split-plan-v2.md): Return
-    // P2PRouteDescriptor directly after QueryResult is split by architecture.
+    // TODO(C3.1 / native query result; see p2p-split-plan-v3.md): Return
+    // P2PRouteDescriptor directly when internalizing the query implementation.
     tl::expected<
         std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
         ErrorCode>

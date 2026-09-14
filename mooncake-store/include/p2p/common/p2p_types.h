@@ -49,9 +49,10 @@ YLT_REFL(P2PReadRouteConfigExtra, tag_filters, priority_limit);
  * This is not a master RPC DTO. The centralized baseline API has no
  * read-route config parameter.
  *
- * TODO(C4 / external interface; see p2p-split-plan-v2.md): Rename this to
- * P2PReadRouteConfig and remove it from centralized Query/Get/Batch methods
- * once the public client facade has architecture-specific business APIs.
+ * TODO(C3.3 / read configuration; see p2p-split-plan-v3.md): Remove this
+ * mixed configuration after native P2P APIs use P2PReadRouteConfig and C3.2
+ * restores A00 centralized Query/Get/Batch signatures. Any Python type
+ * compatibility belongs to the I1 binding layer.
  */
 struct ReadRouteConfig {
     static constexpr size_t RETURN_ALL_CANDIDATES = 0;
@@ -68,9 +69,9 @@ YLT_REFL(ReadRouteConfig, max_candidates, p2p_config);
  * @brief Temporary unified-facade P2P write selection config.
  *
  * This is converted to P2PWriteRouteConfig at the master RPC boundary.
- * TODO(C4 / external interface; see p2p-split-plan-v2.md): Move this type out
- * of the shared ClientService WriteConfig after the public client facade has
- * architecture-specific business APIs.
+ * TODO(C3.3 / write configuration; see p2p-split-plan-v3.md): Remove this
+ * transitional type and the shared ClientService WriteConfig after native
+ * P2P APIs use P2PWriteRouteConfig. Keep Python compatibility in I1 bindings.
  */
 struct WriteRouteRequestConfig {
     static constexpr size_t RETURN_ALL_CANDIDATES = 0;

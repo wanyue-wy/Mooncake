@@ -35,8 +35,9 @@ class P2PClientHttpEndpointsTest : public ::testing::Test {
    protected:
     static std::shared_ptr<P2PClientService> CreateP2PClient(
         const std::string& host_name, uint32_t rpc_port, uint16_t http_port) {
-        // TODO(C2): Bind the client listener atomically and publish its actual
-        // port after runtime ownership is split; remove the port-probe race.
+        // TODO(C3.1 / listener fixture; see p2p-split-plan-v3.md): Use the
+        // service's actual bound port after atomic listener initialization;
+        // remove the port-probe race.
         auto config = ClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",

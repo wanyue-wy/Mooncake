@@ -143,8 +143,9 @@ target_link_libraries(mooncake_store
         transfer_engine
 )
 
-# The client aggregate still includes both architectures until C4 splits the
-# public client facade. Master executables use the isolated targets below.
+# V3 C2-C4 separate the native clients; D1 audits aggregate dependencies before
+# the I1 Python binding work (see p2p-split-plan-v3.md). Master executables use
+# the isolated targets below.
 list(APPEND MOONCAKE_STORE_P2P_SOURCES
     ${MOONCAKE_P2P_MASTER_SOURCES}
     p2p/master/p2p_master_client.cpp

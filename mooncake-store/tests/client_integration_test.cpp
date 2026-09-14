@@ -85,9 +85,9 @@ class ClientIntegrationTest : public ::testing::Test {
    protected:
     static std::shared_ptr<CentralizedClientService> CreateClient(
         const std::string& host_name) {
-        // TODO(C4/public API): Replace this shared-facade factory adaptation
-        // with the concrete centralized API; preserve a00f757 scenarios and
-        // assertions.
+        // TODO(C3.2 / A00 client factory; see p2p-split-plan-v3.md): Restore
+        // the baseline Client factory when removing CentralizedClientService;
+        // preserve the original scenarios and assertions.
         auto config = ClientConfigBuilder::build_centralized_real_client(
             host_name, "P2PHANDSHAKE", FLAGS_protocol, std::nullopt,
             master_address_);
@@ -421,8 +421,9 @@ TEST_F(ClientIntegrationTest, LocalPreferredAllocationTest) {
                   .buffer_descriptor.transport_endpoint_,
               segment_provider_client_->GetTransportEndpoint());
 
-    // TODO(C4): Restore the a00f757 Query-result reuse path in Get after
-    // concrete client APIs are split; preserve the original assertions.
+    // TODO(C3.2 / A00 query reuse; see p2p-split-plan-v3.md): Restore the
+    // baseline Query-result reuse path in Get; preserve the original
+    // assertions.
     auto get_result = test_client_->Get(key, {buffer}, {test_data.size()});
     ASSERT_TRUE(get_result.has_value())
         << "Get operation failed: " << toString(get_result.error());

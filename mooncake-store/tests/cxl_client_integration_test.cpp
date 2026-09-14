@@ -95,9 +95,9 @@ class ClientIntegrationTestCxl : public ::testing::Test {
    protected:
     static std::shared_ptr<CentralizedClientService> CreateClient(
         const std::string& host_name) {
-        // TODO(C4/public API): Replace this shared-facade factory adaptation
-        // with the concrete centralized API; preserve a00f757 scenarios and
-        // assertions.
+        // TODO(C3.2 / A00 client factory; see p2p-split-plan-v3.md): Restore
+        // the baseline Client factory when removing CentralizedClientService;
+        // preserve the original scenarios and assertions.
         auto config = ClientConfigBuilder::build_centralized_real_client(
             host_name, FLAGS_transfer_engine_metadata_url, FLAGS_protocol,
             std::nullopt, master_address_);

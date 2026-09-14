@@ -234,8 +234,8 @@ TEST_F(IPv6ClientTest, BasicPutGetOverIPv6Loopback) {
     LOG(INFO) << "Setting up client with server address: "
               << FLAGS_server_address;
 
-    // TODO(C4/public API): Replace this shared-facade factory adaptation with
-    // the concrete centralized API; preserve a00f757 scenarios and assertions.
+    // TODO(C3.2 / A00 client factory; see p2p-split-plan-v3.md): Restore the
+    // baseline Client factory; preserve the original scenarios and assertions.
     auto config = ClientConfigBuilder::build_centralized_real_client(
         FLAGS_server_address, "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
