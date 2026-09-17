@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <span>
 #include <vector>
 #include <string>
 
@@ -96,6 +97,8 @@ class BufferHandle {
 };
 
 // Utility functions for buffer and slice management
+[[nodiscard]] size_t CalculateSliceSize(std::span<const Slice> slices);
+
 /**
  * @brief Split a BufferHandle into slices of maximum size kMaxSliceSize
  * @param handle The buffer handle to split

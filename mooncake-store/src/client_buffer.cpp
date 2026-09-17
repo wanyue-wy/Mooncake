@@ -96,6 +96,14 @@ void* BufferHandle::ptr() const { return handle_.ptr(); }
 size_t BufferHandle::size() const { return handle_.size(); }
 
 // Utility functions for buffer and slice management
+size_t CalculateSliceSize(std::span<const Slice> slices) {
+    size_t slice_size = 0;
+    for (const auto& slice : slices) {
+        slice_size += slice.size;
+    }
+    return slice_size;
+}
+
 std::vector<Slice> split_into_slices(BufferHandle& handle) {
     std::vector<Slice> slices;
     auto base = static_cast<uint8_t*>(handle.ptr());

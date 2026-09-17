@@ -51,6 +51,7 @@ set(MOONCAKE_STORE_SOURCES
     ${MOONCAKE_MASTER_SUPPORT_SOURCES}
     ${MOONCAKE_CENTRALIZED_MASTER_SOURCES}
     client_service.cpp
+    client_resources.cpp
     centralized_client_service.cpp
     client_metric.cpp
     master_client.cpp

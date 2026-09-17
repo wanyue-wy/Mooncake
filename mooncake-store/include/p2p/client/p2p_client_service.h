@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
 #include <csignal>
 #include <functional>
 #include <future>
@@ -7,8 +9,11 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 #include <coroutine>
 #include <async_simple/Executor.h>
 #include <async_simple/Future.h>
@@ -17,7 +22,19 @@
 #include <async_simple/coro/Lazy.h>
 
 #include "p2p/client/async_metadata_notifier.h"
+// TODO(C3.1 / native types; see p2p-split-plan-v3.md): Remove this include
+// when QueryResult and the mixed write/read configuration are replaced.
+// P2PClientService no longer inherits state or implementation from it.
 #include "client_service.h"
+#include "client_buffer.hpp"
+#include "client_resources.h"
+#include "client_config_builder.h"
+#include "mutex.h"
+#include "p2p/client/inflight_tracker.h"
+#include "p2p/client/runtime_config_store.h"
+#include "transfer_engine.h"
+#include <ylt/coro_http/coro_http_server.hpp>
+#include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include "p2p/client/data_manager.h"
 #include "p2p/client/client_rpc_service.h"
 #include "p2p/ha/ha_recovery_manager.h"
@@ -30,12 +47,14 @@
 
 namespace mooncake {
 
-class P2PClientService final : public ClientService {
+class P2PClientService final {
    public:
+    // Native lifecycle, data and memory-registration API.
+    static std::optional<std::shared_ptr<P2PClientService>> Create(
+        const P2PClientConfig& config);
+
     /**
      * @brief Constructor for P2PClientService.
-     * @param local_ip IP address of the local node.
-     * @param te_port TE port of the local node.
      * @param metadata_connstring Connection string for metadata server.
      * @param http_port Port for HTTP server.
      * @param enable_http_server Whether to enable HTTP server.
@@ -46,7 +65,7 @@ class P2PClientService final : public ClientService {
                      const std::map<std::string, std::string>& labels = {},
                      bool enable_metric_collection = true);
 
-    virtual ~P2PClientService();
+    ~P2PClientService();
 
     ErrorCode Init(const P2PClientConfig& config);
 
@@ -55,12 +74,19 @@ class P2PClientService final : public ClientService {
      * 1. Stops heartbeat, RPC server, and all background threads of submodules.
      * 2. Rejects all incoming requests.
      */
-    void Stop() override;
+    void Stop();
 
     /**
      * @brief Release internal resources.
      */
-    void Destroy() override;
+    void Destroy();
+
+    tl::expected<void, ErrorCode> RegisterLocalMemory(
+        void* addr, size_t length, const std::string& location,
+        bool remote_accessible = true, bool update_metadata = true);
+
+    tl::expected<void, ErrorCode> unregisterLocalMemory(
+        void* addr, bool update_metadata = true);
 
     /**
      * @brief Proactively unregister from the master, stop the heartbeat, and
@@ -78,7 +104,7 @@ class P2PClientService final : public ClientService {
      */
     tl::expected<void, ErrorCode> Put(const ObjectKey& key,
                                       std::vector<Slice>& slices,
-                                      const WriteConfig& config) override;
+                                      const WriteConfig& config);
 
     /**
      * @brief Batch put data for multiple keys.
@@ -91,7 +117,7 @@ class P2PClientService final : public ClientService {
     std::vector<tl::expected<void, ErrorCode>> BatchPut(
         const std::vector<ObjectKey>& keys,
         std::vector<std::vector<Slice>>& batched_slices,
-        const WriteConfig& config) override;
+        const WriteConfig& config);
 
     /**
      * @brief Gets object metadata without transferring data
@@ -100,8 +126,7 @@ class P2PClientService final : public ClientService {
      * indicating failure
      */
     tl::expected<std::unique_ptr<QueryResult>, ErrorCode> Query(
-        const std::string& object_key,
-        const ReadRouteConfig& config = {}) override;
+        const std::string& object_key, const ReadRouteConfig& config = {});
 
     /**
      * @brief Batch query object metadata without transferring data
@@ -110,57 +135,34 @@ class P2PClientService final : public ClientService {
      */
     std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
     BatchQuery(const std::vector<std::string>& object_keys,
-               const ReadRouteConfig& config = {}) override;
+               const ReadRouteConfig& config = {});
 
-    tl::expected<bool, ErrorCode> IsExist(const std::string& key) override;
+    tl::expected<bool, ErrorCode> IsExist(const std::string& key);
 
     std::vector<tl::expected<bool, ErrorCode>> BatchIsExist(
-        const std::vector<std::string>& keys) override;
-
-    DeploymentMode deployment_mode() const override {
-        return DeploymentMode::P2P;
-    }
+        const std::vector<std::string>& keys);
 
     tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Get(
         const std::string& key,
         std::shared_ptr<ClientBufferAllocator> allocator,
-        const ReadRouteConfig& config = {}) override;
+        const ReadRouteConfig& config = {});
 
     std::vector<tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>>
     BatchGet(const std::vector<std::string>& keys,
              std::shared_ptr<ClientBufferAllocator> allocator,
-             const ReadRouteConfig& config = {}) override;
+             const ReadRouteConfig& config = {});
 
-    tl::expected<int64_t, ErrorCode> Get(
-        const std::string& key, const std::vector<void*>& buffers,
-        const std::vector<size_t>& sizes,
-        const ReadRouteConfig& config = {}) override;
+    tl::expected<int64_t, ErrorCode> Get(const std::string& key,
+                                         const std::vector<void*>& buffers,
+                                         const std::vector<size_t>& sizes,
+                                         const ReadRouteConfig& config = {});
 
     std::vector<tl::expected<int64_t, ErrorCode>> BatchGet(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
         const std::vector<std::vector<size_t>>& all_sizes,
         const ReadRouteConfig& config = {},
-        bool aggregate_same_segment_task = false) override;
-
-    /**
-     * @brief Mount a memory segment in P2P mode.
-     * @param buffer Start address of the buffer.
-     * @param size Size of the buffer in bytes.
-     * @return An ErrorCode indicating success or failure.
-     */
-    tl::expected<void, ErrorCode> MountSegment(
-        const void* buffer, size_t size,
-        const std::string& protocol = "tcp") override;
-
-    /**
-     * @brief Unmount a memory segment in P2P mode.
-     * @param buffer Start address of the buffer.
-     * @param size Size of the buffer in bytes.
-     * @return An ErrorCode indicating success or failure.
-     */
-    tl::expected<void, ErrorCode> UnmountSegment(const void* buffer,
-                                                 size_t size) override;
+        bool aggregate_same_segment_task = false);
 
     /**
      * @brief Removes an object and all its replicas
@@ -168,7 +170,7 @@ class P2PClientService final : public ClientService {
      * @return ErrorCode indicating success/failure
      */
     tl::expected<void, ErrorCode> Remove(const ObjectKey& key,
-                                         bool force = false) override;
+                                         bool force = false);
 
     /**
      * @brief Removes objects from the store whose keys match a regex pattern.
@@ -178,27 +180,27 @@ class P2PClientService final : public ClientService {
      * success, or an ErrorCode on failure.
      */
     tl::expected<long, ErrorCode> RemoveByRegex(const ObjectKey& str,
-                                                bool force = false) override;
+                                                bool force = false);
 
     /**
      * @brief Removes all objects and all its replicas
      * @param force If true, skip lease and replication task checks.
      * @return tl::expected<long, ErrorCode> number of removed objects or error
      */
-    tl::expected<long, ErrorCode> RemoveAll(bool force = false) override;
+    tl::expected<long, ErrorCode> RemoveAll(bool force = false);
 
     /**
      * @brief Removes all objects from THIS client's local tiered storage
      * @return Number of removed objects, or ErrorCode on failure.
      */
-    tl::expected<long, ErrorCode> RemoveAllLocal() override;
+    tl::expected<long, ErrorCode> RemoveAllLocal();
 
     /**
      * @brief Removes a single object from THIS client's local tiered storage.
      * @param key Key to remove
      * @return ErrorCode indicating success/failure.
      */
-    tl::expected<void, ErrorCode> RemoveLocal(const ObjectKey& key) override;
+    tl::expected<void, ErrorCode> RemoveLocal(const ObjectKey& key);
 
     P2PMasterClient& GetMasterClient() { return master_client_; }
 
@@ -208,25 +210,49 @@ class P2PClientService final : public ClientService {
     tl::expected<
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>
-    BatchQueryIp(const std::vector<UUID>& client_ids) override;
+    BatchQueryIp(const std::vector<UUID>& client_ids);
 
     // TODO(C3.1 / native query result; see p2p-split-plan-v3.md): Return
     // P2PRouteDescriptor directly when internalizing the query implementation.
     tl::expected<
         std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
         ErrorCode>
-    QueryByRegex(const std::string& regex) override;
+    QueryByRegex(const std::string& regex);
 
-    tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
-    CalcCacheStats() override;
-
+   public:
+    // Diagnostics and runtime configuration access.
     P2PClientMetric* GetMetrics() { return metrics_.get(); }
 
-    tl::expected<std::string, ErrorCode> GetSummaryMetrics() override;
+    tl::expected<std::string, ErrorCode> GetSummaryMetrics();
 
-    tl::expected<std::string, ErrorCode> SerializeMetrics() override;
+    tl::expected<std::string, ErrorCode> SerializeMetrics();
 
-    std::string GetHealthStatus() const override;
+    std::string GetHealthStatus() const;
+
+    // These accessors were previously inherited; the service owns the state.
+    uint16_t GetHttpPort() const { return http_port_; }
+    bool IsHttpServerEnabled() const { return http_server_ != nullptr; }
+
+    // Retained for the shared deployment backend's buffers and defaults.
+    std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const {
+        return resources_.GetBufferAllocator();
+    }
+
+    RuntimeConfigStore& getRuntimeConfigStore() {
+        return *runtime_config_store_;
+    }
+    RuntimeConfigStore::WriteConfig getDefaultWriteConfig() const {
+        return runtime_config_store_->getDefaultWriteConfig();
+    }
+    ReadRouteConfig getDefaultReadConfig() const {
+        return runtime_config_store_->getDefaultReadConfig();
+    }
+
+    std::string local_endpoint() const {
+        return local_ip_ + ":" +
+               std::to_string(resources_.GetTransferEnginePort());
+    }
+    UUID GetClientID() const { return client_id_; }
 
    private:
     /**
@@ -288,7 +314,7 @@ class P2PClientService final : public ClientService {
      * LOCAL_ONLY (heartbeat stopped), also restarts the heartbeat and drives
      * metadata recovery back to FULL.
      */
-    tl::expected<ViewVersionId, ErrorCode> InnerRegisterClient() override
+    tl::expected<ViewVersionId, ErrorCode> InnerRegisterClient()
         REQUIRES(registration_mutex_);
 
     /**
@@ -299,7 +325,7 @@ class P2PClientService final : public ClientService {
     tl::expected<void, ErrorCode> InnerUnregisterClient()
         REQUIRES(registration_mutex_);
 
-   protected:
+   private:
     bool IsHAMode(const std::string& master_server_entry) const;
     void SetMasterDiscoveryConfig(const P2PClientConfig& config);
     ErrorCode ResolveMasterAddress(const std::string& master_server_entry,
@@ -501,9 +527,6 @@ class P2PClientService final : public ClientService {
         const std::vector<P2PRouteDescriptor>& descriptors);
 
     tl::expected<RouteIterator, ErrorCode> BuildRouteIter(
-        std::string_view key, const ReadRouteConfig& config);
-
-    tl::expected<RouteIterator, ErrorCode> BuildRouteIter(
         std::string_view key, const ReadRouteConfig& config,
         std::vector<ResolvedRoute> pre_fetched);
 
@@ -576,15 +599,53 @@ class P2PClientService final : public ClientService {
     async_simple::Executor* GetCoroExecutor() const;
 
    private:
-    void RegisterHttpMethods() override;
-    void RecordLocalInflight(bool entering) override;
+    // Keep the former base entrypoints; common resource bodies are delegated.
+    ErrorCode InitTransferEngine(
+        uint16_t te_port, const std::string& metadata_connstring,
+        const std::string& protocol,
+        const std::optional<std::string>& device_names);
+    void InitLocalBufferAllocator(size_t pool_size, const std::string& protocol,
+                                  bool use_hugepage = false);
+    void initTeEndpoint();
+    const std::string& get_te_endpoint() const { return te_endpoint_; }
+
+    // P2P registration, heartbeat and shutdown retain their own lifecycle.
+    void StopHeartbeat() EXCLUDES(registration_mutex_);
+    void WaitForNextHeartbeat(int interval_ms);
+    void HeartbeatTryRegister();
+    void InnerStopHeartbeat() REQUIRES(registration_mutex_);
+    tl::expected<ViewVersionId, ErrorCode> RegisterClient()
+        EXCLUDES(registration_mutex_);
+
+    void StopResources();
+    void RegisterStatusHttpMethods();
+    void RegisterRuntimeConfigHttpMethods();
+    void RegisterBusinessHttpMethods();
+    void StartHttpServer();
+    void StopHttpServer();
+
+    InflightTracker::Guard AcquireInflightGuard() {
+        return local_inflight_tracker_.Enter();
+    }
+
+    bool MarkShuttingDown() {
+        bool initiated = local_inflight_tracker_.Close();
+        local_inflight_tracker_.Wait();
+        return initiated;
+    }
+
+    void RegisterHttpMethods();
+    void RecordLocalInflight(bool entering);
 
    private:
     tl::expected<size_t, ErrorCode> GetLocalKeyCount();
     tl::expected<std::vector<std::string>, ErrorCode> GetLocalKeys(
         size_t limit = 0);
 
-   protected:
+      private:
+    // Technical resources outlive every business member declared below.
+    ClientResources resources_;
+
     struct MasterDiscoveryConfig {
         std::string cluster_id = DEFAULT_CLUSTER_ID;
         std::string redis_username;
@@ -598,6 +659,28 @@ class P2PClientService final : public ClientService {
     MasterDiscoveryConfig master_discovery_config_;
 
    private:
+    const UUID client_id_;
+    std::string local_ip_;
+    std::unique_ptr<RuntimeConfigStore> runtime_config_store_;
+    std::string te_endpoint_;
+    const std::string metadata_connstring_;
+
+    std::thread heartbeat_thread_;
+    std::atomic<bool> heartbeat_running_{false};
+    std::condition_variable heartbeat_cv_;
+    std::mutex heartbeat_mtx_;
+    std::atomic<ViewVersionId> view_version_{0};
+    std::string master_server_entry_;
+    // Keep registration_mutex_ before draining local requests, and before
+    // heartbeat_mtx_, as in the d897 registration/shutdown paths.
+    Mutex registration_mutex_;
+    InflightTracker local_inflight_tracker_{
+        "local requests", [this] { RecordLocalInflight(true); },
+        [this] { RecordLocalInflight(false); }};
+
+    // The port must be initialized before constructing the HTTP server.
+    uint16_t http_port_ = 0;
+    std::unique_ptr<coro_http::coro_http_server> http_server_;
     std::shared_ptr<P2PClientMetric> metrics_;
     // Attach a SYNC_CLIENT_METRIC task every METRIC_SYNC_FREQ heartbeats.
     static constexpr int METRIC_SYNC_FREQ = 10;

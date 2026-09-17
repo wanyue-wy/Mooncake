@@ -26,6 +26,7 @@
 #include <ylt/coro_http/coro_http_server.hpp>
 #include "client_config_builder.h"
 #include "client_buffer.hpp"
+#include "client_resources.h"
 #include "p2p/client/runtime_config_store.h"
 
 namespace mooncake {
@@ -82,8 +83,6 @@ class ClientService {
      */
     static std::optional<std::shared_ptr<ClientService>> Create(
         const CentralizedClientConfig& config);
-    static std::optional<std::shared_ptr<ClientService>> Create(
-        const P2PClientConfig& config);
 
     /**
      * @brief Returns the deployment mode of the client service.
@@ -379,7 +378,7 @@ class ClientService {
      *        May be nullptr if local_buffer_size was 0.
      */
     std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const {
-        return local_buffer_allocator_;
+        return resources_.GetBufferAllocator();
     }
 
     /**
@@ -404,43 +403,18 @@ class ClientService {
 
    public:
     std::string local_endpoint() const {
-        return local_ip_ + ":" + std::to_string(te_port_);
+        return local_ip_ + ":" +
+               std::to_string(resources_.GetTransferEnginePort());
     }
     /**
      * @brief Gets the local transport endpoint (IP and port).
      * @return The transport endpoint string.
      */
     [[nodiscard]] std::string GetTransportEndpoint() {
-        return transfer_engine_->getLocalIpAndPort();
+        return resources_.GetTransferEngine()->getLocalIpAndPort();
     }
     UUID GetClientID() const { return client_id_; }
     ViewVersionId GetViewVersion() const { return view_version_.load(); }
-
-   public:
-    /**
-     * @brief Checks if memory registration parameters are valid
-     * @param addr Memory address to check
-     * @param length Size of the memory region
-     * @return ErrorCode indicating success or failure
-     */
-    static tl::expected<void, ErrorCode> CheckRegisterMemoryParams(
-        const void* addr, size_t length);
-
-    /**
-     * @brief Calculate the total size of a list of slices.
-     * @param slices Vector of slices.
-     * @return Total size in bytes.
-     */
-    [[nodiscard]] static size_t CalculateSliceSize(
-        const std::vector<Slice>& slices);
-
-    /**
-     * @brief Calculate the total size of a list of slices.
-     * @param slices Span of slices.
-     * @return Total size in bytes.
-     */
-    [[nodiscard]] static size_t CalculateSliceSize(
-        std::span<const Slice> slices);
 
    protected:
     /**
@@ -464,9 +438,6 @@ class ClientService {
         const std::optional<std::string>& device_names);
 
    protected:
-    ErrorCode InnerInitTransferEngine(
-        bool auto_discover, const std::string& protocol,
-        const std::optional<std::string>& device_names);
     /**
      * @brief Waits for the next heartbeat interval using condition variable.
      * @param interval_ms Milliseconds to wait.
@@ -500,7 +471,7 @@ class ClientService {
 
     /**
      * @brief Creates and TE-registers a shared buffer pool.
-     * @param pool_size Size in bytes (0 = skip, local_buffer_allocator_ stays
+     * @param pool_size Size in bytes (0 = skip, the local buffer stays
      * null).
      * @param protocol Transport protocol for memory allocation.
      * @param use_hugepage Whether to allocate with huge pages.
@@ -551,17 +522,15 @@ class ClientService {
     const UUID client_id_;
 
     // Core components
-    std::shared_ptr<TransferEngine> transfer_engine_;
+    ClientResources resources_;
 
     // Configuration
     std::string local_ip_;
-    uint16_t te_port_ = 0;
     std::unique_ptr<RuntimeConfigStore> runtime_config_store_;
 
     // The segment endpoint that the transfer engine registered with the
     // metadata backend.
     std::string te_endpoint_;
-    std::unique_ptr<AutoPortBinder> port_binder_;
     void initTeEndpoint();
     const std::string& get_te_endpoint() const { return te_endpoint_; }
 
@@ -588,8 +557,6 @@ class ClientService {
 
     std::unique_ptr<coro_http::coro_http_server> http_server_;
     uint16_t http_port_ = 0;  // 0 means disabled
-
-    std::shared_ptr<ClientBufferAllocator> local_buffer_allocator_;
 };
 
 }  // namespace mooncake
