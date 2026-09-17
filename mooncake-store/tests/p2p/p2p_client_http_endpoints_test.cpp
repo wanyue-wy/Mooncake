@@ -320,9 +320,8 @@ TEST_F(P2PClientHttpEndpointsTest, HttpGetAllKeysInvalidLimit) {
 // ============================================================================
 
 TEST_F(P2PClientHttpEndpointsTest, MetricsUseConcreteClientOutput) {
-    ClientService& facade = *client_;
-    ASSERT_TRUE(facade.SerializeMetrics().has_value());
-    ASSERT_TRUE(facade.GetSummaryMetrics().has_value());
+    ASSERT_TRUE(client_->SerializeMetrics().has_value());
+    ASSERT_TRUE(client_->GetSummaryMetrics().has_value());
 
     const auto metrics = HttpGet(Url("/metrics"));
     ASSERT_EQ(metrics.status, 200);
@@ -339,13 +338,12 @@ TEST_F(P2PClientHttpEndpointsTest, MetricsUseConcreteClientOutput) {
               std::string::npos);
 }
 
-TEST_F(P2PClientHttpEndpointsTest, DisabledMetricsPreserveFacadeErrors) {
+TEST_F(P2PClientHttpEndpointsTest, DisabledMetricsPreserveErrors) {
     P2PClientService disabled_client("P2PHANDSHAKE", 0, false, {}, false);
-    ClientService& facade = disabled_client;
-    const auto metrics = facade.SerializeMetrics();
+    const auto metrics = disabled_client.SerializeMetrics();
     ASSERT_FALSE(metrics.has_value());
     EXPECT_EQ(metrics.error(), ErrorCode::INVALID_PARAMS);
-    const auto summary = facade.GetSummaryMetrics();
+    const auto summary = disabled_client.GetSummaryMetrics();
     ASSERT_FALSE(summary.has_value());
     EXPECT_EQ(summary.error(), ErrorCode::INVALID_PARAMS);
 }

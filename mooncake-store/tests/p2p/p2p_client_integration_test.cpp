@@ -730,24 +730,6 @@ TEST_F(P2PClientIntegrationTest, RemoveLocalNonExistent) {
 // }
 
 // ============================================================================
-// MountSegment / UnmountSegment should return NOT_IMPLEMENTED
-// ============================================================================
-
-// TEST_F(P2PClientIntegrationTest, MountSegmentNotImplemented) {
-//     char dummy[64] = {0};
-//     auto r = client_->MountSegment(dummy, sizeof(dummy));
-//     ASSERT_FALSE(r.has_value());
-//     EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
-// }
-
-// TEST_F(P2PClientIntegrationTest, UnmountSegmentNotImplemented) {
-//     char dummy[64] = {0};
-//     auto r = client_->UnmountSegment(dummy, sizeof(dummy));
-//     ASSERT_FALSE(r.has_value());
-//     EXPECT_EQ(r.error(), ErrorCode::NOT_IMPLEMENTED);
-// }
-
-// ============================================================================
 // Query non-existent key should fail
 // ============================================================================
 

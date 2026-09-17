@@ -1,4 +1,5 @@
 #include "centralized_client_service.h"
+#include "client_resources.h"
 
 #include <glog/logging.h>
 
@@ -263,7 +264,7 @@ ErrorCode CentralizedClientService::Init(
             return err;
         }
     } else {
-        transfer_engine_ = config.transfer_engine;
+        resources_.UseTransferEngine(config.transfer_engine);
         LOG(INFO) << "Use existing transfer engine instance. Skip its "
                      "initialization.";
     }
@@ -271,7 +272,10 @@ ErrorCode CentralizedClientService::Init(
 
     InitTransferSubmitter();
 
-    InitLocalBufferAllocator(config.local_buffer_size, config.protocol);
+    InitLocalBufferAllocator(
+        config.local_buffer_size, config.protocol,
+        std::getenv("MC_STORE_USE_HUGEPAGE") != nullptr &&
+            config.protocol != "ascend");
 
     auto reg = RegisterClient();
     if (!reg) {
@@ -386,7 +390,7 @@ ErrorCode CentralizedClientService::Init(
 }
 
 void* CentralizedClientService::GetBaseAddr() {
-    return transfer_engine_->getBaseAddr();
+    return resources_.GetTransferEngine()->getBaseAddr();
 }
 
 void CentralizedClientService::InitTransferSubmitter() {
@@ -394,7 +398,7 @@ void CentralizedClientService::InitTransferSubmitter() {
     // Keep using logical local_hostname for name-based behaviors; endpoint is
     // used separately where needed.
     transfer_submitter_ = std::make_unique<TransferSubmitter>(
-        *transfer_engine_, storage_backend_,
+        *resources_.GetTransferEngine(), storage_backend_,
         metrics_ ? &metrics_->transfer_metric : nullptr);
 }
 
@@ -1259,7 +1263,7 @@ class PutOperation {
    public:
     PutOperation(std::string_view k, const std::vector<Slice>& s)
         : key(k), slices(s) {
-        value_length = ClientService::CalculateSliceSize(slices);
+        value_length = CalculateSliceSize(slices);
         // Initialize with a pending error state to ensure result is always set
         result = tl::unexpected(ErrorCode::INTERNAL_ERROR);
     }
@@ -1826,7 +1830,8 @@ tl::expected<void, ErrorCode> CentralizedClientService::MountSegment(
         LOG(ERROR) << "client is shutting down";
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
     }
-    auto check_result = CheckRegisterMemoryParams(buffer, size);
+    auto check_result =
+        ClientResources::CheckRegisterMemoryParams(buffer, size);
     if (!check_result) {
         return tl::unexpected(check_result.error());
     }
@@ -1848,7 +1853,7 @@ tl::expected<void, ErrorCode> CentralizedClientService::MountSegment(
         }
     }
 
-    int rc = transfer_engine_->registerLocalMemory(
+    int rc = resources_.GetTransferEngine()->registerLocalMemory(
         (void*)buffer, size, kWildcardLocation, true, true);
     if (rc != 0) {
         LOG(ERROR) << "register_local_memory_failed base=" << buffer
@@ -1913,7 +1918,7 @@ tl::expected<void, ErrorCode> CentralizedClientService::InnerUnmountSegment(
         return tl::unexpected(err);
     }
 
-    int rc = transfer_engine_->unregisterLocalMemory(
+    int rc = resources_.GetTransferEngine()->unregisterLocalMemory(
         reinterpret_cast<void*>(segment->second.base));
     if (rc != 0) {
         LOG(ERROR) << "Failed to unregister transfer buffer with transfer "
@@ -2104,7 +2109,7 @@ ErrorCode CentralizedClientService::TransferRead(
         total_size = disk_desc.object_size;
     }
 
-    size_t slices_size = ClientService::CalculateSliceSize(slices);
+    size_t slices_size = CalculateSliceSize(slices);
     if (slices_size < total_size) {
         LOG(ERROR) << "Slice size " << slices_size << " is smaller than total "
                    << "size " << total_size;
