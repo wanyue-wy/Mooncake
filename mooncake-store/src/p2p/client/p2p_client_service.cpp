@@ -63,28 +63,6 @@ P2PWriteRouteConfig ToP2PWriteRouteConfig(
     return rpc_config;
 }
 
-// TODO(C3.3 / query result isolation; see p2p-split-plan-v3.md): Delete this
-// conversion after native P2P query results use P2PRouteDescriptor directly.
-std::vector<Replica::Descriptor> ToFacadeReplicaDescriptors(
-    std::vector<P2PRouteDescriptor> routes) {
-    std::vector<Replica::Descriptor> replicas;
-    replicas.reserve(routes.size());
-    for (auto& route : routes) {
-        P2PProxyDescriptor proxy;
-        proxy.client_id = route.client_id;
-        proxy.segment_id = route.segment_id;
-        proxy.ip_address = std::move(route.ip_address);
-        proxy.rpc_port = route.rpc_port;
-        proxy.object_size = route.object_size;
-        Replica::Descriptor replica{};
-        replica.id = 0;
-        replica.status = ReplicaStatus::COMPLETE;
-        replica.descriptor_variant = std::move(proxy);
-        replicas.push_back(std::move(replica));
-    }
-    return replicas;
-}
-
 }  // namespace
 
 // ============================================================================
@@ -467,8 +445,8 @@ ErrorCode P2PClientService::InitTransferEngine(
     uint16_t te_port, const std::string& metadata_connstring,
     const std::string& protocol,
     const std::optional<std::string>& device_names) {
-    return resources_.InitTransferEngine(
-        te_port, metadata_connstring_, protocol, device_names, local_ip_);
+    return resources_.InitTransferEngine(te_port, metadata_connstring_,
+                                         protocol, device_names, local_ip_);
 }
 
 void P2PClientService::InitLocalBufferAllocator(size_t pool_size,
@@ -819,8 +797,7 @@ ErrorCode P2PClientService::InitStorage(const P2PClientConfig& config) {
 
     data_manager_ = std::make_unique<DataManagerV1>(
         std::move(tiered_backend), resources_.GetTransferEngine(),
-        config.lock_shard_count,
-        local_transfer_config, key_lease_config);
+        config.lock_shard_count, local_transfer_config, key_lease_config);
     // Set rectify callback on DataManager to remove stale replicas from master
     data_manager_->SetRectifyCallback([this](std::string_view key,
                                              std::optional<UUID> tier_id) {
@@ -1142,12 +1119,14 @@ P2PClientService::BatchQueryIp(const std::vector<UUID>& client_ids) {
         LOG(ERROR) << "client is shutting down";
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
-    (void)client_ids;
-    LOG(ERROR) << "BatchQueryIp is not part of the P2P route protocol";
-    return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+    auto result = master_client_.BatchQueryIp(client_ids);
+    if (!result) {
+        LOG(ERROR) << "BatchQueryIp RPC failed: " << toString(result.error());
+    }
+    return result;
 }
 
-tl::expected<std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+tl::expected<std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
              ErrorCode>
 P2PClientService::QueryByRegex(const std::string& regex) {
     auto guard = AcquireInflightGuard();
@@ -1163,13 +1142,7 @@ P2PClientService::QueryByRegex(const std::string& regex) {
         return tl::make_unexpected(result.error());
     }
 
-    std::unordered_map<std::string, std::vector<Replica::Descriptor>> response;
-    response.reserve(result->size());
-    for (auto& [key, routes] : *result) {
-        response.emplace(std::move(key),
-                         ToFacadeReplicaDescriptors(std::move(routes)));
-    }
-    return response;
+    return result;
 }
 
 // ============================================================================
@@ -1615,7 +1588,7 @@ auto P2PClientService::BuildWriteOps(std::string_view key,
             } else {
                 // segment_id is intentionally left unset: the write route is
                 // client-granular; the remote peer picks the concrete segment.
-                P2PProxyDescriptor proxy;
+                P2PRouteDescriptor proxy;
                 proxy.client_id = candidate.client_id;
                 proxy.ip_address = candidate.ip_address;
                 proxy.rpc_port = candidate.rpc_port;
@@ -1710,7 +1683,7 @@ P2PClientService::RemoteReverseWriteOp::Dispatch() {
                 auto& result = remote_res.value();
                 if (result.has_value()) {
                     if (cache) {
-                        P2PProxyDescriptor desc = cached_proxy;
+                        P2PRouteDescriptor desc = cached_proxy;
                         desc.segment_id = result.value();
                         cache->Upsert(req->key, {desc});
                     }
@@ -2148,7 +2121,7 @@ P2PClientService::BatchFetchReadRoutes(
             continue;
         }
         if (route_cache_) {
-            std::vector<P2PProxyDescriptor> descriptors;
+            std::vector<P2PRouteDescriptor> descriptors;
             descriptors.reserve(routes.size());
             for (const auto& r : routes) {
                 descriptors.push_back(r.proxy);
@@ -2164,8 +2137,10 @@ std::vector<P2PClientService::ResolvedRoute> P2PClientService::LoadCachedRoutes(
     std::string_view key) {
     std::vector<ResolvedRoute> routes;
     if (route_cache_) {
-        for (const auto& item : route_cache_->Get(key).items()) {
-            P2PProxyDescriptor proxy;
+        // The handle owns the storage referenced by items() during iteration.
+        auto cached = route_cache_->Get(key);
+        for (const auto& item : cached.items()) {
+            P2PRouteDescriptor proxy;
             proxy.client_id = item.client_id;
             proxy.segment_id = item.segment_id;
             proxy.ip_address = item.ip_address;
@@ -2203,13 +2178,7 @@ P2PClientService::RouteDescriptorsToRoutes(
         return routes;
     }
 
-    for (const auto& descriptor : descriptors) {
-        P2PProxyDescriptor proxy;
-        proxy.client_id = descriptor.client_id;
-        proxy.segment_id = descriptor.segment_id;
-        proxy.ip_address = descriptor.ip_address;
-        proxy.rpc_port = descriptor.rpc_port;
-        proxy.object_size = descriptor.object_size;
+    for (const auto& proxy : descriptors) {
         if (proxy.ip_address.empty() || proxy.rpc_port == 0) {
             LOG(ERROR) << "skip invalid p2p route, empty ip or zero port"
                        << ", client_id=" << proxy.client_id << ", ip_address='"
@@ -2576,7 +2545,7 @@ void P2PClientService::RouteIterator::UpsertToCache(
     if (!route_cache_ || routes.empty()) {
         return;
     }
-    std::vector<P2PProxyDescriptor> ps;
+    std::vector<P2PRouteDescriptor> ps;
     ps.reserve(routes.size());
     for (const auto& r : routes) {
         ps.push_back(r.proxy);
@@ -2704,8 +2673,9 @@ std::vector<tl::expected<bool, ErrorCode>> P2PClientService::BatchIsExist(
 // Query Operations
 // ============================================================================
 
-tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
-    const std::string& object_key, const ReadRouteConfig& config) {
+tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>
+P2PClientService::Query(const std::string& object_key,
+                        const ReadRouteConfig& config) {
     auto guard = AcquireInflightGuard();
     if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
@@ -2716,20 +2686,16 @@ tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
     if (data_manager_ != nullptr) {
         auto local = data_manager_->Query(object_key);
         if (local.has_value()) {
-            P2PProxyDescriptor proxy;
+            P2PRouteDescriptor proxy;
             proxy.client_id = client_id_;
             proxy.segment_id = local.value().first;
             proxy.ip_address = local_ip_;
             proxy.rpc_port = client_rpc_port_;
             proxy.object_size = local.value().second;
 
-            Replica::Descriptor desc;
-            desc.descriptor_variant = std::move(proxy);
-            desc.status = ReplicaStatus::COMPLETE;
-
-            std::vector<Replica::Descriptor> replicas;
-            replicas.push_back(std::move(desc));
-            return std::make_unique<QueryResult>(std::move(replicas));
+            std::vector<P2PRouteDescriptor> routes;
+            routes.push_back(std::move(proxy));
+            return routes;
         }
         if (local.error() != ErrorCode::OBJECT_NOT_FOUND) {
             LOG(ERROR) << "fail to query local object"
@@ -2754,17 +2720,16 @@ tl::expected<std::unique_ptr<QueryResult>, ErrorCode> P2PClientService::Query(
         return tl::unexpected(result.error());
     }
 
-    return std::make_unique<QueryResult>(
-        ToFacadeReplicaDescriptors(std::move(result.value())));
+    return result;
 }
 
-std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
+std::vector<tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>>
 P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
                              const ReadRouteConfig& config) {
     auto guard = AcquireInflightGuard();
     if (!guard.is_valid()) {
         LOG(ERROR) << "client is shutting down";
-        std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
+        std::vector<tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>>
             results;
         results.reserve(object_keys.size());
         for (size_t i = 0; i < object_keys.size(); ++i) {
@@ -2776,7 +2741,7 @@ P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
     // longer routing for us, so treat every key as not-found, matching the
     // singular Query().
     if (ha_manager_ && ha_manager_->IsLocalService()) {
-        std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
+        std::vector<tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>>
             results;
         results.reserve(object_keys.size());
         for (size_t i = 0; i < object_keys.size(); ++i) {
@@ -2787,19 +2752,8 @@ P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
 
     std::vector<std::string_view> key_views(object_keys.begin(),
                                             object_keys.end());
-    auto responses = master_client_.BatchGetReadRoute(
-        key_views, ToP2PReadRouteConfig(config));
-    std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>> results;
-    results.reserve(responses.size());
-    for (size_t i = 0; i < responses.size(); ++i) {
-        if (responses[i]) {
-            results.emplace_back(std::make_unique<QueryResult>(
-                ToFacadeReplicaDescriptors(std::move(responses[i].value()))));
-        } else {
-            results.emplace_back(tl::unexpected(responses[i].error()));
-        }
-    }
-    return results;
+    return master_client_.BatchGetReadRoute(key_views,
+                                            ToP2PReadRouteConfig(config));
 }
 
 // ============================================================================

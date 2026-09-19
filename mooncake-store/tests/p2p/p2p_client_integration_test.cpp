@@ -337,6 +337,71 @@ TEST_F(P2PClientIntegrationTest, GetMissMetrics) {
 // Query returns replica descriptors
 // ============================================================================
 
+TEST_F(P2PClientIntegrationTest, NativeQueriesPreserveRoutesAndBatchOrder) {
+    const std::string key = "native_query_route_fields";
+    const std::string missing = "native_query_missing_key";
+    const std::string data = "native_route_payload";
+    WriteRouteRequestConfig config;
+    config.remote_weight = 0.0;
+    std::vector<Slice> slices{
+        {const_cast<char*>(data.data()), data.size()}};
+    auto put = client_->Put(key, slices, config);
+    ASSERT_TRUE(put.has_value()) << put.error();
+
+    auto local = client_->Query(key);
+    ASSERT_TRUE(local.has_value()) << local.error();
+    ASSERT_EQ(local->size(), 1u);
+    const auto& route = local->front();
+    EXPECT_EQ(route.client_id, client_->GetClientID());
+    EXPECT_NE(route.segment_id, (UUID{0, 0}));
+    EXPECT_FALSE(route.ip_address.empty());
+    EXPECT_NE(route.rpc_port, 0);
+    EXPECT_EQ(route.object_size, data.size());
+
+    const auto expect_same_route = [&](const P2PRouteDescriptor& actual) {
+        EXPECT_EQ(actual.client_id, route.client_id);
+        EXPECT_EQ(actual.segment_id, route.segment_id);
+        EXPECT_EQ(actual.ip_address, route.ip_address);
+        EXPECT_EQ(actual.rpc_port, route.rpc_port);
+        EXPECT_EQ(actual.object_size, route.object_size);
+    };
+    auto remote = client2_->Query(key);
+    ASSERT_TRUE(remote.has_value()) << remote.error();
+    ASSERT_EQ(remote->size(), 1u);
+    expect_same_route(remote->front());
+
+    auto batch = client2_->BatchQuery({key, missing, key});
+    ASSERT_EQ(batch.size(), 3u);
+    for (size_t index : {0u, 2u}) {
+        ASSERT_TRUE(batch[index].has_value()) << batch[index].error();
+        ASSERT_EQ(batch[index]->size(), 1u);
+        expect_same_route(batch[index]->front());
+    }
+    ASSERT_FALSE(batch[1].has_value());
+    EXPECT_EQ(batch[1].error(), ErrorCode::OBJECT_NOT_FOUND);
+    EXPECT_TRUE(client2_->BatchQuery({}).empty());
+
+    auto regex = client2_->QueryByRegex("^native_query_route_fields$");
+    ASSERT_TRUE(regex.has_value()) << regex.error();
+    ASSERT_EQ(regex->count(key), 1u);
+    ASSERT_EQ(regex->at(key).size(), 1u);
+    expect_same_route(regex->at(key).front());
+}
+
+TEST_F(P2PClientIntegrationTest, BatchQueryIpUsesNativeMaster) {
+    const auto first = client_->GetClientID();
+    const auto second = client2_->GetClientID();
+    const auto missing = generate_uuid();
+    auto result = client_->BatchQueryIp({first, second, missing, first});
+    ASSERT_TRUE(result.has_value()) << result.error();
+    ASSERT_EQ(result->size(), 2u);
+    ASSERT_EQ(result->count(first), 1u);
+    ASSERT_EQ(result->count(second), 1u);
+    EXPECT_FALSE(result->at(first).empty());
+    EXPECT_FALSE(result->at(second).empty());
+    EXPECT_EQ(result->count(missing), 0u);
+}
+
 TEST_F(P2PClientIntegrationTest, QueryReturnsReplicas) {
     const std::string key = "p2p_query_replica";
     const std::string data = "replica_data";
@@ -351,7 +416,7 @@ TEST_F(P2PClientIntegrationTest, QueryReturnsReplicas) {
         << "Query failed: " << static_cast<int>(query.error());
 
     // P2P mode: replicas come from master's AddReplica record
-    auto& replicas = query.value()->replicas;
+    auto& replicas = query.value();
     EXPECT_GE(replicas.size(), 1u)
         << "Expected at least one replica descriptor";
 }

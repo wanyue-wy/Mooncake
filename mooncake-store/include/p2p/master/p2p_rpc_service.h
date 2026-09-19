@@ -51,6 +51,11 @@ class P2PMasterRpcService final {
         const std::vector<std::string_view>& keys);
 
     tl::expected<
+        std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+        ErrorCode>
+    BatchQueryIp(const std::vector<UUID>& client_ids);
+
+    tl::expected<
         std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
         ErrorCode>
     GetReadRouteByRegex(std::string_view regex);

@@ -23,7 +23,7 @@
 
 #include "p2p/client/async_metadata_notifier.h"
 // TODO(C3.1 / native types; see p2p-split-plan-v3.md): Remove this include
-// when QueryResult and the mixed write/read configuration are replaced.
+// when the mixed write/read configuration is replaced.
 // P2PClientService no longer inherits state or implementation from it.
 #include "client_service.h"
 #include "client_buffer.hpp"
@@ -122,18 +122,18 @@ class P2PClientService final {
     /**
      * @brief Gets object metadata without transferring data
      * @param object_key Key to query
-     * @return QueryResult containing replicas, or ErrorCode
+     * @return Native P2P routes, or ErrorCode
      * indicating failure
      */
-    tl::expected<std::unique_ptr<QueryResult>, ErrorCode> Query(
+    tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode> Query(
         const std::string& object_key, const ReadRouteConfig& config = {});
 
     /**
      * @brief Batch query object metadata without transferring data
      * @param object_keys Keys to query
-     * @return Vector of QueryResult objects containing replicas
+     * @return Per-key native P2P routes in request order
      */
-    std::vector<tl::expected<std::unique_ptr<QueryResult>, ErrorCode>>
+    std::vector<tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>>
     BatchQuery(const std::vector<std::string>& object_keys,
                const ReadRouteConfig& config = {});
 
@@ -204,18 +204,14 @@ class P2PClientService final {
 
     P2PMasterClient& GetMasterClient() { return master_client_; }
 
-    // TODO(C3.1 / native query API; see p2p-split-plan-v3.md): Implement the
-    // P2P BatchQueryIp API against the retained P2P Master contract while
-    // removing the shared ClientService interface.
+    // Missing or unavailable clients are omitted by the P2P master.
     tl::expected<
         std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
         ErrorCode>
     BatchQueryIp(const std::vector<UUID>& client_ids);
 
-    // TODO(C3.1 / native query result; see p2p-split-plan-v3.md): Return
-    // P2PRouteDescriptor directly when internalizing the query implementation.
     tl::expected<
-        std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+        std::unordered_map<std::string, std::vector<P2PRouteDescriptor>>,
         ErrorCode>
     QueryByRegex(const std::string& regex);
 
@@ -452,13 +448,13 @@ class P2PClientService final {
     struct RemoteReverseWriteOp : WriteOp {
         PeerClient* peer_ptr;
         std::shared_ptr<RemoteWriteRequest> write_req;
-        P2PProxyDescriptor proxy;
+        P2PRouteDescriptor proxy;
         RouteCache* route_cache;
         std::string endpoint;
 
         RemoteReverseWriteOp(PeerClient* p,
                              std::shared_ptr<RemoteWriteRequest> wr,
-                             P2PProxyDescriptor px, RouteCache* rc,
+                             P2PRouteDescriptor px, RouteCache* rc,
                              std::string ep)
             : peer_ptr(p),
               write_req(std::move(wr)),
@@ -488,7 +484,7 @@ class P2PClientService final {
         PeerClient* peer = nullptr;
         uint64_t object_size = 0;
         bool is_cached = false;
-        P2PProxyDescriptor proxy;  // for RemoveReplica on stale-cache eviction
+        P2PRouteDescriptor proxy;  // for RemoveReplica on stale-cache eviction
     };
 
     // Yields ResolvedRoute candidates from cache first, then a one-shot lazy

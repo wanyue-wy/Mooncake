@@ -110,6 +110,45 @@ class P2PMasterRpcTest : public ::testing::Test {
     P2PSegment second_;
 };
 
+TEST_F(P2PMasterRpcTest, BatchQueryIpPreservesPartialResultsAndItemMetrics) {
+    auto& metrics = P2PMasterMetricManager::instance();
+    const auto requests = metrics.get_batch_query_ip_requests();
+    const auto failures = metrics.get_batch_query_ip_failures();
+    const auto partial = metrics.get_batch_query_ip_partial_successes();
+    const auto items = metrics.get_batch_query_ip_items();
+    const auto failed_items = metrics.get_batch_query_ip_failed_items();
+    const UUID missing = generate_uuid();
+
+    auto result = client_->BatchQueryIp({client_id_, missing, client_id_});
+    ASSERT_TRUE(result.has_value()) << result.error();
+    ASSERT_EQ(result->size(), 1u);
+    ASSERT_EQ(result->count(client_id_), 1u);
+    EXPECT_EQ(result->at(client_id_),
+              (std::vector<std::string>{"127.0.0.1"}));
+    EXPECT_EQ(result->count(missing), 0u);
+    EXPECT_EQ(metrics.get_batch_query_ip_requests(), requests + 1);
+    EXPECT_EQ(metrics.get_batch_query_ip_items(), items + 3);
+    EXPECT_EQ(metrics.get_batch_query_ip_partial_successes(), partial + 1);
+    EXPECT_EQ(metrics.get_batch_query_ip_failed_items(), failed_items + 1);
+    EXPECT_EQ(metrics.get_batch_query_ip_failures(), failures);
+
+    auto empty = client_->BatchQueryIp({});
+    ASSERT_TRUE(empty.has_value()) << empty.error();
+    EXPECT_TRUE(empty->empty());
+    EXPECT_EQ(metrics.get_batch_query_ip_requests(), requests + 2);
+    EXPECT_EQ(metrics.get_batch_query_ip_items(), items + 3);
+    EXPECT_EQ(metrics.get_batch_query_ip_failures(), failures);
+
+    auto absent = client_->BatchQueryIp({missing, missing});
+    ASSERT_TRUE(absent.has_value()) << absent.error();
+    EXPECT_TRUE(absent->empty());
+    EXPECT_EQ(metrics.get_batch_query_ip_requests(), requests + 3);
+    EXPECT_EQ(metrics.get_batch_query_ip_items(), items + 5);
+    EXPECT_EQ(metrics.get_batch_query_ip_failures(), failures + 1);
+    EXPECT_EQ(metrics.get_batch_query_ip_partial_successes(), partial + 1);
+    EXPECT_EQ(metrics.get_batch_query_ip_failed_items(), failed_items + 3);
+}
+
 TEST_F(P2PMasterRpcTest, MixedSyncPreservesItemErrorsAndReadOrder) {
     ASSERT_TRUE(Publish("existing", first_.id).has_value());
     auto& metrics = P2PMasterMetricManager::instance();
