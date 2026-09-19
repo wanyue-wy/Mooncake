@@ -126,6 +126,11 @@ class PyClient {
     virtual tl::expected<QueryTaskResponse, ErrorCode> query_task(
         const UUID& task_id) = 0;
 
+    // TODO(C2.1/C2.2 / Service ownership; see p2p-split-plan-v3.md): This base
+    // pointer cannot own P2PClientService. Move native Service ownership behind
+    // RealClient's build-selected ClientBackend; expose state, allocator and
+    // default-config access through PyClient. Remove this field and the Service
+    // header dependency after all callers use those interfaces.
     std::shared_ptr<mooncake::ClientService> client_service_ = nullptr;
 };
 

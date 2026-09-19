@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
+#include <cstdlib>
+#include <optional>
 #include <fstream>
 #include <filesystem>
 #include <unordered_map>
@@ -26,6 +28,46 @@ TEST(ClientConfigBuilderTest, CentralizedClientRejectsRedisMasterDiscovery) {
         "127.0.0.1:18000", "P2PHANDSHAKE", "tcp", std::nullopt,
         "redis://127.0.0.1:6379");
     EXPECT_FALSE(ClientService::Create(config).has_value());
+}
+
+TEST(ClientConfigBuilderTest, CentralizedRejectsExplicitRuntimeConfig) {
+    std::unordered_map<std::string, std::string> config = {
+        {"local_hostname", "127.0.0.1:12345"},
+        {"metadata_server", "P2PHANDSHAKE"},
+        {"runtime_config", R"({"write":{"replica_num":3}})"},
+    };
+    EXPECT_THROW(ClientConfigBuilder::build_centralized_real_client(config),
+                 std::invalid_argument);
+}
+
+TEST(ClientConfigBuilderTest, RuntimeEnvironmentBelongsToP2P) {
+    const char* old = std::getenv("MC_RUNTIME_CONFIG");
+    struct RestoreRuntimeEnv {
+        std::optional<std::string> value;
+        ~RestoreRuntimeEnv() {
+            if (value) {
+                setenv("MC_RUNTIME_CONFIG", value->c_str(), 1);
+            } else {
+                unsetenv("MC_RUNTIME_CONFIG");
+            }
+        }
+    } restore{old ? std::optional<std::string>(old) : std::nullopt};
+    ASSERT_EQ(setenv("MC_RUNTIME_CONFIG",
+                     R"({"write":{"remote_weight":0.8}})", 1), 0);
+
+    auto p2p = ClientConfigBuilder::build_p2p_real_client(
+        "127.0.0.1:12345", "P2PHANDSHAKE", "tcp", std::nullopt,
+        "127.0.0.1:50051", kTieredConfigJson);
+    EXPECT_DOUBLE_EQ(p2p.runtime_config_json["write"]["remote_weight"].asDouble(),
+                     0.8);
+
+    ASSERT_EQ(setenv("MC_RUNTIME_CONFIG", "{invalid json", 1), 0);
+    EXPECT_NO_THROW(ClientConfigBuilder::build_centralized_real_client(
+        "127.0.0.1:12345", "P2PHANDSHAKE"));
+    EXPECT_THROW(ClientConfigBuilder::build_p2p_real_client(
+                     "127.0.0.1:12345", "P2PHANDSHAKE", "tcp", std::nullopt,
+                     "127.0.0.1:50051", kTieredConfigJson),
+                 std::runtime_error);
 }
 
 TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesDefaults) {

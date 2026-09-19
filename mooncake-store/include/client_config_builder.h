@@ -119,10 +119,6 @@ struct RealClientConfigBase {
     // Whether to enable HTTP server.
     bool enable_http_server = true;
 
-    // Parsed runtime read/write config JSON.
-    // Loaded from file path, inline JSON string, or env MC_RUNTIME_CONFIG
-    Json::Value runtime_config_json;
-
     // TODO(C2 / native configuration; see p2p-split-plan-v3.md): Remove
     // RealClientConfigBase and split the native builders. Keep HTTP/runtime
     // JSON and metric inputs in the P2P configuration; restore A00 centralized
@@ -173,6 +169,10 @@ enum class LocalTransferMode {
  * Inherits all common real client fields and adds P2P-specific options.
  */
 struct P2PClientConfig : RealClientConfigBase {
+    // Parsed runtime read/write config JSON.
+    // Loaded from file path, inline JSON string, or env MC_RUNTIME_CONFIG
+    Json::Value runtime_config_json;
+
     // Port for P2P RPC service.
     uint16_t client_rpc_port = 12345;
 
@@ -273,13 +273,17 @@ class ClientConfigBuilder {
         int redis_master_view_ttl_sec = 4, int redis_heartbeat_interval_sec = 1,
         const std::string& redis_username = "",
         uint16_t heartbeat_rpc_port = 0) {
+        if (!runtime_config.empty()) {
+            LOG(ERROR) << "Centralized clients do not support runtime_config";
+            throw std::invalid_argument(
+                "Centralized clients do not support runtime_config");
+        }
         CentralizedClientConfig config;
         fill_real_client_config_base(
             config, local_hostname, metadata_connstring, protocol, rdma_devices,
             master_server_entry, local_buffer_size, transfer_engine,
             ipc_socket_path, http_port, enable_http_server, labels,
-            runtime_config, enable_metric_collection,
-            metric_report_interval_seconds);
+            enable_metric_collection, metric_report_interval_seconds);
         fill_redis_discovery_config(config, redis_cluster_id, redis_password,
                                     redis_db_index, redis_master_view_ttl_sec,
                                     redis_heartbeat_interval_sec,
@@ -377,8 +381,23 @@ class ClientConfigBuilder {
             config, local_hostname, metadata_connstring, protocol, rdma_devices,
             master_server_entry, local_buffer_size, transfer_engine,
             ipc_socket_path, http_port, enable_http_server, labels,
-            runtime_config, enable_metric_collection,
-            metric_report_interval_seconds);
+            enable_metric_collection, metric_report_interval_seconds);
+        std::string rc_source = runtime_config;
+        if (runtime_config.empty()) {
+            const char* env = std::getenv("MC_RUNTIME_CONFIG");
+            if (env && *env) {
+                rc_source = env;
+            }
+        }
+        if (!rc_source.empty()) {
+            config.runtime_config_json = LoadJsonConfig(rc_source);
+            if (config.runtime_config_json.isNull() ||
+                !config.runtime_config_json.isObject()) {
+                throw std::runtime_error(
+                    "Invalid runtime configuration provided via runtime_config "
+                    "or MC_RUNTIME_CONFIG");
+            }
+        }
         fill_redis_discovery_config(config, redis_cluster_id, redis_password,
                                     redis_db_index, redis_master_view_ttl_sec,
                                     redis_heartbeat_interval_sec,
@@ -765,7 +784,6 @@ class ClientConfigBuilder {
         const std::string& ipc_socket_path, uint16_t http_port = 9003,
         bool enable_http_server = true,
         const std::map<std::string, std::string>& labels = {},
-        const std::string& runtime_config = "",
         bool enable_metric_collection = true,
         uint64_t metric_report_interval_seconds = 60) {
         // Parse local_hostname into IP and optional port.
@@ -806,22 +824,6 @@ class ClientConfigBuilder {
         config.labels = labels;
         config.enable_metric_collection = enable_metric_collection;
         config.metric_report_interval_seconds = metric_report_interval_seconds;
-        std::string rc_source = runtime_config;
-        if (runtime_config.empty()) {
-            const char* env = std::getenv("MC_RUNTIME_CONFIG");
-            if (env && *env) {
-                rc_source = env;
-            }
-        }
-        if (!rc_source.empty()) {
-            config.runtime_config_json = LoadJsonConfig(rc_source);
-            if (config.runtime_config_json.isNull() ||
-                !config.runtime_config_json.isObject()) {
-                throw std::runtime_error(
-                    "Invalid runtime configuration provided via runtime_config "
-                    "or MC_RUNTIME_CONFIG");
-            }
-        }
     }
 
     static LocalTransferMode parse_p2p_local_transfer_mode(std::string mode) {

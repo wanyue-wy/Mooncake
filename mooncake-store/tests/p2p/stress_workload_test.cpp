@@ -233,9 +233,9 @@ void worker_thread(int thread_id, std::atomic<bool>& stop_flag,
     slices.emplace_back(
         Slice{write_buffer, static_cast<size_t>(FLAGS_value_size)});
 
-    WriteRouteRequestConfig p2p_config;
+    P2PWriteRouteConfig p2p_config;
     p2p_config.max_candidates = 1;
-    WriteConfig config = p2p_config;
+    P2PWriteRouteConfig config = p2p_config;
 
     std::vector<std::string> stored_keys;  // Track keys for GET operations
     stored_keys.reserve(total_keys);

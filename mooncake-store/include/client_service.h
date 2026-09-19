@@ -27,7 +27,6 @@
 #include "client_config_builder.h"
 #include "client_buffer.hpp"
 #include "client_resources.h"
-#include "p2p/client/runtime_config_store.h"
 
 namespace mooncake {
 
@@ -387,19 +386,13 @@ class ClientService {
      */
     virtual std::string GetHealthStatus() const { return "OK"; }
 
-    RuntimeConfigStore& getRuntimeConfigStore() {
-        return *runtime_config_store_;
-    }
-    const RuntimeConfigStore& getRuntimeConfigStore() const {
-        return *runtime_config_store_;
-    }
-
-    RuntimeConfigStore::WriteConfig getDefaultWriteConfig() const {
-        return runtime_config_store_->getDefaultWriteConfig();
-    }
-    ReadRouteConfig getDefaultReadConfig() const {
-        return runtime_config_store_->getDefaultReadConfig();
-    }
+    // Centralized clients use ordinary defaults, without runtime overrides.
+    // TODO(C2.1/C2.2 / default-config interface; see p2p-split-plan-v3.md):
+    // ClientBackend should expose these entry-facing defaults. Keep these two
+    // getters for the old store_py access path until it uses PyClient/Real/
+    // ClientBackend, then delete them without adding centralized runtime state.
+    WriteConfig getDefaultWriteConfig() const { return ReplicateConfig{}; }
+    ReadRouteConfig getDefaultReadConfig() const { return {}; }
 
    public:
     std::string local_endpoint() const {
@@ -456,8 +449,6 @@ class ClientService {
      * No-op when the HTTP server is disabled.
      */
     virtual void RegisterHttpMethods();
-
-    void RegisterRuntimeConfigHttpMethods();
 
     /**
      * @brief Starts the HTTP server.
@@ -526,7 +517,6 @@ class ClientService {
 
     // Configuration
     std::string local_ip_;
-    std::unique_ptr<RuntimeConfigStore> runtime_config_store_;
 
     // The segment endpoint that the transfer engine registered with the
     // metadata backend.

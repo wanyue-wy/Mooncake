@@ -75,6 +75,10 @@ class RealClient : public PyClient {
 
     uint64_t alloc_from_mem_pool(size_t size) override { return 0; };
 
+    // TODO(C2.1/C2.2 / deployment identity; see p2p-split-plan-v3.md): Get the
+    // selected architecture from ClientBackend once Real is connected to it,
+    // then remove this base-Service query. Preserve UNKNOWN before setup and
+    // the existing identity carried by the Dummy handshake.
     DeploymentMode deployment_mode() const override {
         return client_service_ ? client_service_->deployment_mode()
                                : DeploymentMode::UNKNOWN;

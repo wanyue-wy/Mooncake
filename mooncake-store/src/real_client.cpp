@@ -186,6 +186,11 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT& config) {
         (std::getenv("MC_STORE_USE_HUGEPAGE") != nullptr) &&
         this->protocol != "ascend";
 
+    // TODO(C2.2 / native creation; see p2p-split-plan-v3.md): P2PClientConfig no
+    // longer has a ClientService factory overload. Create the build-selected
+    // native Service through ClientBackend, with config/result conversion at
+    // that boundary. Replace this factory and the remaining Service calls when
+    // RealClient owns the backend; do not cast P2P back to the old base type.
     auto client_opt = mooncake::ClientService::Create(config);
     if (!client_opt) {
         LOG(ERROR) << "Failed to create client";
