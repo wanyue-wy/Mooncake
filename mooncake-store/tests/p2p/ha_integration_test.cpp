@@ -76,8 +76,8 @@ class HAIntegrationTest : public ::testing::Test {
 
     // Default write config for these HA tests: force local placement, matching
     // the previous local-first default the tests were written against.
-    static WriteRouteRequestConfig LocalWriteConfig() {
-        WriteRouteRequestConfig c;
+    static P2PWriteRouteConfig LocalWriteConfig() {
+        P2PWriteRouteConfig c;
         c.remote_weight = 0.0;  // force local write
         return c;
     }
@@ -85,7 +85,7 @@ class HAIntegrationTest : public ::testing::Test {
     static tl::expected<void, ErrorCode> PutData(
         std::shared_ptr<P2PClientService>& client, const std::string& key,
         const std::string& data,
-        const WriteRouteRequestConfig& config = LocalWriteConfig()) {
+        const P2PWriteRouteConfig& config = LocalWriteConfig()) {
         std::vector<Slice> slices;
         slices.emplace_back(Slice{const_cast<char*>(data.data()), data.size()});
         return client->Put(key, slices, config);
@@ -261,7 +261,7 @@ std::shared_ptr<P2PClientService> HAIntegrationTest::client2_ = nullptr;
 // A1: Baseline — put from client1 routed to client2, then read back.
 TEST_F(HAIntegrationTest, RemotePutAndGet) {
     // Put with remote_weight=1 (force remote): master routes to client2
-    WriteRouteRequestConfig config;
+    P2PWriteRouteConfig config;
     config.remote_weight = 1.0;
     config.local_write_waterline = 0.0;
 

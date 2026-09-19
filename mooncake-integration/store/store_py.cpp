@@ -273,6 +273,10 @@ class MooncakeStorePyWrapper {
         return real_client;
     }
 
+    // TODO(C2.1/C2.3 / initialization access; see p2p-split-plan-v3.md):
+    // This base-Service pointer cannot represent the independent P2P service.
+    // Use the PyClient initialization interface, backed by Real's ClientBackend;
+    // remove this direct access when Real/Dummy entrypoints are migrated.
     bool is_client_initialized() const {
         // Check if the store and client are initialized
         // Dummy client does not use client_service_ instance
@@ -283,6 +287,10 @@ class MooncakeStorePyWrapper {
         return base_key + "_tp_" + std::to_string(rank);
     }
 
+    // TODO(C2.1/C2.3 / default configuration; see p2p-split-plan-v3.md):
+    // Route both default-config helpers through PyClient. Real must delegate to
+    // ClientBackend for native snapshots and facade conversion; Dummy keeps its
+    // existing defaults. Remove the Service dereferences after that wiring lands.
     WriteConfig get_default_write_config() {
         if (!store_) {
             LOG(ERROR) << "Client is not initialized";
@@ -723,6 +731,10 @@ class MooncakeStorePyWrapper {
             // Note: In batch mode, we need contiguous memory for Metadata +
             // Data.
             std::vector<std::unique_ptr<BufferHandle>> temp_allocations;
+            // TODO(C2.1/C2.3 / tensor allocator; see p2p-split-plan-v3.md):
+            // Obtain the Service-owned scratch pool through PyClient and Real's
+            // ClientBackend. Remove this base-pointer access once connected;
+            // keep tensor packing and Dummy's existing IPC behavior here.
             std::shared_ptr<ClientBufferAllocator> allocator =
                 store_->client_service_->GetBufferAllocator();
             if (!allocator) {

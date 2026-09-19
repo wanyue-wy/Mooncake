@@ -70,10 +70,7 @@ CentralizedClientService::CentralizedClientService(
       protocol_(protocol),
       master_client_(client_id_,
                      metrics_ ? &metrics_->master_client_metric : nullptr),
-      write_thread_pool_(2) {
-    runtime_config_store_ =
-        std::make_unique<RuntimeConfigStore>(DeploymentMode::CENTRALIZATION);
-}
+      write_thread_pool_(2) {}
 
 tl::expected<std::string, ErrorCode>
 CentralizedClientService::GetSummaryMetrics() {
@@ -379,12 +376,6 @@ ErrorCode CentralizedClientService::Init(
     StartPing(master_server_entry);
 
     StartHttpServer();
-
-    if (!runtime_config_store_->loadFromJson(config.runtime_config_json)) {
-        LOG(ERROR) << "runtime config validation failed during startup, "
-                   << "init aborted";
-        return ErrorCode::INVALID_PARAMS;
-    }
 
     return ErrorCode::OK;
 }
