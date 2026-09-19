@@ -17,6 +17,11 @@ struct RpcNameTraits<&P2PMasterRpcService::BatchExistKey> {
 };
 
 template <>
+struct RpcNameTraits<&P2PMasterRpcService::BatchQueryIp> {
+    static constexpr const char* value = "BatchQueryIp";
+};
+
+template <>
 struct RpcNameTraits<&P2PMasterRpcService::GetReadRouteByRegex> {
     static constexpr const char* value = "GetReadRouteByRegex";
 };
@@ -208,6 +213,22 @@ std::vector<tl::expected<bool, ErrorCode>> P2PMasterClient::BatchExistKey(
     auto result = invoke_batch_rpc<&P2PMasterRpcService::BatchExistKey, bool>(
         object_keys.size(), object_keys);
     timer.LogResponse("result=", result.size(), " keys");
+    return result;
+}
+
+tl::expected<
+    std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+    ErrorCode>
+P2PMasterClient::BatchQueryIp(const std::vector<UUID>& client_ids) {
+    ScopedVLogTimer timer(1, "P2PMasterClient::BatchQueryIp");
+    timer.LogRequest("client_ids_count=", client_ids.size());
+
+    auto result = invoke_rpc<
+        &P2PMasterRpcService::BatchQueryIp,
+        std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>>(
+        client_ids);
+
+    timer.LogResponseExpected(result);
     return result;
 }
 
