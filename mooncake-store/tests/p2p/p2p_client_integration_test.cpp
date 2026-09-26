@@ -387,6 +387,41 @@ TEST_F(P2PClientIntegrationTest, NativeQueriesPreserveRoutesAndBatchOrder) {
     expect_same_route(regex->at(key).front());
 }
 
+TEST_F(P2PClientIntegrationTest, BatchQueryKeepsLocalHitsAfterUnregister) {
+    auto isolated = CreateP2PClient("localhost", 0, "memcpy");
+    ASSERT_NE(isolated, nullptr);
+    const std::string key = "local-only-batch-query";
+    std::string value = "retained";
+    std::vector<Slice> slices{{value.data(), value.size()}};
+    P2PWriteRouteConfig config;
+    config.remote_weight = 0.0;
+    ASSERT_TRUE(isolated->Put(key, slices, config).has_value());
+    P2PReadRouteConfig filtered;
+    filtered.priority_limit = 1000;
+    auto master_result = isolated->GetMasterClient().GetReadRoute(key, filtered);
+    ASSERT_FALSE(master_result.has_value());
+    auto healthy = isolated->BatchQuery({key}, filtered);
+    ASSERT_EQ(healthy.size(), 1u);
+    ASSERT_FALSE(healthy[0].has_value());
+    EXPECT_EQ(healthy[0].error(), master_result.error());
+    ASSERT_TRUE(isolated->UnregisterClient().has_value());
+    EXPECT_EQ(isolated->GetHealthStatus(), "LOCAL_ONLY");
+    auto single = isolated->Query(key);
+    ASSERT_TRUE(single.has_value());
+    auto batch = isolated->BatchQuery({key, "missing-local-only-key", key});
+    ASSERT_EQ(batch.size(), 3u);
+    for (size_t i : {0u, 2u}) {
+        ASSERT_TRUE(batch[i].has_value());
+        ASSERT_EQ(batch[i]->size(), 1u);
+        EXPECT_EQ(batch[i]->front().client_id, isolated->GetClientID());
+        EXPECT_EQ(batch[i]->front().segment_id, single->front().segment_id);
+        EXPECT_EQ(batch[i]->front().object_size, value.size());
+    }
+    ASSERT_FALSE(batch[1].has_value());
+    EXPECT_EQ(batch[1].error(), ErrorCode::OBJECT_NOT_FOUND);
+    EXPECT_TRUE(isolated->BatchQuery({}).empty());
+}
+
 TEST_F(P2PClientIntegrationTest, BatchQueryIpUsesNativeMaster) {
     const auto first = client_->GetClientID();
     const auto second = client2_->GetClientID();

@@ -252,6 +252,8 @@ class P2PClientService final {
     UUID GetClientID() const { return client_id_; }
 
    private:
+    tl::expected<P2PRouteDescriptor, ErrorCode> QueryLocalRoute(
+        const std::string& key);
     /**
      * @brief init TieredBackend and DataManager
      *        1. build metadata and segment sync callback

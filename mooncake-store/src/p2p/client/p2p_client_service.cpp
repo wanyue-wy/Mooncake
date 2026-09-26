@@ -2749,26 +2749,16 @@ P2PClientService::Query(const std::string& object_key,
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
 
-    // 1) Local first
-    if (data_manager_ != nullptr) {
-        auto local = data_manager_->Query(object_key);
-        if (local.has_value()) {
-            P2PRouteDescriptor proxy;
-            proxy.client_id = client_id_;
-            proxy.segment_id = local.value().first;
-            proxy.ip_address = local_ip_;
-            proxy.rpc_port = client_rpc_port_;
-            proxy.object_size = local.value().second;
-
-            std::vector<P2PRouteDescriptor> routes;
-            routes.push_back(std::move(proxy));
-            return routes;
-        }
-        if (local.error() != ErrorCode::OBJECT_NOT_FOUND) {
-            LOG(ERROR) << "fail to query local object"
-                       << ", key=" << object_key << ", error=" << local.error();
-            return tl::make_unexpected(local.error());
-        }
+    // 1) Local first, shared with the batch query path.
+    auto local = QueryLocalRoute(object_key);
+    if (local) {
+        return std::vector<P2PRouteDescriptor>{std::move(*local)};
+    } else if (local.error() != ErrorCode::OBJECT_NOT_FOUND) {
+        LOG(ERROR) << "fail to query local object"
+                   << ", key=" << object_key << ", error=" << local.error();
+        return tl::unexpected(local.error());
+    } else {
+        // local miss
     }
 
     // 2) Local miss + DEGRADED: master unreachable, treat as not found.
@@ -2803,15 +2793,18 @@ P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
         }
         return results;
     }
-    // Local-only service (LOCAL_ONLY/DEGRADED): master is unreachable / no
-    // longer routing for us, so treat every key as not-found, matching the
-    // singular Query().
     if (IsLocalService()) {
         std::vector<tl::expected<std::vector<P2PRouteDescriptor>, ErrorCode>>
             results;
         results.reserve(object_keys.size());
-        for (size_t i = 0; i < object_keys.size(); ++i) {
-            results.push_back(tl::make_unexpected(ErrorCode::OBJECT_NOT_FOUND));
+        for (const auto& key : object_keys) {
+            auto local = QueryLocalRoute(key);
+            if (local) {
+                results.emplace_back(
+                    std::vector<P2PRouteDescriptor>{std::move(*local)});
+            } else {
+                results.emplace_back(tl::unexpected(local.error()));
+            }
         }
         return results;
     }
@@ -2821,12 +2814,35 @@ P2PClientService::BatchQuery(const std::vector<std::string>& object_keys,
     return master_client_.BatchGetReadRoute(key_views, config);
 }
 
+tl::expected<P2PRouteDescriptor, ErrorCode> P2PClientService::QueryLocalRoute(
+    const std::string& key) {
+    if (!data_manager_) {
+        LOG(ERROR) << "data manager is null, failed to query local route, "
+                   << "key=" << key;
+        return tl::unexpected(ErrorCode::OBJECT_NOT_FOUND);
+    }
+    auto local = data_manager_->Query(key);
+    if (!local) {
+        if (local.error() != ErrorCode::OBJECT_NOT_FOUND) {
+            LOG(ERROR) << "fail to query local object"
+                       << ", key=" << key << ", error=" << local.error();
+        }
+        return tl::unexpected(local.error());
+    }
+    P2PRouteDescriptor route;
+    route.client_id = client_id_;
+    route.segment_id = local->first;
+    route.ip_address = local_ip_;
+    route.rpc_port = client_rpc_port_;
+    route.object_size = local->second;
+    return route;
+}
+
 // ============================================================================
 // Remove Operations (Not Supported in P2P)
 // Attention:
 // The behavior of this type of interface has not yet been defined.
-// At present, all keys will be evicted by the client's scheduler according
-// to a specific strategy.
+// At present, all keys will be evicted by the client's specific strategy.
 // The external active remove call is not allowed currently
 // ============================================================================
 
@@ -2838,7 +2854,7 @@ tl::expected<void, ErrorCode> P2PClientService::Remove(const ObjectKey& key,
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
     LOG(WARNING) << "Remove is not supported in P2P mode";
-    return {};  // return ok for ut
+    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
 }
 
 tl::expected<long, ErrorCode> P2PClientService::RemoveByRegex(
@@ -2849,7 +2865,7 @@ tl::expected<long, ErrorCode> P2PClientService::RemoveByRegex(
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
     LOG(WARNING) << "RemoveByRegex is not supported in P2P mode";
-    return {};  // return ok for ut
+    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
 }
 
 tl::expected<long, ErrorCode> P2PClientService::RemoveAll(bool force) {
@@ -2859,7 +2875,7 @@ tl::expected<long, ErrorCode> P2PClientService::RemoveAll(bool force) {
         return tl::make_unexpected(ErrorCode::SHUTTING_DOWN);
     }
     LOG(WARNING) << "RemoveAll is not supported in P2P mode";
-    return {};  // return ok for ut
+    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
 }
 
 tl::expected<long, ErrorCode> P2PClientService::RemoveAllLocal() {
