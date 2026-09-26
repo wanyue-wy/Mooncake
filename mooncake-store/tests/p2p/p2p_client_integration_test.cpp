@@ -335,6 +335,22 @@ TEST_F(P2PClientIntegrationTest, GetMissMetrics) {
 // Query returns replica descriptors
 // ============================================================================
 
+TEST_F(P2PClientIntegrationTest, MissingTransferEngineFailsBeforePublication) {
+    P2PClientService pending("P2PHANDSHAKE", 0, false, {}, false);
+    EXPECT_EQ(pending.GetHealthStatus(), "INITIALIZING");
+    EXPECT_EQ(pending.GetRpcPort(), 0);
+    P2PClientConfig config;
+    config.local_ip = "localhost";
+    config.protocol = "rpc_only";
+    EXPECT_EQ(pending.Init(config), ErrorCode::INVALID_PARAMS);
+    EXPECT_EQ(pending.GetRpcPort(), 0);
+    EXPECT_EQ(pending.GetBufferAllocator(), nullptr);
+    // Preserve the current lifecycle: the caller stops a failed direct Init.
+    pending.Stop();
+    EXPECT_EQ(pending.GetHealthStatus(), "STOPPED");
+    pending.Destroy();
+}
+
 TEST_F(P2PClientIntegrationTest, NativeQueriesPreserveRoutesAndBatchOrder) {
     const std::string key = "native_query_route_fields";
     const std::string missing = "native_query_missing_key";

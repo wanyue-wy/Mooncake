@@ -410,7 +410,6 @@ ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
         LOG(ERROR) << "Cannot initialize an active or stopped P2P service";
         return ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS;
     }
-    client_rpc_port_ = config.client_rpc_port;
     transfer_direction_mode_ = config.transfer_direction_mode;
     master_client_.SetHeartbeatRpcPort(config.heartbeat_rpc_port);
     // Reuse this entry when a LOCAL_ONLY service rejoins the cluster.
@@ -439,6 +438,10 @@ ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
         resources_.UseTransferEngine(config.transfer_engine);
         LOG(INFO) << "Use existing transfer engine instance. Skip its "
                      "initialization.";
+    }
+    if (!resources_.GetTransferEngine()) {
+        LOG(ERROR) << "P2P data service requires a transfer engine";
+        return ErrorCode::INVALID_PARAMS;
     }
     initTeEndpoint();
 
@@ -500,14 +503,14 @@ ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
     // Bind the peer listener before publishing its port to Master.
     client_rpc_service_.emplace(*data_manager_, metrics_);
     client_rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(
-        config.rpc_thread_num, client_rpc_port_);
+        config.rpc_thread_num, config.client_rpc_port);
     RegisterClientRpcService(*client_rpc_server_, *client_rpc_service_);
     // async_start binds synchronously;
     // its future completes when the server exits.
     auto server_exit = client_rpc_server_->async_start();
     if (server_exit.hasResult()) {
         LOG(ERROR) << "P2P RPC server failed to start on port "
-                   << client_rpc_port_ << ": "
+                   << config.client_rpc_port << ": "
                    << server_exit.result().value().message();
         return ErrorCode::INTERNAL_ERROR;
     }
@@ -896,9 +899,11 @@ ErrorCode P2PClientService::StopClusterResources(bool unregister) {
 }
 
 ErrorCode P2PClientService::EnterOnline(P2PClientServiceState rollback_state) {
-    // TODO: Replay writes accepted before initial registration. Redis-mode
-    // rejoin also leaves routes written while DEGRADED/LOCAL_ONLY
-    // unsynchronized.
+    // TODO(P2P route reconciliation): Reconcile Master's routes with local
+    // replicas after metadata loss, even if the client entry survives.
+    // Non-Redis rejoin already replays replicas, but pre-registration writes
+    // and Redis-mode DEGRADED/LOCAL_ONLY writes remain uncovered. Also repair
+    // routes removed by delayed cleanup callbacks after re-registration.
     const auto origin = GetServiceState();
     auto error = ConnectToMaster(master_server_entry_);
     if (error != ErrorCode::OK) {
@@ -1240,7 +1245,7 @@ void P2PClientService::RecordLocalInflight(bool entering) {
 
 std::string P2PClientService::GetHealthStatus() const {
     const auto state = GetServiceState();
-    return state == P2PClientServiceState::INITIALIZING ? "STARTING"
+    return state == P2PClientServiceState::INITIALIZING ? "INITIALIZING"
                                                         : toString(state);
 }
 
