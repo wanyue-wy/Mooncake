@@ -1757,7 +1757,7 @@ TEST_F(HAIntegrationTest, RejectsOccupiedPeerPortBeforeRegistration) {
     auto client = std::make_shared<P2PClientService>(
         config.metadata_connstring, config.http_port, false, config.labels);
     EXPECT_EQ(client->Init(config), ErrorCode::INTERNAL_ERROR);
-    EXPECT_EQ(client->GetHealthStatus(), "STARTING");
+    EXPECT_EQ(client->GetHealthStatus(), "INITIALIZING");
     EXPECT_NE(client->GetServiceState(), P2PClientServiceState::ONLINE);
     ASSERT_NE(client->recovery_worker_, nullptr);
     EXPECT_EQ(client->recovery_worker_->GetStatus(), MetadataRecoveryWorker::Status::IDLE);

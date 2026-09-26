@@ -687,7 +687,7 @@ class P2PClientService final {
     // Heartbeats since the last SYNC_CLIENT_METRIC task.
     int metric_sync_heartbeat_count_ = 0;
     P2PMasterClient master_client_;
-    uint16_t client_rpc_port_ = 12345;
+    uint16_t client_rpc_port_ = 0;
 
     std::unique_ptr<coro_rpc::coro_rpc_server> client_rpc_server_;
     // Held by pointer, not by value: DataManager is now an abstract

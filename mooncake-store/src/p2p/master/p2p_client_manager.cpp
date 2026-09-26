@@ -364,12 +364,10 @@ auto P2PClientManager::UnregisterClient(const UUID& client_id)
         client_metas_.erase(it);
     }
 
-    // TODO(C3.1 / identity cleanup; see p2p-split-plan-v3.md): Review and
-    // define cleanup completion before reusing a client/segment
-    // identity; an old removal callback can otherwise erase newly published
-    // routes with the same identity, even when same-key values are immutable.
-    // The client is out of client_metas_ now. Recycle its segments WITHOUT
-    // crash accounting (this is a proactive unregister, not a crash).
+    // TODO(P2P route reconciliation): Concurrent monitor cleanup can leave old
+    // callbacks running after re-registration. They may remove newly published
+    // routes with the same client/segment ID. See the reconciliation TODO in
+    // P2PClientService::EnterOnline.
     meta->RecycleMeta();
     // Decrement the active gauge only if the client was still HEALTH: the
     // unhealthy path already decremented it during the status transition.
