@@ -42,11 +42,7 @@ class P2PClientIntegrationTest : public ::testing::Test {
         TransferDirectionMode transfer_direction_mode =
             TransferDirectionMode::REVERSE,
         size_t te_async_poll_worker_num = 32) {
-        if (rpc_port == 0) rpc_port = getFreeTcpPort();
 
-        // TODO(C3.1 / listener fixture; see p2p-split-plan-v3.md): Use the
-        // service's actual bound port after atomic listener initialization;
-        // remove the port-probe race.
         auto config = ClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
@@ -74,6 +70,8 @@ class P2PClientIntegrationTest : public ::testing::Test {
             return nullptr;
         }
 
+        EXPECT_TRUE(WaitForRoutableClient(client->GetMasterClient(),
+                                          client->GetClientID()));
         return client;
     }
 
@@ -356,6 +354,7 @@ TEST_F(P2PClientIntegrationTest, NativeQueriesPreserveRoutesAndBatchOrder) {
     EXPECT_NE(route.segment_id, (UUID{0, 0}));
     EXPECT_FALSE(route.ip_address.empty());
     EXPECT_NE(route.rpc_port, 0);
+    EXPECT_EQ(route.rpc_port, client_->GetRpcPort());
     EXPECT_EQ(route.object_size, data.size());
 
     const auto expect_same_route = [&](const P2PRouteDescriptor& actual) {
@@ -1237,7 +1236,7 @@ TEST_F(P2PClientIntegrationTest, TeAsyncPollReverseRemoteBatchPutAndGet) {
 TEST_F(P2PClientIntegrationTest, UnregisterSwitchesToLocalOnly) {
     auto c = CreateP2PClient("localhost:18821");
     ASSERT_NE(c, nullptr);
-    EXPECT_EQ(c->GetHealthStatus(), "FULL");
+    EXPECT_EQ(c->GetHealthStatus(), "ONLINE");
 
     // Unregister -> stable LOCAL_ONLY (heartbeat stopped, no auto re-register).
     auto un = c->UnregisterClient();
@@ -1262,7 +1261,7 @@ TEST_F(P2PClientIntegrationTest, UnregisterSwitchesToLocalOnly) {
     // P2PClientHttpEndpointsTest.HttpUnregisterThenRegister.)
 
     c->Stop();
-    c->Destroy();
+    c.reset();
 }
 
 // ============================================================================
@@ -1369,7 +1368,7 @@ TEST_F(P2PClientIntegrationTest, MetricLocalPutGet_Memcpy) {
     EXPECT_EQ(m->remote_request.get_requests.value(), 0);
 
     c->Stop();
-    c->Destroy();
+    c.reset();
 }
 
 TEST_F(P2PClientIntegrationTest, MetricRemotePut) {

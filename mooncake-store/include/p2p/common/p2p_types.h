@@ -13,6 +13,27 @@ namespace mooncake {
 
 static constexpr int64_t DEFAULT_CLIENT_CRASHED_TTL_SEC = 30;
 
+enum class P2PClientServiceState {
+    INITIALIZING = 0,
+    ONLINE = 1,
+    DEGRADED = 2,
+    LOCAL_ONLY = 3,
+    STOPPING = 4,
+    STOPPED = 5,
+};
+
+inline const char* toString(P2PClientServiceState state) {
+    switch (state) {
+        case P2PClientServiceState::INITIALIZING: return "INITIALIZING";
+        case P2PClientServiceState::ONLINE: return "ONLINE";
+        case P2PClientServiceState::DEGRADED: return "DEGRADED";
+        case P2PClientServiceState::LOCAL_ONLY: return "LOCAL_ONLY";
+        case P2PClientServiceState::STOPPING: return "STOPPING";
+        case P2PClientServiceState::STOPPED: return "STOPPED";
+        default: return "UNKNOWN";
+    }
+}
+
 /**
  * @brief Client health state owned by the P2P master.
  */

@@ -105,7 +105,9 @@ endif()
 # HA
 add_p2p_store_test(p2p_client_ha_test p2p_client_ha_test.cpp)
 add_p2p_store_test(ha_integration_test ha_integration_test.cpp)
-add_p2p_store_test(ha_recovery_manager_test ha_recovery_manager_test.cpp)
+target_link_libraries(ha_integration_test PRIVATE ${CMAKE_DL_LIBS})
+set_tests_properties(ha_integration_test PROPERTIES TIMEOUT 180)
+add_p2p_store_test(metadata_recovery_worker_test metadata_recovery_worker_test.cpp)
 add_p2p_store_test(oplog_manager_test ha/oplog/oplog_manager_test.cpp)
 add_p2p_store_test(oplog_serializer_test ha/oplog/oplog_serializer_test.cpp)
 add_p2p_store_test(localfs_oplog_store_test ha/oplog/localfs_oplog_store_test.cpp)
@@ -121,7 +123,7 @@ add_p2p_store_test(p2p_oplog_test
     ha/oplog/p2p_hot_standby_service_test.cpp
 )
 
-set_tests_properties(p2p_client_ha_test ha_integration_test ha_recovery_manager_test
+set_tests_properties(p2p_client_ha_test ha_integration_test metadata_recovery_worker_test
     oplog_manager_test oplog_serializer_test localfs_oplog_store_test
     standby_state_machine_test ha_metric_manager_test oplog_applier_test
     oplog_replicator_test p2p_oplog_test PROPERTIES LABELS "p2p;ha")

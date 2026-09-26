@@ -82,15 +82,11 @@ ClientResources::ClientResources() = default;
 ClientResources::~ClientResources() {
     // Normal shutdown releases the pool earlier through the owning service.
     // Keep constructor/initialization failure cleanup local to these resources.
-    try {
-        ReleaseLocalBuffer(false);
-    } catch (const std::exception& e) {
-        LOG(ERROR) << "Failed to release local buffer during resource "
-                      "destruction: "
-                   << e.what();
-    } catch (...) {
-        LOG(ERROR) << "Unknown exception while releasing local buffer during "
-                      "resource destruction";
+    auto error = ReleaseLocalBuffer(false);
+    if (error != ErrorCode::OK) {
+        LOG(ERROR)
+            << "Failed to release local buffer during resource destruction: "
+            << error;
     }
 }
 
@@ -408,12 +404,26 @@ void ClientResources::InitLocalBufferAllocator(size_t pool_size,
     }
 }
 
-void ClientResources::ReleaseLocalBuffer(bool update_metadata) {
-    if (local_buffer_allocator_) {
-        unregisterLocalMemory(local_buffer_allocator_->getBase(),
-                              update_metadata);
-        local_buffer_allocator_.reset();
+ErrorCode ClientResources::ReleaseLocalBuffer(bool update_metadata) {
+    if (!local_buffer_allocator_) {
+        return ErrorCode::OK;
     }
+    try {
+        auto result = unregisterLocalMemory(local_buffer_allocator_->getBase(),
+                                            update_metadata);
+        local_buffer_allocator_.reset();
+        if (!result) {
+            LOG(ERROR) << "ReleaseLocalBuffer: unregister memory failed, error="
+                       << result.error();
+            return result.error();
+        }
+        return ErrorCode::OK;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "ReleaseLocalBuffer failed: " << e.what();
+    } catch (...) {
+        LOG(ERROR) << "ReleaseLocalBuffer failed with unknown exception";
+    }
+    return ErrorCode::INTERNAL_ERROR;
 }
 
 }  // namespace mooncake

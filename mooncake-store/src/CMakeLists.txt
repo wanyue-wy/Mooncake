@@ -172,7 +172,7 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/client/tiered_cache/event_driven_scheduler/multi_lru_stats_collector.cpp
     p2p/client/tiered_cache/event_driven_scheduler/multi_lru_policy.cpp
     p2p/client/tiered_cache/event_driven_scheduler/event_driven_client_scheduler.cpp
-    p2p/ha/ha_recovery_manager.cpp
+    p2p/ha/metadata_recovery_worker.cpp
 )
 
 add_library(mooncake_store_p2p_objects OBJECT ${MOONCAKE_STORE_P2P_SOURCES})

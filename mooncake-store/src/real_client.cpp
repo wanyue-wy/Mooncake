@@ -198,6 +198,10 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT& config) {
     }
     client_service_ = *client_opt;
 
+    // TODO(C2.2 / Dummy startup; see p2p-split-plan-v3.md): start_ipc_server
+    // only starts a thread today. Wait for bind/listen success and propagate
+    // failure through setup before the Real RPC listener admits Dummy calls.
+    // Remove this TODO after ClientBackend deployment wiring enforces it.
     // Start IPC server to accept FD from dummy clients
     if (!ipc_socket_path_.empty()) {
         if (start_ipc_server() != 0) {
@@ -245,6 +249,10 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
         return {};
     }
 
+    // TODO(C2.2 / Dummy shutdown; see p2p-split-plan-v3.md): close Real RPC
+    // admission and join IPC registration work before stopping the backend or
+    // unmapping SHM. stop_ipc_server currently only wakes the thread. Remove
+    // this TODO once RPC/IPC teardown owns and drains both entry points.
     stop_ipc_server();
     stop_dummy_client_monitor();
 

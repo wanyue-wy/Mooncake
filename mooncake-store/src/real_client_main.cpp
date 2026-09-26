@@ -58,6 +58,8 @@ DEFINE_uint64(async_max_batch_size, 2000,
 DEFINE_uint64(async_route_queue_size, 0,
               "Async route notifier queue size when async is enabled "
               "(min='async_max_batch_size * async_sender_thread_count').");
+DEFINE_bool(p2p_start_local_only, false,
+            "Start P2P locally without contacting Master; join via POST /register.");
 DEFINE_string(p2p_local_transfer_mode, "te",
               "Local transfer mode for P2P local Get/Put path: memcpy|te");
 DEFINE_string(p2p_transfer_direction_mode, "reverse",
@@ -170,7 +172,8 @@ int main(int argc, char* argv[]) {
                 FLAGS_redis_master_view_ttl_sec,
                 FLAGS_redis_heartbeat_interval_sec, FLAGS_redis_username,
                 static_cast<uint16_t>(FLAGS_heartbeat_rpc_port),
-                static_cast<size_t>(FLAGS_te_async_poll_worker_num));
+                static_cast<size_t>(FLAGS_te_async_poll_worker_num),
+                FLAGS_p2p_start_local_only);
         } else {
             if (FLAGS_deployment_mode != "Centralization") {
                 LOG(WARNING)

@@ -51,8 +51,6 @@ static bool parseJsonString(const std::string& json_str, Json::Value& value,
 // (e.g., client not connected).
 class PeerClientTest : public ::testing::Test {
    protected:
-    static constexpr uint16_t kTestPort = 50051;
-
     void SetUp() override {
         google::InitGoogleLogging("PeerClientTest");
         FLAGS_logtostderr = 1;
@@ -97,25 +95,20 @@ class PeerClientTest : public ::testing::Test {
 
         // Create ClientRpcService
         rpc_service_ = std::make_unique<ClientRpcService>(*data_manager_);
+        rpc_service_->SetReady();
 
         // Start coro_rpc_server
         server_ = std::make_unique<coro_rpc::coro_rpc_server>(
-            /*thread_num=*/1, kTestPort);
+            /*thread_num=*/1, /*port=*/0);
         RegisterClientRpcService(*server_, *rpc_service_);
 
-        server_thread_ = std::thread([this]() {
-            auto ec = server_->start();
-            if (ec) {
-                LOG(ERROR) << "Server start failed: " << ec.message();
-            }
-        });
-
-        // Wait for server to be ready
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        auto started = server_->async_start();
+        ASSERT_FALSE(started.hasResult()) << "Peer RPC server failed to bind";
+        ASSERT_GT(server_->port(), 0);
 
         // Create and connect PeerClient
         peer_client_ = std::make_unique<PeerClient>();
-        std::string endpoint = "127.0.0.1:" + std::to_string(kTestPort);
+        std::string endpoint = "127.0.0.1:" + std::to_string(server_->port());
         auto connect_result = peer_client_->Connect(endpoint);
         ASSERT_TRUE(connect_result.has_value()) << "PeerClient::Connect failed";
     }
@@ -124,9 +117,6 @@ class PeerClientTest : public ::testing::Test {
         peer_client_.reset();
         if (server_) {
             server_->stop();
-        }
-        if (server_thread_.joinable()) {
-            server_thread_.join();
         }
         server_.reset();
         rpc_service_.reset();
@@ -166,7 +156,6 @@ class PeerClientTest : public ::testing::Test {
     std::shared_ptr<TransferEngine> transfer_engine_;
     std::unique_ptr<ClientRpcService> rpc_service_;
     std::unique_ptr<coro_rpc::coro_rpc_server> server_;
-    std::thread server_thread_;
     std::unique_ptr<PeerClient> peer_client_;
     std::optional<UUID> saved_tier_id_;
 };

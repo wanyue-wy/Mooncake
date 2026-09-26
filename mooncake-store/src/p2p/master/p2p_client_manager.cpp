@@ -11,9 +11,9 @@ namespace mooncake {
 P2PClientManager::P2PClientManager(int64_t disconnect_timeout_sec,
                                    int64_t crash_timeout_sec,
                                    ViewVersionId view_version)
-    : view_version_(view_version) {
-    P2PClientMeta::SetTimeouts(disconnect_timeout_sec, crash_timeout_sec);
-}
+    : disconnect_timeout_sec_(disconnect_timeout_sec),
+      crash_timeout_sec_(crash_timeout_sec),
+      view_version_(view_version) {}
 
 P2PClientManager::~P2PClientManager() { Stop(); }
 
@@ -299,8 +299,9 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
         return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
     }
 
-    auto meta = std::make_shared<P2PClientMeta>(req.client_id, req.ip_address,
-                                                req.rpc_port);
+    auto meta = std::make_shared<P2PClientMeta>(
+        req.client_id, req.ip_address, req.rpc_port, disconnect_timeout_sec_,
+        crash_timeout_sec_);
     for (const auto& segment : req.segments) {
         auto result = meta->MountSegment(segment);
         if (!result) {
@@ -312,7 +313,6 @@ auto P2PClientManager::RegisterClient(const P2PRegisterClientRequest& req)
             return tl::make_unexpected(result.error());
         }
     }
-    meta->SetSyncing(true);
 
     bool inserted = false;
     {
@@ -401,6 +401,7 @@ auto P2PClientManager::Heartbeat(const P2PHeartbeatRequest& req)
     // Update Heartbeat
     auto [old_status, new_status] = meta->Heartbeat();
     response.status = new_status;
+    meta->SetServiceState(req.service_state);
     if (new_status == P2PClientStatus::HEALTH) {
         response.task_results.reserve(req.tasks.size());
         for (const auto& task : req.tasks) {

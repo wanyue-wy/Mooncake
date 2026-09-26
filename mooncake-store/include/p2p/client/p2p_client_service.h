@@ -34,7 +34,7 @@
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include "p2p/client/data_manager.h"
 #include "p2p/client/client_rpc_service.h"
-#include "p2p/ha/ha_recovery_manager.h"
+#include "p2p/ha/metadata_recovery_worker.h"
 #include "p2p/ha/p2p_master_view.h"
 #include "p2p/client/peer_client.h"
 #include "p2p/client/p2p_client_metric.h"
@@ -86,11 +86,10 @@ class P2PClientService final {
         void* addr, bool update_metadata = true);
 
     /**
-     * @brief Proactively unregister from the master, stop the heartbeat, and
+     * @brief Proactively unregister from the master, pause heartbeats, and
      * switch to a stable LOCAL_ONLY service.
      */
-    tl::expected<void, ErrorCode> UnregisterClient()
-        EXCLUDES(registration_mutex_);
+    tl::expected<void, ErrorCode> UnregisterClient() EXCLUDES(lifecycle_mutex_);
 
     /**
      * @brief Single put data for a key.
@@ -224,6 +223,7 @@ class P2PClientService final {
 
     // These accessors were previously inherited; the service owns the state.
     uint16_t GetHttpPort() const { return http_port_; }
+    uint16_t GetRpcPort() const { return client_rpc_port_; }
     bool IsHttpServerEnabled() const { return http_server_ != nullptr; }
 
     // Retained for the shared deployment backend's buffers and defaults.
@@ -306,21 +306,13 @@ class P2PClientService final {
      */
     std::vector<P2PSegment> CollectTierSegments() const;
 
-    /**
-     * @brief Register the P2P client with the master. On a re-registration from
-     * LOCAL_ONLY (heartbeat stopped), also restarts the heartbeat and drives
-     * metadata recovery back to FULL.
-     */
     tl::expected<ViewVersionId, ErrorCode> InnerRegisterClient()
-        REQUIRES(registration_mutex_);
-
-    /**
-     * @brief Unregister body without the in-flight guard. Used by Stop() to
-     * unregister during shutdown (when the public UnregisterClient() would be
-     * rejected). The caller must hold registration_mutex_.
-     */
-    tl::expected<void, ErrorCode> InnerUnregisterClient()
-        REQUIRES(registration_mutex_);
+        REQUIRES(lifecycle_mutex_);
+    ErrorCode EnterOnline(P2PClientServiceState rollback_state)
+        REQUIRES(lifecycle_mutex_);
+    ErrorCode EnterLocalOnly() REQUIRES(lifecycle_mutex_);
+    ErrorCode EnterDegraded(const char* reason) REQUIRES(lifecycle_mutex_);
+    ErrorCode StopClusterResources(bool unregister) REQUIRES(lifecycle_mutex_);
 
    private:
     bool IsHAMode(const std::string& master_server_entry) const;
@@ -329,19 +321,40 @@ class P2PClientService final {
                                    std::string& master_address);
 
    private:
-    ErrorCode ConnectToMaster(const std::string& master_server_entry);
-    void StartHeartbeat(const std::string& master_server_entry);
-    void HeartbeatThreadMain(bool is_ha_mode,
-                             std::string current_master_address);
-    bool ReconnectToMaster(bool is_ha_mode,
-                           std::string& current_master_address);
-    void HandleHeartbeatResponse(const P2PHeartbeatResponse& response,
-                                 const std::string& current_master_address,
-                                 const std::function<void()>& register_client,
-                                 std::future<void>& register_client_future);
+    ErrorCode ConnectToMaster(const std::string& master_server_entry)
+        REQUIRES(lifecycle_mutex_);
+    ErrorCode StartHeartbeat() REQUIRES(lifecycle_mutex_);
+    void HeartbeatThreadMain();
+    ErrorCode ReconnectToMaster() REQUIRES(lifecycle_mutex_);
+    enum class ClientEvent {
+        INITIALIZE_ONLINE,
+        INITIALIZE_LOCAL,
+        REGISTER_REQUESTED,
+        UNREGISTER_REQUESTED,
+        HEARTBEAT_HEALTHY,
+        REGISTRATION_REQUIRED,
+        MASTER_UNREACHABLE,
+        STOP_REQUESTED,
+    };
+    std::optional<ClientEvent> HandleHeartbeatResponse(
+        const P2PHeartbeatResponse& response);
     void HandleHeartbeatTaskResult(const HeartbeatTaskResult& task_result);
     P2PHeartbeatRequest build_heartbeat_request();
-    void OnHAEvent(HAEvent event);
+    ErrorCode HandleEvent(ClientEvent event) EXCLUDES(lifecycle_mutex_);
+    ErrorCode HandleEventLocked(ClientEvent event) REQUIRES(lifecycle_mutex_);
+    ErrorCode HandleInitializeEventLocked(ClientEvent event)
+        REQUIRES(lifecycle_mutex_);
+    ErrorCode HandleRegisterEventLocked() REQUIRES(lifecycle_mutex_);
+    ErrorCode HandleUnregisterEventLocked() REQUIRES(lifecycle_mutex_);
+    ErrorCode HandleHeartbeatEventLocked(ClientEvent event)
+        REQUIRES(lifecycle_mutex_);
+    ErrorCode HandleStopEvent() EXCLUDES(lifecycle_mutex_);
+    P2PClientServiceState GetServiceState() const {
+        return service_state_.load(std::memory_order_acquire);
+    }
+    bool IsLocalService() const;
+    void PublishServiceState(P2PClientServiceState state, const char* reason)
+        REQUIRES(lifecycle_mutex_);
 
    private:
     bool IsLocalWrite(const P2PWriteRouteConfig& cfg) const;
@@ -606,15 +619,9 @@ class P2PClientService final {
     void initTeEndpoint();
     const std::string& get_te_endpoint() const { return te_endpoint_; }
 
-    // P2P registration, heartbeat and shutdown retain their own lifecycle.
-    void StopHeartbeat() EXCLUDES(registration_mutex_);
-    void WaitForNextHeartbeat(int interval_ms);
-    void HeartbeatTryRegister();
-    void InnerStopHeartbeat() REQUIRES(registration_mutex_);
     tl::expected<ViewVersionId, ErrorCode> RegisterClient()
-        EXCLUDES(registration_mutex_);
+        EXCLUDES(lifecycle_mutex_);
 
-    void StopResources();
     void RegisterStatusHttpMethods();
     void RegisterRuntimeConfigHttpMethods();
     void RegisterBusinessHttpMethods();
@@ -623,12 +630,6 @@ class P2PClientService final {
 
     InflightTracker::Guard AcquireInflightGuard() {
         return local_inflight_tracker_.Enter();
-    }
-
-    bool MarkShuttingDown() {
-        bool initiated = local_inflight_tracker_.Close();
-        local_inflight_tracker_.Wait();
-        return initiated;
     }
 
     void RegisterHttpMethods();
@@ -662,15 +663,15 @@ class P2PClientService final {
     std::string te_endpoint_;
     const std::string metadata_connstring_;
 
-    std::thread heartbeat_thread_;
-    std::atomic<bool> heartbeat_running_{false};
-    std::condition_variable heartbeat_cv_;
-    std::mutex heartbeat_mtx_;
+    std::thread heartbeat_thread_ GUARDED_BY(lifecycle_mutex_);
+    std::condition_variable_any lifecycle_cv_;
     std::atomic<ViewVersionId> view_version_{0};
     std::string master_server_entry_;
-    // Keep registration_mutex_ before draining local requests, and before
-    // heartbeat_mtx_, as in the d897 registration/shutdown paths.
-    Mutex registration_mutex_;
+
+    // Serializes events, control RPCs and resource transitions.
+    Mutex lifecycle_mutex_;
+    std::atomic<P2PClientServiceState> service_state_{
+        P2PClientServiceState::INITIALIZING};
     InflightTracker local_inflight_tracker_{
         "local requests", [this] { RecordLocalInflight(true); },
         [this] { RecordLocalInflight(false); }};
@@ -684,13 +685,9 @@ class P2PClientService final {
     // Heartbeats since the last SYNC_CLIENT_METRIC task.
     int metric_sync_heartbeat_count_ = 0;
     P2PMasterClient master_client_;
-    // Accessed only by the P2P heartbeat thread.
-    bool connection_interrupted_ = false;
-    std::atomic<bool> registered_{false};
     uint16_t client_rpc_port_ = 12345;
 
     std::unique_ptr<coro_rpc::coro_rpc_server> client_rpc_server_;
-    std::thread client_rpc_server_thread_;
     // Held by pointer, not by value: DataManager is now an abstract
     // interface, so the concrete implementation is picked at construction
     // time. A null pointer means "not created yet / already released",
@@ -708,8 +705,9 @@ class P2PClientService final {
     // Async route notifier (nullptr when disabled)
     std::unique_ptr<AsyncMetadataNotifier> async_route_notifier_;
 
-    // HA recovery manager
-    std::unique_ptr<HARecoveryManager> ha_manager_;
+    // Stopped before DataManager/notifier destruction; never owns Service state.
+    std::unique_ptr<MetadataRecoveryWorker> recovery_worker_;
+
 
     // Cross-node transfer direction from P2PClientConfig at Init().
     TransferDirectionMode transfer_direction_mode_ =

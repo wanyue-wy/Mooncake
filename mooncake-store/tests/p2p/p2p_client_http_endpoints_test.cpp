@@ -35,9 +35,6 @@ class P2PClientHttpEndpointsTest : public ::testing::Test {
    protected:
     static std::shared_ptr<P2PClientService> CreateP2PClient(
         const std::string& host_name, uint32_t rpc_port, uint16_t http_port) {
-        // TODO(C3.1 / listener fixture; see p2p-split-plan-v3.md): Use the
-        // service's actual bound port after atomic listener initialization;
-        // remove the port-probe race.
         auto config = ClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
@@ -59,6 +56,8 @@ class P2PClientHttpEndpointsTest : public ::testing::Test {
             ADD_FAILURE() << "Init failed: " << static_cast<int>(err);
             return nullptr;
         }
+        EXPECT_TRUE(WaitForRoutableClient(client->GetMasterClient(),
+                                          client->GetClientID()));
         return client;
     }
 
@@ -72,7 +71,7 @@ class P2PClientHttpEndpointsTest : public ::testing::Test {
 
         // Take a free HTTP port to avoid colliding with the default 9003.
         const uint16_t http_port = static_cast<uint16_t>(getFreeTcpPort());
-        const uint32_t rpc_port = static_cast<uint32_t>(getFreeTcpPort());
+        const uint32_t rpc_port = 0;
         client_ = CreateP2PClient("localhost:18901", rpc_port, http_port);
         ASSERT_NE(client_, nullptr);
         ASSERT_TRUE(client_->IsHttpServerEnabled());
@@ -320,6 +319,9 @@ TEST_F(P2PClientHttpEndpointsTest, HttpGetAllKeysInvalidLimit) {
 // ============================================================================
 
 TEST_F(P2PClientHttpEndpointsTest, MetricsUseConcreteClientOutput) {
+    ASSERT_EQ(HttpPost(Url("/put", "key=http_metrics_probe"), "metrics").status,
+              200);
+    ASSERT_EQ(HttpGet(Url("/get", "key=http_metrics_probe")).status, 200);
     ASSERT_TRUE(client_->SerializeMetrics().has_value());
     ASSERT_TRUE(client_->GetSummaryMetrics().has_value());
 
@@ -327,7 +329,7 @@ TEST_F(P2PClientHttpEndpointsTest, MetricsUseConcreteClientOutput) {
     ASSERT_EQ(metrics.status, 200);
     EXPECT_NE(metrics.resp_body.find("mooncake_p2p_total_get_requests_total"),
               std::string::npos);
-    EXPECT_NE(metrics.resp_body.find("mooncake_transfer_read_bytes"),
+    EXPECT_NE(metrics.resp_body.find("mooncake_p2p_local_get_bytes_total"),
               std::string::npos);
 
     const auto summary = HttpGet(Url("/metrics/summary"));
@@ -352,6 +354,47 @@ TEST_F(P2PClientHttpEndpointsTest, DisabledMetricsPreserveErrors) {
 // /unregister + /register
 // ============================================================================
 
+TEST_F(P2PClientHttpEndpointsTest, LocalStartupCanJoinThroughHttp) {
+    for (size_t senders : {0u, 1u}) {
+        auto config = ClientConfigBuilder::build_p2p_real_client(
+            "localhost:" + std::to_string(getFreeTcpPort()), "P2PHANDSHAKE",
+            "tcp", std::nullopt, master_address_,
+            R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})");
+        config.start_local_only = true;
+        config.client_rpc_port = 0;
+        config.http_port = 0;
+        config.local_transfer_mode = LocalTransferMode::MEMCPY;
+        config.async_sender_thread_count = senders;
+        auto created = P2PClientService::Create(config);
+        ASSERT_TRUE(created.has_value());
+        auto local = *created;
+        ASSERT_TRUE(local->IsHttpServerEnabled());
+        ASSERT_NE(local->GetHttpPort(), 0);
+        const auto base = "http://127.0.0.1:" + std::to_string(local->GetHttpPort());
+        const auto key = "http-local-join-" + std::to_string(senders);
+        EXPECT_EQ(local->GetHealthStatus(), "LOCAL_ONLY");
+        EXPECT_EQ(master_.GetWrapped().GetMasterService().GetClientManager()
+                      .GetClient(local->GetClientID()), nullptr);
+        ASSERT_EQ(HttpPost(base + "/put?key=" + key, "local-value").status, 200);
+        EXPECT_EQ(HttpGet(base + "/get?key=" + key).resp_body, "local-value");
+        ASSERT_EQ(HttpPost(base + "/register").status, 200);
+        EXPECT_EQ(local->GetHealthStatus(), "ONLINE");
+        ASSERT_TRUE(WaitForRoutableClient(local->GetMasterClient(), local->GetClientID()));
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        auto remote = HttpGet(Url("/get", "key=" + key));
+        while (remote.status != 200 && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            remote = HttpGet(Url("/get", "key=" + key));
+        }
+        EXPECT_EQ(remote.status, 200);
+        EXPECT_EQ(remote.resp_body, "local-value");
+        ASSERT_EQ(HttpPost(base + "/register").status, 200);
+        ASSERT_EQ(HttpPost(base + "/unregister").status, 200);
+        EXPECT_EQ(local->GetHealthStatus(), "LOCAL_ONLY");
+        EXPECT_EQ(HttpGet(base + "/get?key=" + key).resp_body, "local-value");
+    }
+}
+
 TEST_F(P2PClientHttpEndpointsTest, HttpUnregisterThenRegister) {
     // Unregister via HTTP -> 200, client switches to LOCAL_ONLY.
     auto un = HttpPost(Url("/unregister"));
@@ -371,16 +414,18 @@ TEST_F(P2PClientHttpEndpointsTest, HttpUnregisterThenRegister) {
         << "status=" << re.status << " body=" << re.resp_body;
     EXPECT_EQ(re.resp_body, "OK");
 
-    // Recovery back to FULL is asynchronous.
+    // Service readiness does not wait for historical metadata recovery.
     bool full = false;
     for (int i = 0; i < 50; ++i) {
-        if (client_->GetHealthStatus() == "FULL") {
+        if (client_->GetHealthStatus() == "ONLINE") {
             full = true;
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     EXPECT_TRUE(full) << "health=" << client_->GetHealthStatus();
+    EXPECT_TRUE(WaitForRoutableClient(client_->GetMasterClient(),
+                                      client_->GetClientID()));
 }
 
 }  // namespace testing

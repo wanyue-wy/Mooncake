@@ -8,6 +8,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <glog/logging.h>
 #include <memory>
 #include <mutex>
@@ -141,12 +142,6 @@ class P2PMasterClient final {
     [[nodiscard]] tl::expected<P2PBatchSyncRoutesResponse, ErrorCode>
     BatchSyncRoutes(const P2PBatchSyncRoutesRequest& req);
 
-    /**
-     * @brief Notify Master that this client has finished syncing routes
-     */
-    [[nodiscard]] tl::expected<void, ErrorCode> CompleteRouteSync(
-        const UUID& client_id);
-
    private:
     // TODO: Re-evaluate extracting the pool access, invoke, batch-failure
     // and RPC-metric plumbing into a stateless shared transport helper after
@@ -167,6 +162,12 @@ class P2PMasterClient final {
         Args&&... args) {
         if (metrics_) {
             metrics_->rpc_count.inc({RpcNameTraits<ServiceMethod>::value});
+        }
+
+        if (!pool) {
+            LOG(ERROR) << "P2P master RPC pool is not initialized: "
+                       << RpcNameTraits<ServiceMethod>::value;
+            co_return tl::make_unexpected(ErrorCode::RPC_FAIL);
         }
 
         auto start_time = std::chrono::steady_clock::now();
@@ -198,9 +199,8 @@ class P2PMasterClient final {
     template <auto ServiceMethod, typename ReturnType, typename... Args>
     [[nodiscard]] tl::expected<ReturnType, ErrorCode> invoke_rpc(
         Args&&... args) {
-        return async_simple::coro::syncAwait(
-            invoke_rpc_async<ServiceMethod, ReturnType>(
-                std::forward<Args>(args)...));
+        return invoke_rpc_via<ServiceMethod, ReturnType>(
+            client_accessor_, std::forward<Args>(args)...);
     }
 
     template <auto ServiceMethod, typename ResultType, typename... Args>
@@ -210,6 +210,13 @@ class P2PMasterClient final {
 
         if (metrics_) {
             metrics_->rpc_count.inc({RpcNameTraits<ServiceMethod>::value});
+        }
+
+        if (!pool) {
+            LOG(ERROR) << "P2P master RPC pool is not initialized: "
+                       << RpcNameTraits<ServiceMethod>::value;
+            return std::vector<tl::expected<ResultType, ErrorCode>>(
+                input_size, tl::make_unexpected(ErrorCode::RPC_FAIL));
         }
 
         auto start_time = std::chrono::steady_clock::now();
@@ -276,9 +283,19 @@ class P2PMasterClient final {
     template <auto ServiceMethod, typename ReturnType, typename... Args>
     [[nodiscard]] tl::expected<ReturnType, ErrorCode> invoke_rpc_via(
         RpcClientAccessor& accessor, Args&&... args) {
-        return async_simple::coro::syncAwait(
-            invoke_rpc_async_with_pool<ServiceMethod, ReturnType>(
-                accessor.GetClientPool(), std::forward<Args>(args)...));
+        try {
+            return async_simple::coro::syncAwait(
+                invoke_rpc_async_with_pool<ServiceMethod, ReturnType>(
+                    accessor.GetClientPool(), std::forward<Args>(args)...));
+        } catch (const std::exception& e) {
+            LOG(ERROR) << "P2P master RPC threw: "
+                       << RpcNameTraits<ServiceMethod>::value
+                       << ", what=" << e.what();
+        } catch (...) {
+            LOG(ERROR) << "P2P master RPC threw unknown: "
+                       << RpcNameTraits<ServiceMethod>::value;
+        }
+        return tl::make_unexpected(ErrorCode::INTERNAL_ERROR);
     }
 
     RpcClientAccessor client_accessor_;
