@@ -73,7 +73,11 @@ ClientService::~ClientService() {
 
 void ClientService::Stop() {
     StopHttpServer();
-    resources_.ReleaseLocalBuffer(false);
+    auto error = resources_.ReleaseLocalBuffer(false);
+    if (error != ErrorCode::OK) {
+        LOG(ERROR) << "ClientService::Stop: failed to release local buffer: "
+                   << error;
+    }
     StopHeartbeat();
 }
 

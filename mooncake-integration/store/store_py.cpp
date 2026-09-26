@@ -275,8 +275,9 @@ class MooncakeStorePyWrapper {
 
     // TODO(C2.1/C2.3 / initialization access; see p2p-split-plan-v3.md):
     // This base-Service pointer cannot represent the independent P2P service.
-    // Use the PyClient initialization interface, backed by Real's ClientBackend;
-    // remove this direct access when Real/Dummy entrypoints are migrated.
+    // Use the PyClient initialization interface, backed by Real's
+    // ClientBackend; remove this direct access when Real/Dummy entrypoints are
+    // migrated.
     bool is_client_initialized() const {
         // Check if the store and client are initialized
         // Dummy client does not use client_service_ instance
@@ -290,7 +291,8 @@ class MooncakeStorePyWrapper {
     // TODO(C2.1/C2.3 / default configuration; see p2p-split-plan-v3.md):
     // Route both default-config helpers through PyClient. Real must delegate to
     // ClientBackend for native snapshots and facade conversion; Dummy keeps its
-    // existing defaults. Remove the Service dereferences after that wiring lands.
+    // existing defaults. Remove the Service dereferences after that wiring
+    // lands.
     WriteConfig get_default_write_config() {
         if (!store_) {
             LOG(ERROR) << "Client is not initialized";
@@ -1211,7 +1213,7 @@ PYBIND11_MODULE(store, m) {
                const std::string& runtime_config = "",
                bool enable_metric_collection = true,
                uint64_t metric_report_interval_seconds = 60,
-               uint16_t heartbeat_rpc_port = 0) {
+               uint16_t heartbeat_rpc_port = 0, bool start_local_only = false) {
                 auto real_client = self.init_real_client();
                 std::shared_ptr<mooncake::TransferEngine> transfer_engine =
                     nullptr;
@@ -1236,7 +1238,8 @@ PYBIND11_MODULE(store, m) {
                     p2p_key_lease_scan_interval_ms, p2p_transfer_direction_mode,
                     runtime_config, enable_metric_collection,
                     metric_report_interval_seconds, DEFAULT_CLUSTER_ID, "", 0,
-                    5, 2, "", heartbeat_rpc_port, te_async_poll_worker_num);
+                    5, 2, "", heartbeat_rpc_port, te_async_poll_worker_num,
+                    start_local_only);
 
                 auto ret = real_client->setup(config);
                 return ret;
@@ -1263,7 +1266,10 @@ PYBIND11_MODULE(store, m) {
             py::arg("enable_metric_collection") = true,
             py::arg("metric_report_interval_seconds") = 60,
             py::arg("heartbeat_rpc_port") = 0,
-            "Setup the store in P2P architecture.")
+            py::arg("start_local_only") = false,
+            "Setup the store in P2P architecture. start_local_only skips "
+            "Master "
+            "connection and heartbeat until an explicit POST /register.")
         .def(
             "setup",
             [](MooncakeStorePyWrapper& self, const std::string& local_hostname,
@@ -1364,6 +1370,8 @@ PYBIND11_MODULE(store, m) {
             py::arg("config"),
             "Setup the store in P2P mode with a configuration dictionary.\n"
             "Supported keys:\n"
+            "  start_local_only: Start without joining Master; join later via "
+            "POST /register (default false).\n"
             "  local_hostname (required): Local hostname.\n"
             "  metadata_server (required): Metadata server address.\n"
             "  protocol: Transfer protocol (default 'tcp').\n"

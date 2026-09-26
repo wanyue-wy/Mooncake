@@ -28,8 +28,9 @@ YLT_REFL(P2PRegisterClientRequest, client_id, segments, ip_address, rpc_port);
 struct P2PHeartbeatRequest {
     UUID client_id;
     std::vector<HeartbeatTask> tasks;
+    P2PClientServiceState service_state = P2PClientServiceState::INITIALIZING;
 };
-YLT_REFL(P2PHeartbeatRequest, client_id, tasks);
+YLT_REFL(P2PHeartbeatRequest, client_id, tasks, service_state);
 
 struct P2PHeartbeatResponse {
     P2PClientStatus status = P2PClientStatus::UNDEFINED;

@@ -169,6 +169,10 @@ enum class LocalTransferMode {
  * Inherits all common real client fields and adds P2P-specific options.
  */
 struct P2PClientConfig : RealClientConfigBase {
+    // Skip Master discovery/registration/heartbeat until an explicit /register.
+    // Startup-only policy; master_server_entry is retained for the later join.
+    bool start_local_only = false;
+
     // Parsed runtime read/write config JSON.
     // Loaded from file path, inline JSON string, or env MC_RUNTIME_CONFIG
     Json::Value runtime_config_json;
@@ -375,7 +379,7 @@ class ClientConfigBuilder {
         const std::string& redis_password = "", int redis_db_index = 0,
         int redis_master_view_ttl_sec = 4, int redis_heartbeat_interval_sec = 1,
         const std::string& redis_username = "", uint16_t heartbeat_rpc_port = 0,
-        size_t te_async_poll_worker_num = 32) {
+        size_t te_async_poll_worker_num = 32, bool start_local_only = false) {
         P2PClientConfig config;
         fill_real_client_config_base(
             config, local_hostname, metadata_connstring, protocol, rdma_devices,
@@ -414,6 +418,7 @@ class ClientConfigBuilder {
                 local_memcpy_async_worker_num;
         }
         config.te_async_poll_worker_num = te_async_poll_worker_num;
+        config.start_local_only = start_local_only;
         config.async_sender_thread_count = async_sender_thread_count;
         config.async_max_batch_size = async_max_batch_size;
         config.async_route_queue_size = async_route_queue_size;
@@ -521,7 +526,8 @@ class ClientConfigBuilder {
             redis_config.password, redis_config.db_index,
             redis_config.master_view_ttl_sec,
             redis_config.heartbeat_interval_sec, redis_config.username,
-            heartbeat_rpc_port, te_async_poll_worker_num);
+            heartbeat_rpc_port, te_async_poll_worker_num,
+            get_config_bool(config, DictP2P::kStartLocalOnly, false));
     }
 
    private:
@@ -581,6 +587,7 @@ class ClientConfigBuilder {
 
     struct DictP2P {
         // Keys
+        static constexpr const char* kStartLocalOnly = "start_local_only";
         static constexpr const char* kTieredBackendConfig =
             "tiered_backend_config";
         static constexpr const char* kClientRpcPort = "client_rpc_port";

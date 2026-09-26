@@ -22,9 +22,6 @@ class RuntimeConfigTest : public ::testing::Test {
    protected:
     static std::shared_ptr<P2PClientService> CreateP2PClient(
         const std::string& host_name, uint32_t rpc_port, uint16_t http_port) {
-        // TODO(C3.1 / listener fixture; see p2p-split-plan-v3.md): Use the
-        // service's actual bound port after atomic listener initialization;
-        // remove the port-probe race.
         auto config = ClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
@@ -41,6 +38,8 @@ class RuntimeConfigTest : public ::testing::Test {
             ADD_FAILURE() << "Init failed: " << static_cast<int>(err);
             return nullptr;
         }
+        EXPECT_TRUE(WaitForRoutableClient(client->GetMasterClient(),
+                                          client->GetClientID()));
         return client;
     }
 
@@ -52,7 +51,7 @@ class RuntimeConfigTest : public ::testing::Test {
         master_address_ = master_.master_address();
 
         const uint16_t http_port = static_cast<uint16_t>(getFreeTcpPort());
-        const uint32_t rpc_port = static_cast<uint32_t>(getFreeTcpPort());
+        const uint32_t rpc_port = 0;
         client_ = CreateP2PClient("localhost:18951", rpc_port, http_port);
         ASSERT_NE(client_, nullptr);
         ASSERT_TRUE(client_->IsHttpServerEnabled());

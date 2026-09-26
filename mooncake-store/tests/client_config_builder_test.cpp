@@ -75,6 +75,7 @@ TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesDefaults) {
         "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
         std::nullopt, "127.0.0.1:50051", kTieredConfigJson);
 
+    EXPECT_FALSE(config.start_local_only);
     EXPECT_FALSE(config.tiered_backend_config.isNull());
     EXPECT_TRUE(config.tiered_backend_config.isMember("tiers"));
     EXPECT_EQ(config.tiered_backend_config["tiers"].size(), 1u);
@@ -88,6 +89,18 @@ TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesDefaults) {
     EXPECT_EQ(config.transfer_direction_mode, TransferDirectionMode::REVERSE);
     EXPECT_EQ(config.redis_master_view_ttl_sec, 4);
     EXPECT_EQ(config.redis_heartbeat_interval_sec, 1);
+}
+
+TEST(ClientConfigBuilderTest, P2PLocalOnlyStartupIsExplicit) {
+    std::unordered_map<std::string, std::string> values = {
+        {"local_hostname", "127.0.0.1:12345"},
+        {"metadata_server", "P2PHANDSHAKE"},
+        {"tiered_backend_config", kTieredConfigJson},
+        {"start_local_only", "true"},
+    };
+    EXPECT_TRUE(ClientConfigBuilder::build_p2p_real_client(values).start_local_only);
+    values["start_local_only"] = "false";
+    EXPECT_FALSE(ClientConfigBuilder::build_p2p_real_client(values).start_local_only);
 }
 
 TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesRedisDiscoveryDefaults) {
@@ -193,7 +206,8 @@ TEST(ClientConfigBuilderTest, BuildP2PTeModePassesTeAsyncPollWorkerArg) {
         std::nullopt, "127.0.0.1:50051", kTieredConfigJson, 0, nullptr, "",
         12345, 2, 1024, 100 * 1024 * 1024, 60 * 1000, "te", 5, 9003, true, {},
         0, 2000, 0, 0, 0, "reverse", "", true, 60, DEFAULT_CLUSTER_ID, "", 0, 5,
-        2, "", 0, 18);
+        2, "", 0, 18, true);
+    EXPECT_TRUE(config.start_local_only);
     EXPECT_EQ(config.local_transfer_mode, LocalTransferMode::TE);
     EXPECT_EQ(config.te_async_poll_worker_num, 18u);
     EXPECT_EQ(config.local_memcpy_async_worker_num, 32u);

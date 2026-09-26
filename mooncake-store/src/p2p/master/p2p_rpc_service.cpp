@@ -551,18 +551,6 @@ P2PBatchSyncRoutesResponse P2PMasterRpcService::BatchSyncRoutes(
     return response;
 }
 
-tl::expected<void, ErrorCode> P2PMasterRpcService::CompleteRouteSync(
-    const UUID& client_id) {
-    ScopedVLogTimer timer(1, "CompleteRouteSync");
-    timer.LogRequest("client_id=", client_id);
-
-    auto result = master_service_.CompleteRouteSync(client_id);
-    if (!result) {
-        LOG(ERROR) << "CompleteRouteSync failed: " << toString(result.error());
-    }
-    return result;
-}
-
 void RegisterP2PRpcService(
     coro_rpc::coro_rpc_server& server,
     mooncake::P2PMasterRpcService& wrapped_master_service,
@@ -609,8 +597,6 @@ void RegisterP2PRpcService(
     server.register_handler<&P2PMasterRpcService::BatchWithdrawRoute>(
         &wrapped_master_service);
     server.register_handler<&P2PMasterRpcService::BatchSyncRoutes>(
-        &wrapped_master_service);
-    server.register_handler<&P2PMasterRpcService::CompleteRouteSync>(
         &wrapped_master_service);
 }
 

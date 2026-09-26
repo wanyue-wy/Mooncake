@@ -95,6 +95,7 @@ class PeerClientPerfTest : public ::testing::Test {
             local_transfer_config);
 
         rpc_service_ = std::make_unique<ClientRpcService>(*data_manager_);
+        rpc_service_->SetReady();
 
         // Bind to an ephemeral port (0) so the OS assigns a free one
         server_ = std::make_unique<coro_rpc::coro_rpc_server>(
@@ -553,6 +554,7 @@ class PeerClientRdmaPerfTest : public ::testing::Test {
             local_transfer_config);
 
         rpc_service_ = std::make_unique<ClientRpcService>(*data_manager_);
+        rpc_service_->SetReady();
 
         server_ = std::make_unique<coro_rpc::coro_rpc_server>(
             /*thread_num=*/4, /*port=*/0);

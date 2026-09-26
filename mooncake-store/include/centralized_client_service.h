@@ -9,6 +9,7 @@
 #include "transfer_task.h"
 #include "thread_pool.h"
 #include "rpc_types.h"
+#include "utils.h"
 #include <chrono>
 
 namespace mooncake {

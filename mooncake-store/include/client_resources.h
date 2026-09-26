@@ -60,7 +60,7 @@ class ClientResources {
 
     // Only the owned pool is released here. Caller-registered buffers and SHM
     // retain their existing owners and explicit registration lifecycle.
-    void ReleaseLocalBuffer(bool update_metadata);
+    ErrorCode ReleaseLocalBuffer(bool update_metadata);
 
    private:
     ErrorCode InnerInitTransferEngine(

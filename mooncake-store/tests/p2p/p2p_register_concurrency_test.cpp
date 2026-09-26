@@ -24,7 +24,7 @@
 
 #include <ylt/coro_http/coro_http_client.hpp>
 
-// Read private heartbeat_running_ / registered_ for state assertions.
+// Read private heartbeat thread / Service state for state assertions.
 #define private public
 #define protected public
 #include "p2p/client/p2p_client_service.h"
@@ -75,6 +75,8 @@ class P2PRegisterConcurrencyTest : public ::testing::Test {
             config.metadata_connstring, config.http_port,
             config.enable_http_server, config.labels);
         EXPECT_EQ(client->Init(config), ErrorCode::OK);
+        EXPECT_TRUE(WaitForRoutableClient(client->GetMasterClient(),
+                                          client->GetClientID()));
         return client;
     }
 
@@ -107,15 +109,15 @@ class P2PRegisterConcurrencyTest : public ::testing::Test {
 InProcP2PMaster P2PRegisterConcurrencyTest::master_;
 std::string P2PRegisterConcurrencyTest::master_address_;
 
-// B1/B2: a burst of concurrent /register after LOCAL_ONLY (heartbeat stopped)
+// B1/B2: a burst of concurrent /register after LOCAL_ONLY (heartbeat parked)
 // must not std::terminate / race heartbeat_thread_; the client ends registered
-// with the heartbeat running.
+// with the existing heartbeat thread.
 TEST_F(P2PRegisterConcurrencyTest, ConcurrentRegisterNoCrash) {
     auto client = CreateClient();
 
     ASSERT_EQ(HttpPost(Url(client, "/unregister")), 200);
-    ASSERT_TRUE(WaitFor([&] { return !client->heartbeat_running_.load(); }));
-    EXPECT_FALSE(client->registered_.load());
+    ASSERT_TRUE(client->heartbeat_thread_.joinable());
+    EXPECT_FALSE((client->GetServiceState() == P2PClientServiceState::ONLINE));
     EXPECT_EQ(client->GetHealthStatus(), "LOCAL_ONLY");
 
     constexpr int kThreads = 16;
@@ -138,8 +140,8 @@ TEST_F(P2PRegisterConcurrencyTest, ConcurrentRegisterNoCrash) {
     // The first request creates the client; later requests may observe the
     // existing client and complete as idempotent re-registers.
     EXPECT_GE(ok_count.load(), 1);
-    ASSERT_TRUE(WaitFor([&] { return client->heartbeat_running_.load(); }));
-    EXPECT_TRUE(client->registered_.load());
+    ASSERT_TRUE(client->heartbeat_thread_.joinable());
+    EXPECT_TRUE((client->GetServiceState() == P2PClientServiceState::ONLINE));
 
     client->Stop();
 }
@@ -168,10 +170,10 @@ TEST_F(P2PRegisterConcurrencyTest, RegisterUnregisterInterleaving) {
     reg.join();
     unreg.join();
 
-    // Terminal: unregistered + heartbeat stopped + LOCAL_ONLY all agree.
+    // Terminal: unregistered + heartbeat parked + LOCAL_ONLY all agree.
     ASSERT_EQ(HttpPost(Url(client, "/unregister")), 200);
-    ASSERT_TRUE(WaitFor([&] { return !client->heartbeat_running_.load(); }));
-    EXPECT_FALSE(client->registered_.load());
+    ASSERT_TRUE(client->heartbeat_thread_.joinable());
+    EXPECT_FALSE((client->GetServiceState() == P2PClientServiceState::ONLINE));
     EXPECT_EQ(client->GetHealthStatus(), "LOCAL_ONLY");
 
     client->Stop();
@@ -193,46 +195,47 @@ TEST_F(P2PRegisterConcurrencyTest, StopDuringRegister) {
     client->Stop();
 
     // Heartbeat is stopped and stays stopped while /register keeps being tried.
-    EXPECT_FALSE(client->heartbeat_running_.load());
+    EXPECT_FALSE(client->heartbeat_thread_.joinable());
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    EXPECT_FALSE(client->heartbeat_running_.load());
+    EXPECT_FALSE(client->heartbeat_thread_.joinable());
 
     stop.store(true, std::memory_order_release);
     spam.join();
     client.reset();  // ~P2PClientService after Stop must not double-throw.
 }
 
-// Unregister must always land in LOCAL_ONLY with the heartbeat stopped, and a
+// Unregister must always land in LOCAL_ONLY with the heartbeat parked, and a
 // repeated unregister stays there (idempotent).
 TEST_F(P2PRegisterConcurrencyTest, UnregisterAlwaysLocalOnly) {
     auto client = CreateClient();
 
     ASSERT_EQ(HttpPost(Url(client, "/unregister")), 200);
-    ASSERT_TRUE(WaitFor([&] { return !client->heartbeat_running_.load(); }));
-    EXPECT_FALSE(client->registered_.load());
+    ASSERT_TRUE(client->heartbeat_thread_.joinable());
+    EXPECT_FALSE((client->GetServiceState() == P2PClientServiceState::ONLINE));
     EXPECT_EQ(client->GetHealthStatus(), "LOCAL_ONLY");
 
-    // Second unregister: still OK, still local-only, heartbeat still stopped.
+    // Second unregister: still OK, still local-only, heartbeat still parked.
     ASSERT_EQ(HttpPost(Url(client, "/unregister")), 200);
-    EXPECT_FALSE(client->registered_.load());
-    EXPECT_FALSE(client->heartbeat_running_.load());
+    EXPECT_FALSE((client->GetServiceState() == P2PClientServiceState::ONLINE));
+    EXPECT_TRUE(client->heartbeat_thread_.joinable());
     EXPECT_EQ(client->GetHealthStatus(), "LOCAL_ONLY");
 
     client->Stop();
 }
 
-// Register from LOCAL_ONLY restarts the heartbeat and drives recovery to FULL.
+// Register from LOCAL_ONLY resumes the heartbeat and starts metadata recovery
+// while ONLINE.
 TEST_F(P2PRegisterConcurrencyTest, RegisterFromLocalOnlyRecovers) {
     auto client = CreateClient();
 
     ASSERT_EQ(HttpPost(Url(client, "/unregister")), 200);
-    ASSERT_TRUE(WaitFor([&] { return !client->heartbeat_running_.load(); }));
+    ASSERT_TRUE(client->heartbeat_thread_.joinable());
     EXPECT_EQ(client->GetHealthStatus(), "LOCAL_ONLY");
 
     ASSERT_EQ(HttpPost(Url(client, "/register")), 200);
-    EXPECT_TRUE(client->registered_.load());
-    ASSERT_TRUE(WaitFor([&] { return client->heartbeat_running_.load(); }));
-    EXPECT_TRUE(WaitFor([&] { return client->GetHealthStatus() == "FULL"; },
+    EXPECT_TRUE((client->GetServiceState() == P2PClientServiceState::ONLINE));
+    ASSERT_TRUE(client->heartbeat_thread_.joinable());
+    EXPECT_TRUE(WaitFor([&] { return client->GetHealthStatus() == "ONLINE"; },
                         std::chrono::seconds(10)))
         << "health=" << client->GetHealthStatus();
 
@@ -243,12 +246,12 @@ TEST_F(P2PRegisterConcurrencyTest, RegisterFromLocalOnlyRecovers) {
 // state.
 TEST_F(P2PRegisterConcurrencyTest, DuplicateRegisterIsNoop) {
     auto client = CreateClient();
-    ASSERT_TRUE(WaitFor([&] { return client->registered_.load(); }));
-    const bool hb_before = client->heartbeat_running_.load();
+    ASSERT_TRUE(WaitFor([&] { return (client->GetServiceState() == P2PClientServiceState::ONLINE); }));
+    const auto hb_before = client->heartbeat_thread_.get_id();
 
     EXPECT_EQ(HttpPost(Url(client, "/register")), 200);
-    EXPECT_TRUE(client->registered_.load());
-    EXPECT_EQ(client->heartbeat_running_.load(), hb_before);
+    EXPECT_TRUE((client->GetServiceState() == P2PClientServiceState::ONLINE));
+    EXPECT_EQ(client->heartbeat_thread_.get_id(), hb_before);
 
     client->Stop();
 }
