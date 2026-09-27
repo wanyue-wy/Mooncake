@@ -13,6 +13,7 @@
 #include <glog/logging.h>
 
 #include "client_metric.h"
+#include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include "client_buffer.hpp"
 #include "client_resources.h"
 #include "ha_helper.h"
@@ -26,6 +27,22 @@
 #include "master_metric_manager.h"
 
 namespace mooncake {
+
+struct BatchGetOffloadObjectResponse {
+    std::vector<uint64_t> pointers;
+    std::string transfer_engine_addr;
+    uint64_t gc_ttl_ms;
+
+    BatchGetOffloadObjectResponse() = default;
+    BatchGetOffloadObjectResponse(std::vector<uint64_t>&& pointers_param,
+                                  std::string transfer_engine_addr_param,
+                                  uint64_t gc_ttl_ms_param)
+        : pointers(std::move(pointers_param)),
+          transfer_engine_addr(std::move(transfer_engine_addr_param)),
+          gc_ttl_ms(gc_ttl_ms_param) {}
+};
+YLT_REFL(BatchGetOffloadObjectResponse, pointers, transfer_engine_addr,
+         gc_ttl_ms);
 
 class PutOperation;
 class FileStorage;
@@ -62,9 +79,8 @@ class QueryResult {
 class Client {
    public:
     // Callers must finish external operations before releasing the last owner.
-    // TODO(C2.1/C2.2 / deployment shutdown): Real closes and drains RPC/IPC
-    // admission and unregisters SHM before Backend releases this native Client.
-    // The centralized Backend uses destruction; P2P keeps its own Stop/Destroy.
+    // Real drains deployment calls and unregisters SHM before releasing this
+    // Client. Its native client-to-client listener is stopped by the destructor.
     ~Client();
 
     /**
@@ -424,11 +440,12 @@ class Client {
 
     // Storage ownership and convenience calls retained from d897. Their
     // implementation follows the A00 algorithms at the end of client_service.cpp.
+    // InitStorage also starts the native client-to-client RPC server.
     // The creation path calls InitStorage before publishing this Client.
     // On failure discard the Client; its members own the allocated resources.
     ErrorCode InitStorage(uint64_t global_segment_size,
                           uint64_t local_buffer_size, bool enable_offload,
-                          const std::string& local_rpc_addr);
+                          uint16_t client_rpc_port = 0);
     std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const {
         return resources_.GetBufferAllocator();
     }
@@ -558,7 +575,12 @@ class Client {
     std::vector<std::unique_ptr<void, SegmentDeleter>> segment_ptrs_;
     std::vector<std::unique_ptr<void, AscendSegmentDeleter>> ascend_segment_ptrs_;
     std::vector<std::unique_ptr<void, HugepageSegmentDeleter>> hugepage_segment_ptrs_;
-    // FileStorage stays native-owned; Real and Backend only forward calls.
+    // The native client-to-client RPC server is independent of file offload.
+    ErrorCode StartClientRpcServer(uint16_t port);
+    void StopClientRpcServer();
+    std::unique_ptr<coro_rpc::coro_rpc_server> client_rpc_server_;
+    std::atomic<bool> client_rpc_ready_{false};
+    std::string client_rpc_addr_;
     std::unique_ptr<FileStorage> file_storage_;
     std::unique_ptr<ClientRequester> client_requester_;
     tl::expected<void, ErrorCode> BatchGetIntoOffloadObjectInternal(
@@ -572,7 +594,7 @@ class Client {
     void PingThreadMain(bool is_ha_mode, std::string current_master_address);
 };
 
-// A00 offload RPC requester, retained here with the centralized Client.
+// Native client-to-client RPC requester, retained with the centralized Client.
 class ClientRequester {
    public:
     ClientRequester();

@@ -1,6 +1,5 @@
 #include "client_service.h"
 #include "file_storage.h"
-#include "real_client.h"
 
 #include <glog/logging.h>
 
@@ -54,6 +53,7 @@ Client::Client(const std::string& local_hostname,
 }
 
 Client::~Client() {
+    StopClientRpcServer();
     file_storage_.reset();
     // Make a copy of mounted_segments_ to avoid modifying while iterating
     std::vector<Segment> segments_to_unmount;
@@ -1782,7 +1782,7 @@ void Client::HugepageSegmentDeleter::operator()(void* ptr) const {
 
 ErrorCode Client::InitStorage(uint64_t global_segment_size,
                               uint64_t local_buffer_size, bool enable_offload,
-                              const std::string& local_rpc_addr) {
+                              uint16_t client_rpc_port) {
     const bool should_use_hugepage =
         (std::getenv("MC_STORE_USE_HUGEPAGE") != nullptr) && protocol_ != "ascend";
     resources_.InitLocalBufferAllocator(local_buffer_size, protocol_,
@@ -1866,10 +1866,17 @@ ErrorCode Client::InitStorage(uint64_t global_segment_size,
         }
     }
 
+    auto rpc_error = StartClientRpcServer(client_rpc_port);
+    if (rpc_error != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to start client rpc server: "
+                   << toString(rpc_error.error());
+        return rpc_error;
+    }
+
     if (enable_offload) {
         auto file_storage_config = FileStorageConfig::FromEnvironment();
         file_storage_ = std::make_unique<FileStorage>(file_storage_config, this,
-                                                      local_rpc_addr);
+                                                      client_rpc_addr_);
         auto init_result = file_storage_->Init();
         if (!init_result) {
             LOG(ERROR) << "file storage init failed with error: "
@@ -1877,7 +1884,54 @@ ErrorCode Client::InitStorage(uint64_t global_segment_size,
             return init_result.error();
         }
     }
+    client_rpc_ready_.store(true, std::memory_order_release);
     return ErrorCode::OK;
+}
+
+ErrorCode Client::StartClientRpcServer(uint16_t port) {
+    std::string host;
+    if (resources_.GetTransferEngine()) {
+        const auto te_endpoint = GetTransportEndpoint();
+        host = te_endpoint.substr(0, te_endpoint.rfind(':'));
+    } else {
+        // rpc_only clients have no transfer engine; use their configured host.
+        host = parseHostNameWithPort(local_hostname_).first;
+    }
+    if (host.size() > 1 && host.front() == '[' && host.back() == ']') {
+        host = host.substr(1, host.size() - 2);
+    }
+    auto listen_address =
+        (host.find(':') == std::string::npos ? host : "[" + host + "]") + ":" +
+        std::to_string(port);
+    client_rpc_server_ =
+        std::make_unique<coro_rpc::coro_rpc_server>(1, listen_address);
+    client_rpc_server_
+        ->register_handler<&Client::BatchGetOffloadObjectFromStorage>(this);
+    auto server_exit = client_rpc_server_->async_start();
+    if (server_exit.hasResult()) {
+        LOG(ERROR) << "Failed to start client RPC server on port " << port
+                   << ": " << server_exit.result().value().message();
+        return ErrorCode::INTERNAL_ERROR;
+    }
+    auto bound_port = client_rpc_server_->port();
+    if (bound_port == 0) {
+        LOG(ERROR) << "Client RPC server has no bound port";
+        return ErrorCode::INTERNAL_ERROR;
+    }
+    client_rpc_addr_ =
+        (host.find(':') == std::string::npos ? host : "[" + host + "]") + ":" +
+        std::to_string(bound_port);
+    LOG(INFO) << "Native client-to-client RPC listening at "
+              << client_rpc_addr_;
+    return ErrorCode::OK;
+}
+
+void Client::StopClientRpcServer() {
+    client_rpc_ready_.store(false, std::memory_order_release);
+    if (client_rpc_server_) {
+        client_rpc_server_->stop();
+    }
+    client_rpc_server_.reset();
 }
 
 tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Client::Get(
@@ -2238,6 +2292,14 @@ std::vector<tl::expected<int64_t, ErrorCode>> Client::BatchGet(
 tl::expected<BatchGetOffloadObjectResponse, ErrorCode>
 Client::BatchGetOffloadObjectFromStorage(const std::vector<std::string>& keys,
                                          const std::vector<int64_t>& sizes) {
+    if (!client_rpc_ready_.load(std::memory_order_acquire)) {
+        LOG(ERROR) << "Client RPC server is not ready";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    if (!file_storage_) {
+        LOG(ERROR) << "File offload is not enabled for this client";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
     auto result = file_storage_->BatchGet(keys, sizes);
     if (!result) {
         LOG(ERROR) << "Batch get offload object failed, err_code = "
@@ -2289,13 +2351,6 @@ tl::expected<void, ErrorCode> Client::BatchGetIntoOffloadObjectInternal(
     return {};
 }
 
-// Preserve the A00 wire method also registered by the current daemon.
-// TODO(C2.2 / offload serving; see p2p-split-plan-v3.md): replace Real's stale
-// downcast with ClientBackend -> Client::BatchGetOffloadObjectFromStorage and
-// validate the paired requester/daemon route. Keep this method identity.
-// TODO(D1 / offload dependency): audit this declaration-only Real include and
-// its symbols after PyClient no longer includes legacy_client_service.h.
-
 ClientRequester::ClientRequester() {
     coro_io::client_pool<coro_rpc::coro_rpc_client>::pool_config pool_conf{};
     const char* value = std::getenv("MC_RPC_PROTOCOL");
@@ -2313,7 +2368,7 @@ ClientRequester::batch_get_offload_object(const std::string& client_addr,
                                           const std::vector<std::string>& keys,
                                           const std::vector<int64_t> sizes) {
     auto result =
-        invoke_rpc<&RealClient::batch_get_offload_object,
+        invoke_rpc<&Client::BatchGetOffloadObjectFromStorage,
                    BatchGetOffloadObjectResponse>(client_addr, keys, sizes);
     if (!result) {
         LOG(ERROR)

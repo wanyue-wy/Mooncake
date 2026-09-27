@@ -125,7 +125,7 @@ TEST(ClientConfigBuilderTest, CentralizedConfigKeepsDiscoveryForBackendValidatio
     };
     auto config = CentralizedClientConfigBuilder::build_centralized_real_client(raw_config);
     EXPECT_EQ(config.master_server_entry, "redis://127.0.0.1:6379");
-    EXPECT_EQ(config.offload_rpc_port, 0);
+    EXPECT_EQ(config.client_rpc_port, 0);
 }
 
 TEST(ClientConfigBuilderTest, BuildP2PClientConfigKeyLeaseOverrides) {
@@ -174,16 +174,20 @@ TEST(ClientConfigBuilderTest, CentralizedConfigRejectsRemovedParameters) {
     }
 }
 
-TEST(ClientConfigBuilderTest, CentralizedOffloadPortIsIndependent) {
+TEST(ClientConfigBuilderTest, CentralizedClientRpcPortIsIndependentOfOffload) {
     std::unordered_map<std::string, std::string> config = {
         {"local_hostname", "127.0.0.1:12345"}, {"metadata_server", "P2PHANDSHAKE"},
-        {"enable_offload", "true"}, {"offload_rpc_port", "12346"},
+        {"client_rpc_port", "12346"},
     };
     auto parsed = CentralizedClientConfigBuilder::build_centralized_real_client(config);
     EXPECT_EQ(parsed.te_port, 12345);
-    EXPECT_TRUE(parsed.enable_offload);
-    EXPECT_EQ(parsed.offload_rpc_port, 12346);
-    config["offload_rpc_port"] = "65536";
+    EXPECT_FALSE(parsed.enable_offload);
+    EXPECT_EQ(parsed.client_rpc_port, 12346);
+    config["enable_offload"] = "true";
+    auto with_offload = CentralizedClientConfigBuilder::build_centralized_real_client(config);
+    EXPECT_TRUE(with_offload.enable_offload);
+    EXPECT_EQ(with_offload.client_rpc_port, parsed.client_rpc_port);
+    config["client_rpc_port"] = "65536";
     EXPECT_THROW(CentralizedClientConfigBuilder::build_centralized_real_client(config), std::invalid_argument);
 }
 
