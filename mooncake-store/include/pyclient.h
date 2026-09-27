@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-#include "client_service.h"
+#include "legacy_client_service.h"
 #include "client_buffer.hpp"
 
 namespace mooncake {

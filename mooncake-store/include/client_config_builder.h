@@ -119,10 +119,17 @@ struct RealClientConfigBase {
     // Whether to enable HTTP server.
     bool enable_http_server = true;
 
-    // TODO(C2 / native configuration; see p2p-split-plan-v3.md): Remove
-    // RealClientConfigBase and split the native builders. Keep HTTP/runtime
-    // JSON and metric inputs in the P2P configuration; restore A00 centralized
-    // inputs and environment behavior. Python entry migration belongs to I1.
+    // TODO(C2.2/C2.3 / entry configuration; see p2p-split-plan-v3.md):
+    // Split these entry builders when Backend is connected. Native Client
+    // accepts A00 inputs plus explicit storage initialization, no mixed DTO.
+    // Remove centralized HTTP inputs/defaults, keep explicit runtime rejection
+    // and no MC_RUNTIME_CONFIG reads, and preserve C1 metric controls/labels.
+    // Update Python positional/dict setup and daemon CLI together so ordinary
+    // default setup does not fail because this legacy HTTP default is true.
+    // Native centralized Client uses ClientMetric::Create and its environment
+    // controls, with no enable_metric_collection argument. Remove the
+    // centralized entry-side toggle in C2.2/C2.3; do not silently ignore an
+    // explicit false while the old input remains exposed. Keep P2P's toggle.
     // Whether to collect client metrics at all.
     // Centralized clients also honor MC_STORE_CLIENT_METRIC.
     bool enable_metric_collection = true;
@@ -147,6 +154,10 @@ struct RealClientConfigBase {
  *
  * Inherits all common real client fields and adds centralized-specific options.
  */
+// TODO(C2.2 / centralized Backend creation): unwrap these entry fields into
+// Client::Create and InitStorage before publishing the Client. Reject a
+// dedicated heartbeat port and Redis discovery before resource creation;
+// discard partial initialization on failure and preserve Real's error channel.
 struct CentralizedClientConfig : RealClientConfigBase {
     // Size of global segment to mount (0 to skip)
     uint64_t global_segment_size = 0;

@@ -29,11 +29,8 @@ TEST(NonHAReconnectTest, ClientAutoReconnectAndRemount) {
     // Create client (non-HA), mount a segment
     std::string local_hostname = "127.0.0.1:18001";
     std::string master_addr = master.master_address();
-    // TODO(C3.2 / A00 reconnect fixture; see p2p-split-plan-v3.md): Restore
-    // the baseline Client factory and retain the original reconnect assertions.
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto client_opt = Client::Create(
         local_hostname, "P2PHANDSHAKE", "tcp", std::nullopt, master_addr);
-    auto client_opt = ClientService::Create(config);
     ASSERT_TRUE(client_opt.has_value());
     auto client = client_opt.value();
 

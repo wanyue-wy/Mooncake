@@ -17,7 +17,6 @@
 #include <sys/mman.h>
 
 #include "allocator.h"
-#include "centralized_client_service.h"
 #include "client_service.h"
 #include "client_config_builder.h"
 #include "types.h"
@@ -93,23 +92,18 @@ class ClientIdCaptureSink : public google::LogSink {
 
 class ClientIntegrationTestCxl : public ::testing::Test {
    protected:
-    static std::shared_ptr<CentralizedClientService> CreateClient(
+    static std::shared_ptr<Client> CreateClient(
         const std::string& host_name) {
-        // TODO(C3.2 / A00 client factory; see p2p-split-plan-v3.md): Restore
-        // the baseline Client factory when removing CentralizedClientService;
-        // preserve the original scenarios and assertions.
-        auto config = ClientConfigBuilder::build_centralized_real_client(
+        auto client_opt = Client::Create(
             host_name, FLAGS_transfer_engine_metadata_url, FLAGS_protocol,
             std::nullopt, master_address_);
-        auto client_opt = ClientService::Create(config);
 
         EXPECT_TRUE(client_opt.has_value())
             << "Failed to create client with host_name: " << host_name;
         if (!client_opt.has_value()) {
             return nullptr;
         }
-        return std::static_pointer_cast<CentralizedClientService>(
-            client_opt.value());
+        return client_opt.value();
     }
 
     static void SetUpTestSuite() {
@@ -239,7 +233,7 @@ class ClientIntegrationTestCxl : public ::testing::Test {
         }
     }
 
-    static std::shared_ptr<CentralizedClientService> test_client_;
+    static std::shared_ptr<Client> test_client_;
     // Here we use a simple allocator for the client buffer. In a real
     // application, user should manage the memory allocation and deallocation
     // themselves.
@@ -258,7 +252,7 @@ class ClientIntegrationTestCxl : public ::testing::Test {
 };
 
 // Static members initialization
-std::shared_ptr<CentralizedClientService>
+std::shared_ptr<Client>
     ClientIntegrationTestCxl::test_client_ = nullptr;
 void* ClientIntegrationTestCxl::segment_ptr_ = nullptr;
 void* ClientIntegrationTestCxl::test_client_segment_ptr_ = nullptr;

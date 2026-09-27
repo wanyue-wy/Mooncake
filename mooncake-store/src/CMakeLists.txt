@@ -47,12 +47,15 @@ set(MOONCAKE_P2P_MASTER_SOURCES
     p2p/ha/ha_metric_manager.cpp
 )
 
+# TODO(C2.1/C2.2 / native client linkage; see p2p-split-plan-v3.md): Real still
+# references the declaration-only legacy factory and offload downcast. Connect
+# the build-selected Backend before claiming this aggregate target builds.
+# D1/I2 must then prove architecture isolation in the actual linked artifacts.
 set(MOONCAKE_STORE_SOURCES
     ${MOONCAKE_MASTER_SUPPORT_SOURCES}
     ${MOONCAKE_CENTRALIZED_MASTER_SOURCES}
     client_service.cpp
     client_resources.cpp
-    centralized_client_service.cpp
     client_metric.cpp
     master_client.cpp
     storage_backend.cpp

@@ -43,7 +43,7 @@ namespace mooncake {
 namespace benchmark {
 
 // Global client and allocator instances
-std::shared_ptr<ClientService> g_client = nullptr;
+std::shared_ptr<Client> g_client = nullptr;
 std::unique_ptr<SimpleAllocator> g_client_buffer_allocator = nullptr;
 void* g_segment_ptr = nullptr;
 size_t g_ram_buffer_size = 0;
@@ -101,12 +101,9 @@ bool initialize_client() {
     if (!FLAGS_device_name.empty()) {
         rdma_devices = FLAGS_device_name;
     }
-    // TODO(C3.2 / A00 client factory; see p2p-split-plan-v3.md): Restore the
-    // baseline Client factory; preserve the original scenarios and assertions.
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto client_opt = Client::Create(
         FLAGS_local_hostname, FLAGS_metadata_connection_string, FLAGS_protocol,
         rdma_devices, FLAGS_master_address);
-    auto client_opt = ClientService::Create(config);
 
     if (!client_opt.has_value()) {
         LOG(ERROR) << "Failed to create client";

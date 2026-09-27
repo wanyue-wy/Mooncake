@@ -234,8 +234,9 @@ TEST_F(IPv6ClientTest, BasicPutGetOverIPv6Loopback) {
     LOG(INFO) << "Setting up client with server address: "
               << FLAGS_server_address;
 
-    // TODO(C3.2 / A00 client factory; see p2p-split-plan-v3.md): Restore the
-    // baseline Client factory; preserve the original scenarios and assertions.
+    // TODO(C2.1/C2.2 / IPv6 Real fixture; see p2p-split-plan-v3.md): connect
+    // Real to Backend's native Client creation/storage initialization. Retain
+    // the IPv6 setup and data assertions; native restoration alone is not e2e.
     auto config = ClientConfigBuilder::build_centralized_real_client(
         FLAGS_server_address, "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt

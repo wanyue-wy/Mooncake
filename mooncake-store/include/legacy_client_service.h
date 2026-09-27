@@ -1,0 +1,562 @@
+#pragma once
+
+// TODO(C2.1/C2.2/C3.3 / deployment migration; see p2p-split-plan-v3.md):
+// Declaration-only remainder of the removed shared business service. Neither
+// native Client derives from it and its factory has no implementation. Move
+// Real/PyClient and the mixed e2e wrapper to the build-selected ClientBackend,
+// then delete this header. Do not add a compatibility subclass or factory.
+// LegacyQueryResult is only an old deployment signature, not a native model.
+
+#include <csignal>
+#include <boost/functional/hash.hpp>
+#include <condition_variable>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <vector>
+#include <ylt/util/tl/expected.hpp>
+#include "mutex.h"
+
+#include "p2p/client/inflight_tracker.h"
+#include "transfer_engine.h"
+#include "types.h"
+#include "p2p/common/p2p_rpc_types.h"
+#include "p2p/common/p2p_types.h"
+#include "rpc_types.h"
+#include "replica.h"
+#include "master_metric_manager.h"
+#include <ylt/coro_rpc/coro_rpc_server.hpp>
+#include <ylt/coro_http/coro_http_server.hpp>
+#include "client_config_builder.h"
+#include "client_buffer.hpp"
+#include "client_resources.h"
+
+namespace mooncake {
+
+using WriteConfig = std::variant<ReplicateConfig, WriteRouteRequestConfig>;
+
+/**
+ * @brief Result of a query operation containing replica information
+ */
+class LegacyQueryResult {
+   public:
+    /** @brief List of available replicas for the queried key */
+    const std::vector<Replica::Descriptor> replicas;
+
+    explicit LegacyQueryResult(std::vector<Replica::Descriptor>&& replicas_param)
+        : replicas(std::move(replicas_param)) {}
+
+    virtual ~LegacyQueryResult() = default;
+
+    // Disable copy to prevent slicing; allow move
+    LegacyQueryResult(const LegacyQueryResult&) = delete;
+    LegacyQueryResult& operator=(const LegacyQueryResult&) = delete;
+    LegacyQueryResult(LegacyQueryResult&&) = default;
+    LegacyQueryResult& operator=(LegacyQueryResult&&) = default;
+};
+
+/**
+ * @brief Client for interacting with the mooncake distributed object store
+ */
+class ClientService {
+   public:
+    virtual ~ClientService();
+
+    /**
+     * @brief stops background threads
+     */
+    virtual void Stop();
+
+    /**
+     * @brief Stops the heartbeat thread
+     */
+    virtual void StopHeartbeat() EXCLUDES(registration_mutex_);
+
+    /**
+     * @brief Release internal resources. Should be called after Stop()
+     */
+    virtual void Destroy();
+
+    /**
+     * @brief Creates and initializes a new ClientService instance
+     * @param config The start up configuration for the client service.
+     * @return std::optional containing a shared_ptr to ClientService if
+     * successful, std::nullopt otherwise
+     */
+    static std::optional<std::shared_ptr<ClientService>> Create(
+        const CentralizedClientConfig& config);
+
+    /**
+     * @brief Returns the deployment mode of the client service.
+     * @return DeploymentMode (CENTRALIZATION or P2P).
+     */
+    virtual DeploymentMode deployment_mode() const = 0;
+
+    /**
+     * @brief Batch query IP addresses for multiple client IDs.
+     * @param client_ids Vector of client UUIDs to query.
+     * @return An expected object containing a map from client_id to their IP
+     * address lists on success, or an ErrorCode on failure.
+     */
+    virtual tl::expected<
+        std::unordered_map<UUID, std::vector<std::string>, boost::hash<UUID>>,
+        ErrorCode>
+    BatchQueryIp(const std::vector<UUID>& client_ids) = 0;
+
+    /**
+     * @brief Queries replica lists for object keys that match a regex pattern.
+     * @param str The regular expression string to match against object keys.
+     * @return An expected object containing a map from object keys to their
+     * replica descriptors on success, or an ErrorCode on failure.
+     */
+    virtual tl::expected<
+        std::unordered_map<std::string, std::vector<Replica::Descriptor>>,
+        ErrorCode>
+    QueryByRegex(const std::string& str) = 0;
+
+    /**
+     * @brief Gets object metadata without transferring data
+     * @param object_key Key to query
+     * @return LegacyQueryResult (or its subclass) containing replicas, or ErrorCode
+     * indicating failure
+     */
+    virtual tl::expected<std::unique_ptr<LegacyQueryResult>, ErrorCode> Query(
+        const std::string& object_key, const ReadRouteConfig& config = {}) = 0;
+
+    /**
+     * @brief Batch query object metadata without transferring data
+     * @param object_keys Keys to query
+     * @return Vector of LegacyQueryResult (or its subclass) containing replicas
+     */
+    virtual std::vector<tl::expected<std::unique_ptr<LegacyQueryResult>, ErrorCode>>
+    BatchQuery(const std::vector<std::string>& object_keys,
+               const ReadRouteConfig& config = {}) = 0;
+
+    /**
+     * @brief Gets data with memory allocation
+     * @param key Object key
+     * @param allocator Read buffer allocator
+     * @param config Read route config
+     * @return BufferHandle allocated by `allocator` on success.
+     *         ErrorCode on failure.
+     */
+    virtual tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Get(
+        const std::string& key,
+        std::shared_ptr<ClientBufferAllocator> allocator,
+        const ReadRouteConfig& config = {}) = 0;
+
+    virtual std::vector<tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>>
+    BatchGet(const std::vector<std::string>& keys,
+             std::shared_ptr<ClientBufferAllocator> allocator,
+             const ReadRouteConfig& config = {}) = 0;
+
+    /**
+     * @brief Gets data into user-provided buffers without memory allocation
+     * @param key Object key
+     * @param buffers Vector of destination buffer pointers
+     * @param sizes Vector of buffer sizes (must match buffers.size())
+     * @param config Read route config
+     * @return Number of bytes read on success. ErrorCode on failure.
+     */
+    virtual tl::expected<int64_t, ErrorCode> Get(
+        const std::string& key, const std::vector<void*>& buffers,
+        const std::vector<size_t>& sizes,
+        const ReadRouteConfig& config = {}) = 0;
+
+    /**
+     * @brief Batch get data into user-provided buffers
+     * @param keys Object keys
+     * @param all_buffers Vector of buffer pointer vectors (one per key)
+     * @param all_sizes Vector of buffer size vectors (one per key)
+     * @param config Read route config
+     * @param aggregate_same_segment_task
+     * Whether to aggregate read tasks on the same segment.
+     * If false, each key will be generated as a independent task.
+     * Otherwise, the tasks will be aggregated on the same segment.
+     * @return Vector of bytes read on success. ErrorCode on failure.
+     */
+    virtual std::vector<tl::expected<int64_t, ErrorCode>> BatchGet(
+        const std::vector<std::string>& keys,
+        const std::vector<std::vector<void*>>& all_buffers,
+        const std::vector<std::vector<size_t>>& all_sizes,
+        const ReadRouteConfig& config = {},
+        bool aggregate_same_segment_task = false) = 0;
+
+    /**
+     * @brief Stores data with replication
+     * @param key Object key
+     * @param slices Vector of data slices to store
+     * @param config Replication configuration
+     * @return ErrorCode indicating success/failure
+     */
+    virtual tl::expected<void, ErrorCode> Put(const ObjectKey& key,
+                                              std::vector<Slice>& slices,
+                                              const WriteConfig& config) = 0;
+
+    /**
+     * @brief Batch put data with replication
+     * @param keys Object keys
+     * @param batched_slices Vector of vectors of data slices to store (indexed
+     * to match keys)
+     * @param config Replication configuration
+     */
+    virtual std::vector<tl::expected<void, ErrorCode>> BatchPut(
+        const std::vector<ObjectKey>& keys,
+        std::vector<std::vector<Slice>>& batched_slices,
+        const WriteConfig& config) = 0;
+
+    /**
+     * @brief Removes an object and all its replicas
+     * @param key Key to remove
+     * @param force If true, skip lease and replication task checks
+     * @return ErrorCode indicating success/failure
+     */
+    virtual tl::expected<void, ErrorCode> Remove(const ObjectKey& key,
+                                                 bool force = false) = 0;
+
+    /**
+     * @brief Removes objects from the store whose keys match a regex pattern.
+     * @param str The regular expression string to match against object keys.
+     * @param force If true, skip lease and replication task checks
+     * @return An expected object containing the number of removed objects on
+     * success, or an ErrorCode on failure.
+     */
+    virtual tl::expected<long, ErrorCode> RemoveByRegex(const ObjectKey& str,
+                                                        bool force = false) = 0;
+
+    /**
+     * @brief Removes all objects and all its replicas
+     * @param force If true, skip lease and replication task checks
+     * @return tl::expected<long, ErrorCode> number of removed objects or error
+     */
+    virtual tl::expected<long, ErrorCode> RemoveAll(bool force = false) = 0;
+
+    /**
+     * @brief Removes all objects from this Client's LOCAL tiered storage.
+     * @return Number of removed objects, or ErrorCode on failure.
+     */
+    virtual tl::expected<long, ErrorCode> RemoveAllLocal() {
+        return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+    }
+
+    /**
+     * @brief Removes a single object from this Client's LOCAL tiered storage.
+     * @param key Key to remove
+     * @return ErrorCode indicating success/failure.
+     */
+    virtual tl::expected<void, ErrorCode> RemoveLocal(const ObjectKey& key) {
+        (void)key;
+        return tl::make_unexpected(ErrorCode::NOT_IMPLEMENTED);
+    }
+
+    /**
+     * @brief Registers a memory segment to master for allocation
+     * @param buffer Memory buffer to register
+     * @param size Size of the buffer in bytes
+     * @return ErrorCode indicating success/failure
+     */
+    virtual tl::expected<void, ErrorCode> MountSegment(
+        const void* buffer, size_t size,
+        const std::string& protocol = "tcp") = 0;
+
+    /**
+     * @brief Unregisters a memory segment from master
+     * @param buffer Memory buffer to unregister
+     * @param size Size of the buffer in bytes
+     * @return ErrorCode indicating success/failure
+     */
+    virtual tl::expected<void, ErrorCode> UnmountSegment(const void* buffer,
+                                                         size_t size) = 0;
+
+    /**
+     * @brief Registers memory buffer with TransferEngine for data transfer
+     * @param addr Memory address to register
+     * @param length Size of the memory region
+     * @param location Device location (e.g. "cpu:0")
+     * @param remote_accessible Whether the memory can be accessed remotely
+     * @param update_metadata Whether to update metadata service
+     * @return ErrorCode indicating success/failure
+     */
+    tl::expected<void, ErrorCode> RegisterLocalMemory(
+        void* addr, size_t length, const std::string& location,
+        bool remote_accessible = true, bool update_metadata = true);
+
+    /**
+     * @brief Unregisters memory buffer from TransferEngine
+     * @param addr Memory address to unregister
+     * @param update_metadata Whether to update metadata service
+     * @return ErrorCode indicating success/failure
+     */
+    tl::expected<void, ErrorCode> unregisterLocalMemory(
+        void* addr, bool update_metadata = true);
+
+    /**
+     * @brief Checks if an object exists
+     * @param key Key to check
+     * @return True if exists, false if not, or ErrorCode for unexpected errors.
+     */
+    virtual tl::expected<bool, ErrorCode> IsExist(const std::string& key) = 0;
+
+    /**
+     * @brief Checks if multiple objects exist
+     * @param keys Vector of keys to check
+     * @return Vector of existence results for each key
+     */
+    virtual std::vector<tl::expected<bool, ErrorCode>> BatchIsExist(
+        const std::vector<std::string>& keys) = 0;
+
+    /**
+     * @brief Create a copy task to copy an object's replicas to target segments
+     * @param key Object key
+     * @param targets Target segments
+     * @return tl::expected<UUID, ErrorCode> Task ID on success, ErrorCode on
+     * failure
+     */
+    virtual tl::expected<UUID, ErrorCode> CreateCopyTask(
+        const std::string& key, const std::vector<std::string>& targets);
+
+    /**
+     * @brief Create a move task to move an object's replica from source segment
+     * to target segment
+     * @param key Object key
+     * @param source Source segment
+     * @param target Target segment
+     * @return tl::expected<UUID, ErrorCode> Task ID on success, ErrorCode on
+     * failure
+     */
+    virtual tl::expected<UUID, ErrorCode> CreateMoveTask(
+        const std::string& key, const std::string& source,
+        const std::string& target);
+
+    /**
+     * @brief Query a task by task id
+     * @param task_id Task ID to query
+     * @return tl::expected<QueryTaskResponse, ErrorCode> Task basic info
+     * on success, ErrorCode on failure
+     */
+    virtual tl::expected<QueryTaskResponse, ErrorCode> QueryTask(
+        const UUID& task_id);
+
+    /**
+     * @brief Fetch tasks assigned to a client
+     * @param batch_size Number of tasks to fetch
+     * @return tl::expected<std::vector<TaskAssignment>, ErrorCode> list of
+     * tasks on success, ErrorCode on failure
+     */
+    virtual tl::expected<std::vector<TaskAssignment>, ErrorCode> FetchTasks(
+        size_t batch_size);
+
+    /**
+     * @brief Mark the task as complete
+     * @param task_complete Task complete request
+     * @return tl::expected<void, ErrorCode> indicating success/failure
+     */
+    virtual tl::expected<void, ErrorCode> MarkTaskToComplete(
+        const TaskCompleteRequest& task_complete);
+
+    // For human-readable metrics
+    virtual tl::expected<std::string, ErrorCode> GetSummaryMetrics() = 0;
+
+    virtual tl::expected<MasterMetricManager::CacheHitStatDict, ErrorCode>
+    CalcCacheStats() = 0;
+
+    // For Prometheus-style metrics
+    virtual tl::expected<std::string, ErrorCode> SerializeMetrics() = 0;
+
+    /**
+     * @brief Gets the HTTP server port.
+     * @return The port number, or 0 if HTTP server is disabled.
+     */
+    uint16_t GetHttpPort() const { return http_port_; }
+
+    /**
+     * @brief Checks if HTTP server is enabled.
+     * @return True if enabled, false otherwise.
+     */
+    bool IsHttpServerEnabled() const { return http_server_ != nullptr; }
+
+    /**
+     * @brief Returns the shared buffer allocator (TE-registered pool).
+     *        May be nullptr if local_buffer_size was 0.
+     */
+    std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const {
+        return resources_.GetBufferAllocator();
+    }
+
+    /**
+     * @brief Gets the health status for the /health endpoint.
+     * @return A string representing the health status.
+     */
+    virtual std::string GetHealthStatus() const { return "OK"; }
+
+    // Centralized clients use ordinary defaults, without runtime overrides.
+    // TODO(C2.1/C2.2 / default-config interface; see p2p-split-plan-v3.md):
+    // ClientBackend should expose these entry-facing defaults. Keep these two
+    // getters for the old store_py access path until it uses PyClient/Real/
+    // ClientBackend, then delete them without adding centralized runtime state.
+    // TODO(C2.2 / centralized read compatibility): accept only max_candidates
+    // == 0 with no p2p_config; reject other read options before calling native
+    // Client. Do not reintroduce filtering, mixed DTOs or runtime state there.
+    WriteConfig getDefaultWriteConfig() const { return ReplicateConfig{}; }
+    ReadRouteConfig getDefaultReadConfig() const { return {}; }
+
+   public:
+    std::string local_endpoint() const {
+        return local_ip_ + ":" +
+               std::to_string(resources_.GetTransferEnginePort());
+    }
+    /**
+     * @brief Gets the local transport endpoint (IP and port).
+     * @return The transport endpoint string.
+     */
+    [[nodiscard]] std::string GetTransportEndpoint() {
+        return resources_.GetTransferEngine()->getLocalIpAndPort();
+    }
+    UUID GetClientID() const { return client_id_; }
+    ViewVersionId GetViewVersion() const { return view_version_.load(); }
+
+   protected:
+    /**
+     * @brief Private constructor to enforce creation through Create() method
+     */
+    ClientService(const std::string& metadata_connstring,
+                  uint16_t http_port = 9003, bool enable_http_server = true,
+                  const std::map<std::string, std::string>& labels = {});
+
+    /**
+     * @brief Initializes the Transfer Engine.
+     * @param te_port Transfer engine port (0 means auto-bind).
+     * @param metadata_connstring Connection string for metadata service.
+     * @param protocol Transport protocol (e.g., "tcp", "rdma").
+     * @param device_names Optional RDMA device names.
+     * @return ErrorCode indicating success or failure.
+     */
+    ErrorCode InitTransferEngine(
+        uint16_t te_port, const std::string& metadata_connstring,
+        const std::string& protocol,
+        const std::optional<std::string>& device_names);
+
+   protected:
+    /**
+     * @brief Waits for the next heartbeat interval using condition variable.
+     * @param interval_ms Milliseconds to wait.
+     */
+    void WaitForNextHeartbeat(int interval_ms);
+
+    void HeartbeatTryRegister();
+
+    /**
+     * @brief Stops the heartbeat with registration_mutex_ held.
+     */
+    void InnerStopHeartbeat() REQUIRES(registration_mutex_);
+
+    /**
+     * @brief Registers HTTP handlers on the http_server_ instance.
+     * No-op when the HTTP server is disabled.
+     */
+    virtual void RegisterHttpMethods();
+
+    /**
+     * @brief Starts the HTTP server.
+     */
+    void StartHttpServer();
+
+    /**
+     * @brief Stops the HTTP server.
+     */
+    void StopHttpServer();
+
+    /**
+     * @brief Creates and TE-registers a shared buffer pool.
+     * @param pool_size Size in bytes (0 = skip, the local buffer stays
+     * null).
+     * @param protocol Transport protocol for memory allocation.
+     * @param use_hugepage Whether to allocate with huge pages.
+     */
+    void InitLocalBufferAllocator(size_t pool_size, const std::string& protocol,
+                                  bool use_hugepage = false);
+
+    /**
+     * @brief Register (or re-register) this client with the master
+     */
+    tl::expected<ViewVersionId, ErrorCode> RegisterClient()
+        EXCLUDES(registration_mutex_);
+
+    virtual tl::expected<ViewVersionId, ErrorCode> InnerRegisterClient()
+        REQUIRES(registration_mutex_) = 0;
+
+    /**
+     * @brief Hook invoked when a local (client-initiated) request enters
+     * (entering=true) or leaves (entering=false) the in-flight set. Subclasses
+     * override to update an in-flight gauge. Base default is a no-op.
+     */
+    virtual void RecordLocalInflight(bool entering) { (void)entering; }
+
+   protected:
+    /**
+     * @brief Acquires an in-flight request guard. If the service has not been
+     * started yet or is shutting down, the returned guard's is_valid() is false
+     * and the caller must reject the request.
+     */
+    InflightTracker::Guard AcquireInflightGuard() {
+        return local_inflight_tracker_.Enter();
+    }
+
+    /**
+     * @brief Marks the service as shutting down: rejects new local requests and
+     * waits (unbounded) for all in-flight ones to finish before the DataManager
+     * is torn down.
+     * @return true if successfully marked, false if already shutting down.
+     */
+    bool MarkShuttingDown() {
+        bool initiated = local_inflight_tracker_.Close();
+        local_inflight_tracker_.Wait();
+        return initiated;
+    }
+
+   protected:
+    // Client identification
+    const UUID client_id_;
+
+    // Core components
+    ClientResources resources_;
+
+    // Configuration
+    std::string local_ip_;
+
+    // The segment endpoint that the transfer engine registered with the
+    // metadata backend.
+    std::string te_endpoint_;
+    void initTeEndpoint();
+    const std::string& get_te_endpoint() const { return te_endpoint_; }
+
+    const std::string metadata_connstring_;
+    std::thread heartbeat_thread_;
+    std::atomic<bool> heartbeat_running_{false};
+    std::condition_variable heartbeat_cv_;
+    std::mutex heartbeat_mtx_;
+    /// View version from master. Updated by async registration thread,
+    /// read by heartbeat thread.
+    std::atomic<ViewVersionId> view_version_{0};
+    /// Master server entry saved at Init() (e.g. "etcd://..." or a direct
+    /// address), so a re-registration can restart the heartbeat.
+    std::string master_server_entry_;
+    // Serializes register / unregister / stop-heartbeat.
+    // Lock order: registration_mutex_ before draining local_inflight_tracker_
+    // (and registration_mutex_ -> heartbeat_mtx_). Stop() holds
+    // registration_mutex_ before Wait() so this order is never inverted.
+    Mutex registration_mutex_;
+
+    InflightTracker local_inflight_tracker_{
+        "local requests", [this] { RecordLocalInflight(true); },
+        [this] { RecordLocalInflight(false); }};
+
+    std::unique_ptr<coro_http::coro_http_server> http_server_;
+    uint16_t http_port_ = 0;  // 0 means disabled
+};
+
+}  // namespace mooncake
