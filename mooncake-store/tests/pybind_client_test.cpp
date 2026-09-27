@@ -77,8 +77,9 @@ TEST_F(RealClientTest, BasicPutGetOperations) {
     const std::string rdma_devices = (FLAGS_protocol == std::string("rdma"))
                                          ? FLAGS_device_name
                                          : std::string("");
-    // TODO(C3.2 / A00 client factory; see p2p-split-plan-v3.md): Restore the
-    // baseline Client factory; preserve the original scenarios and assertions.
+    // TODO(C2.1/C2.2 / Real fixture; see p2p-split-plan-v3.md): native Client
+    // is restored, but Real still calls the removed shared factory. Connect
+    // Backend creation and InitStorage, preserving these deployment assertions.
     auto config = ClientConfigBuilder::build_centralized_real_client(
         "localhost:17813", "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt

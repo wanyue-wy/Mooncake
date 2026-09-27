@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "allocator.h"
-#include "client_service.h"
+#include "legacy_client_service.h"
 #include "types.h"
 
 namespace mooncake {
@@ -24,6 +24,10 @@ struct SegmentInfo {
  * This class is used to wrap the client and provide a more convenient interface
  * for the tests.
  */
+// TODO(C2.2/C3.3 / mixed e2e wrapper): neither native Client derives from
+// ClientService. Replace this old factory/owner with architecture-specific
+// fixtures after Backend wiring; preserve workload assertions and never cast
+// P2PClientService or Client to the removed business base.
 class ClientTestWrapper {
    public:
     /**

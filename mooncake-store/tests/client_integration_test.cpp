@@ -14,7 +14,6 @@
 
 #include "allocator.h"
 #include "client_service.h"
-#include "centralized_client_service.h"
 #include "types.h"
 #include "utils.h"
 #include "test_server_helpers.h"
@@ -83,15 +82,11 @@ class ClientIdCaptureSink : public google::LogSink {
 
 class ClientIntegrationTest : public ::testing::Test {
    protected:
-    static std::shared_ptr<CentralizedClientService> CreateClient(
+    static std::shared_ptr<Client> CreateClient(
         const std::string& host_name) {
-        // TODO(C3.2 / A00 client factory; see p2p-split-plan-v3.md): Restore
-        // the baseline Client factory when removing CentralizedClientService;
-        // preserve the original scenarios and assertions.
-        auto config = ClientConfigBuilder::build_centralized_real_client(
+        auto client_opt = Client::Create(
             host_name, "P2PHANDSHAKE", FLAGS_protocol, std::nullopt,
             master_address_);
-        auto client_opt = ClientService::Create(config);
 
         EXPECT_TRUE(client_opt.has_value())
             << "Failed to create client with host_name: " << host_name;
@@ -99,12 +94,7 @@ class ClientIntegrationTest : public ::testing::Test {
             return nullptr;
         }
 
-        // Cast to CentralizedClientService for BatchReplicaClear access
-        auto client = std::static_pointer_cast<CentralizedClientService>(
-            client_opt.value());
-        EXPECT_TRUE(client != nullptr)
-            << "Failed to cast to CentralizedClientService";
-        return client;
+        return client_opt.value();
     }
 
     static void SetUpTestSuite() {
@@ -265,8 +255,8 @@ class ClientIntegrationTest : public ::testing::Test {
         }
     }
 
-    static std::shared_ptr<CentralizedClientService> test_client_;
-    static std::shared_ptr<ClientService> segment_provider_client_;
+    static std::shared_ptr<Client> test_client_;
+    static std::shared_ptr<Client> segment_provider_client_;
     // Here we use a simple allocator for the client buffer. In a real
     // application, user should manage the memory allocation and deallocation
     // themselves.
@@ -284,9 +274,9 @@ class ClientIntegrationTest : public ::testing::Test {
 };
 
 // Static members initialization
-std::shared_ptr<CentralizedClientService> ClientIntegrationTest::test_client_ =
+std::shared_ptr<Client> ClientIntegrationTest::test_client_ =
     nullptr;
-std::shared_ptr<ClientService> ClientIntegrationTest::segment_provider_client_ =
+std::shared_ptr<Client> ClientIntegrationTest::segment_provider_client_ =
     nullptr;
 void* ClientIntegrationTest::segment_ptr_ = nullptr;
 void* ClientIntegrationTest::test_client_segment_ptr_ = nullptr;
@@ -414,20 +404,17 @@ TEST_F(ClientIntegrationTest, LocalPreferredAllocationTest) {
     auto query_result = test_client_->Query(key);
     ASSERT_TRUE(query_result.has_value())
         << "Query operation failed: " << toString(query_result.error());
-    auto replica_list = query_result.value()->replicas;
+    auto replica_list = query_result.value().replicas;
     ASSERT_EQ(replica_list.size(), 1);
     ASSERT_EQ(replica_list[0]
                   .get_memory_descriptor()
                   .buffer_descriptor.transport_endpoint_,
               segment_provider_client_->GetTransportEndpoint());
 
-    // TODO(C3.2 / A00 query reuse; see p2p-split-plan-v3.md): Restore the
-    // baseline Query-result reuse path in Get; preserve the original
-    // assertions.
-    auto get_result = test_client_->Get(key, {buffer}, {test_data.size()});
+    std::vector<Slice> read_slices{{buffer, test_data.size()}};
+    auto get_result = test_client_->Get(key, query_result.value(), read_slices);
     ASSERT_TRUE(get_result.has_value())
         << "Get operation failed: " << toString(get_result.error());
-    ASSERT_EQ(get_result.value(), static_cast<int64_t>(test_data.size()));
     ASSERT_EQ(memcmp(buffer, test_data.data(), test_data.size()), 0);
     client_buffer_allocator_->deallocate(buffer, test_data.size());
 

@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "real_client.h"
-#include "centralized_client_service.h"
 #include "client_buffer.hpp"
 #include "mutex.h"
 #include "types.h"
@@ -187,7 +186,9 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT& config) {
         this->protocol != "ascend";
 
     // TODO(C2.2 / native creation; see p2p-split-plan-v3.md): P2PClientConfig no
-    // longer has a ClientService factory overload. Create the build-selected
+    // longer has a ClientService factory overload. C3.2 also removed the
+    // centralized factory implementation; Client is independently owned.
+    // Create the build-selected
     // native Service through ClientBackend, with config/result conversion at
     // that boundary. Replace this factory and the remaining Service calls when
     // RealClient owns the backend; do not cast P2P back to the old base type.
@@ -202,6 +203,9 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT& config) {
     // only starts a thread today. Wait for bind/listen success and propagate
     // failure through setup before the Real RPC listener admits Dummy calls.
     // Remove this TODO after ClientBackend deployment wiring enforces it.
+    // A00 setup starts IPC after segment setup but before FileStorage::Init.
+    // Review that ordering when wiring native InitStorage; do not move IPC
+    // ownership into Client or assume the old and split startup are identical.
     // Start IPC server to accept FD from dummy clients
     if (!ipc_socket_path_.empty()) {
         if (start_ipc_server() != 0) {
@@ -253,6 +257,9 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
     // admission and join IPC registration work before stopping the backend or
     // unmapping SHM. stop_ipc_server currently only wakes the thread. Remove
     // this TODO once RPC/IPC teardown owns and drains both entry points.
+    // Centralized Client now has no Stop/Destroy or operation tracker: drain
+    // all Real calls before releasing it, and unregister SHM while Backend/TE
+    // still exist. P2P Backend adapts its own Stop/Destroy contract.
     stop_ipc_server();
     stop_dummy_client_monitor();
 
@@ -640,6 +647,12 @@ std::vector<int> RealClient::batchIsExist(
 
 tl::expected<int64_t, ErrorCode> RealClient::getSize_internal(
     const std::string& key) {
+    // TODO(C2.2 / size projection; see p2p-split-plan-v3.md): forward to
+    // ClientBackend::GetSize. Both native clients keep Query, without GetSize.
+    // The centralized backend projects calculate_total_size(first replica);
+    // the P2P backend projects first_route.object_size. Query once with native
+    // default read options, propagate errors, and keep INVALID_PARAMS for an
+    // empty result. Do not move routing policy or retry state into Backend.
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -1817,6 +1830,13 @@ tl::expected<QueryTaskResponse, ErrorCode> RealClient::query_task(
 tl::expected<BatchGetOffloadObjectResponse, ErrorCode>
 RealClient::batch_get_offload_object(const std::vector<std::string>& keys,
                                      const std::vector<int64_t>& sizes) {
+    // TODO(C2.2 / offload serving; see p2p-split-plan-v3.md): this is an
+    // intentionally unresolved old downcast after C3.2 removed the subclass.
+    // Replace the whole body with build-selected Backend forwarding to native
+    // Client::BatchGetOffloadObjectFromStorage; P2P retains INVALID_PARAMS.
+    // FileStorage remains owned by native Client, never by Real or Backend.
+    // Keep RealClient::batch_get_offload_object as the wire method. Do not
+    // restore a compatibility class or change ClientRequester to a new ID.
     auto* centralized =
         dynamic_cast<CentralizedClientService*>(client_service_.get());
     if (!centralized) {
