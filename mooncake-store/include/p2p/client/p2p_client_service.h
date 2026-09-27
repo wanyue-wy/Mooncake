@@ -25,7 +25,7 @@
 #include "client_buffer.hpp"
 #include "client_resources.h"
 #include "p2p/common/p2p_rpc_types.h"
-#include "client_config_builder.h"
+#include "p2p/client/p2p_client_config_builder.h"
 #include "mutex.h"
 #include "p2p/client/inflight_tracker.h"
 #include "p2p/client/runtime_config_store.h"

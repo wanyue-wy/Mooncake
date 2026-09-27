@@ -23,7 +23,7 @@
 
 #include <ylt/coro_http/coro_http_client.hpp>
 
-#include "client_config_builder.h"
+#include "p2p/client/p2p_client_config_builder.h"
 #include "p2p/client/p2p_client_service.h"
 #include "test_p2p_server_helpers.h"
 #include "types.h"
@@ -35,7 +35,7 @@ class P2PClientHttpEndpointsTest : public ::testing::Test {
    protected:
     static std::shared_ptr<P2PClientService> CreateP2PClient(
         const std::string& host_name, uint32_t rpc_port, uint16_t http_port) {
-        auto config = ClientConfigBuilder::build_p2p_real_client(
+        auto config = P2PClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
             /*local_buffer_size=*/0, nullptr, "", rpc_port,
@@ -356,7 +356,7 @@ TEST_F(P2PClientHttpEndpointsTest, DisabledMetricsPreserveErrors) {
 
 TEST_F(P2PClientHttpEndpointsTest, LocalStartupCanJoinThroughHttp) {
     for (size_t senders : {0u, 1u}) {
-        auto config = ClientConfigBuilder::build_p2p_real_client(
+        auto config = P2PClientConfigBuilder::build_p2p_real_client(
             "localhost:" + std::to_string(getFreeTcpPort()), "P2PHANDSHAKE",
             "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})");

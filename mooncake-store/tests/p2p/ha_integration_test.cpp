@@ -75,6 +75,7 @@ extern "C" int pthread_create(pthread_t* thread, const pthread_attr_t* attr,
 
 #define private public
 #define protected public
+#include "p2p/client/p2p_client_config_builder.h"
 #include "p2p/client/p2p_client_service.h"
 #include "p2p/master/p2p_master_service.h"
 #include "master_service.h"
@@ -249,7 +250,7 @@ class HAIntegrationTest : public ::testing::Test {
     }
 
     static P2PClientConfig LifecycleConfig(uint16_t rpc_port = 0) {
-        auto config = ClientConfigBuilder::build_p2p_real_client(
+        auto config = P2PClientConfigBuilder::build_p2p_real_client(
             "localhost:" + std::to_string(getFreeTcpPort()), "P2PHANDSHAKE",
             "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
@@ -268,7 +269,7 @@ class HAIntegrationTest : public ::testing::Test {
         uint32_t rpc_port = 0, size_t async_sender_thread_count = 1) {
         const uint16_t http_port = static_cast<uint16_t>(getFreeTcpPort());
 
-        auto config = ClientConfigBuilder::build_p2p_real_client(
+        auto config = P2PClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_addr,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
             /*local_buffer_size=*/0, nullptr, "", rpc_port,

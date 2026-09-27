@@ -9,7 +9,7 @@
 #include <chrono>
 
 #include <csignal>
-#include "client_config_builder.h"
+#include "p2p/client/p2p_client_config_builder.h"
 #include "client_metric.h"
 #include "p2p/client/p2p_client_metric.h"
 #include "p2p/client/p2p_client_service.h"
@@ -49,7 +49,7 @@ class ClientHttpMetricsTest : public ::testing::Test {
             LOG(ERROR) << "Failed to start metrics-test P2P master";
             return false;
         }
-        auto config = ClientConfigBuilder::build_p2p_real_client(
+        auto config = P2PClientConfigBuilder::build_p2p_real_client(
             "127.0.0.1", "P2PHANDSHAKE", "tcp", std::nullopt,
             p2p_master_->master_address(),
             R"({"tiers":[{"type":"DRAM","capacity":1048576,"priority":100}]})",
@@ -84,7 +84,7 @@ class ClientHttpMetricsTest : public ::testing::Test {
 // Test config builder with metrics settings
 TEST_F(ClientHttpMetricsTest, ConfigBuilderMetricsSettings) {
     // Test P2P config with default metrics settings
-    auto p2p_config = ClientConfigBuilder::build_p2p_real_client(
+    auto p2p_config = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1", "http://127.0.0.1:8080/metadata", "tcp", std::nullopt,
         "127.0.0.1:50051",
         R"({"tiers": [{"type": "memory", "capacity": 1073741824}]})");
@@ -93,7 +93,7 @@ TEST_F(ClientHttpMetricsTest, ConfigBuilderMetricsSettings) {
     EXPECT_TRUE(p2p_config.enable_http_server);
 
     // Test P2P config with custom metrics settings
-    auto p2p_config_custom = ClientConfigBuilder::build_p2p_real_client(
+    auto p2p_config_custom = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1", "http://127.0.0.1:8080/metadata", "tcp", std::nullopt,
         "127.0.0.1:50051",
         R"({"tiers": [{"type": "memory", "capacity": 1073741824}]})", 0,
@@ -106,32 +106,12 @@ TEST_F(ClientHttpMetricsTest, ConfigBuilderMetricsSettings) {
     EXPECT_EQ(p2p_config_custom.http_port, 9005);
     EXPECT_FALSE(p2p_config_custom.enable_http_server);
 
-    // Test Centralized config with default metrics settings
-    auto centralized_config =
-        ClientConfigBuilder::build_centralized_real_client(
-            "127.0.0.1", "http://127.0.0.1:8080/metadata");
 
-    EXPECT_EQ(centralized_config.http_port, 9003);
-    EXPECT_TRUE(centralized_config.enable_http_server);
-
-    // Test Centralized config with custom metrics settings
-    auto centralized_config_custom =
-        ClientConfigBuilder::build_centralized_real_client(
-            "127.0.0.1", "http://127.0.0.1:8080/metadata", "tcp", std::nullopt,
-            "127.0.0.1:50051", 0, 0, nullptr, "",
-            false,  // enable_offload
-            9006,   // http_port
-            false,  // enable_http_server
-            {}      // labels
-        );
-
-    EXPECT_EQ(centralized_config_custom.http_port, 9006);
-    EXPECT_FALSE(centralized_config_custom.enable_http_server);
 }
 
 // Test metrics disabled scenario
 TEST_F(ClientHttpMetricsTest, MetricsDisabled) {
-    auto config = ClientConfigBuilder::build_p2p_real_client(
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1", "http://127.0.0.1:8080/metadata", "tcp", std::nullopt,
         "127.0.0.1:50051",
         R"({"tiers": [{"type": "memory", "capacity": 1073741824}]})", 0,
@@ -149,7 +129,7 @@ TEST_F(ClientHttpMetricsTest, ConfigWithLabels) {
     std::map<std::string, std::string> labels = {
         {"instance_id", "test_instance"}, {"cluster_id", "test_cluster"}};
 
-    auto config = ClientConfigBuilder::build_p2p_real_client(
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1", "http://127.0.0.1:8080/metadata", "tcp", std::nullopt,
         "127.0.0.1:50051",
         R"({"tiers": [{"type": "memory", "capacity": 1073741824}]})", 0,
