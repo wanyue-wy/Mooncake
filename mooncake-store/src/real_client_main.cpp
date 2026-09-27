@@ -3,7 +3,8 @@
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 
 #include <variant>
-#include "client_config_builder.h"
+#include "centralized_client_config_builder.h"
+#include "p2p/client/p2p_client_config_builder.h"
 #include "real_client.h"
 
 using namespace mooncake;
@@ -146,7 +147,7 @@ int main(int argc, char* argv[]) {
         if (FLAGS_deployment_mode == "P2P") {
             LOG(INFO) << "Using P2P client type"
                       << ", client_rpc_port=" << FLAGS_client_rpc_port;
-            return ClientConfigBuilder::build_p2p_real_client(
+            return P2PClientConfigBuilder::build_p2p_real_client(
                 FLAGS_host, FLAGS_metadata_server, FLAGS_protocol,
                 FLAGS_device_names.empty()
                     ? std::nullopt
@@ -180,7 +181,7 @@ int main(int argc, char* argv[]) {
                     << "Unknown deployment_mode '" << FLAGS_deployment_mode
                     << "', defaulting to Centralization";
             }
-            return ClientConfigBuilder::build_centralized_real_client(
+            return CentralizedClientConfigBuilder::build_centralized_real_client(
                 FLAGS_host, FLAGS_metadata_server, FLAGS_protocol,
                 FLAGS_device_names.empty()
                     ? std::nullopt

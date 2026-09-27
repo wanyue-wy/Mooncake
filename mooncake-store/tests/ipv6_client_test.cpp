@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 
+#include "centralized_client_config_builder.h"
 #include "real_client.h"
 #include "test_server_helpers.h"
 #include "common.h"
@@ -237,7 +238,7 @@ TEST_F(IPv6ClientTest, BasicPutGetOverIPv6Loopback) {
     // TODO(C2.1/C2.2 / IPv6 Real fixture; see p2p-split-plan-v3.md): connect
     // Real to Backend's native Client creation/storage initialization. Retain
     // the IPv6 setup and data assertions; native restoration alone is not e2e.
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         FLAGS_server_address, "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
                              : std::optional<std::string>(rdma_devices),
@@ -304,7 +305,7 @@ TEST_F(IPv6ClientTest, BasicPutGetOverLinkLocalIPv6) {
                                          ? FLAGS_device_name
                                          : std::string("");
 
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         server_address, "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
                              : std::optional<std::string>(rdma_devices),
@@ -358,7 +359,7 @@ TEST_F(IPv6ClientTest, BatchOperationsOverIPv6) {
                                          ? FLAGS_device_name
                                          : std::string("");
 
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         FLAGS_server_address, "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
                              : std::optional<std::string>(rdma_devices),

@@ -1,3 +1,5 @@
+#include "centralized_client_config_builder.h"
+#include "p2p/client/p2p_client_config_builder.h"
 #include "client_wrapper.h"
 
 #include <cstring>
@@ -33,7 +35,7 @@ ClientTestWrapper::CreateClientWrapper(
     if (deployment_mode == "P2P") {
         static constexpr const char* kP2PTierConfig =
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})";
-        auto config = ClientConfigBuilder::build_p2p_real_client(
+        auto config = P2PClientConfigBuilder::build_p2p_real_client(
             hostname, metadata_connstring, protocol, device_name,
             master_server_entry, kP2PTierConfig, local_buffer_size, nullptr, "",
             p2p_client_rpc_port, /*rpc_thread_num=*/2,
@@ -57,7 +59,7 @@ ClientTestWrapper::CreateClientWrapper(
         }
         client = std::move(p2p_client);
     } else {
-        auto config = ClientConfigBuilder::build_centralized_real_client(
+        auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
             hostname, metadata_connstring, protocol, device_name,
             master_server_entry, 0, local_buffer_size, nullptr, "", false, 9003,
             enable_http_server);

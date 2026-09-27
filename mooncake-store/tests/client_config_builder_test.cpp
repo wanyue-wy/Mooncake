@@ -6,7 +6,8 @@
 #include <filesystem>
 #include <unordered_map>
 
-#include "client_config_builder.h"
+#include "centralized_client_config_builder.h"
+#include "p2p/client/p2p_client_config_builder.h"
 #include "client_service.h"
 
 namespace mooncake {
@@ -35,7 +36,7 @@ TEST(ClientConfigBuilderTest, CentralizedRejectsExplicitRuntimeConfig) {
         {"metadata_server", "P2PHANDSHAKE"},
         {"runtime_config", R"({"write":{"replica_num":3}})"},
     };
-    EXPECT_THROW(ClientConfigBuilder::build_centralized_real_client(config),
+    EXPECT_THROW(CentralizedClientConfigBuilder::build_centralized_real_client(config),
                  std::invalid_argument);
 }
 
@@ -54,23 +55,23 @@ TEST(ClientConfigBuilderTest, RuntimeEnvironmentBelongsToP2P) {
     ASSERT_EQ(setenv("MC_RUNTIME_CONFIG",
                      R"({"write":{"remote_weight":0.8}})", 1), 0);
 
-    auto p2p = ClientConfigBuilder::build_p2p_real_client(
+    auto p2p = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1:12345", "P2PHANDSHAKE", "tcp", std::nullopt,
         "127.0.0.1:50051", kTieredConfigJson);
     EXPECT_DOUBLE_EQ(p2p.runtime_config_json["write"]["remote_weight"].asDouble(),
                      0.8);
 
     ASSERT_EQ(setenv("MC_RUNTIME_CONFIG", "{invalid json", 1), 0);
-    EXPECT_NO_THROW(ClientConfigBuilder::build_centralized_real_client(
+    EXPECT_NO_THROW(CentralizedClientConfigBuilder::build_centralized_real_client(
         "127.0.0.1:12345", "P2PHANDSHAKE"));
-    EXPECT_THROW(ClientConfigBuilder::build_p2p_real_client(
+    EXPECT_THROW(P2PClientConfigBuilder::build_p2p_real_client(
                      "127.0.0.1:12345", "P2PHANDSHAKE", "tcp", std::nullopt,
                      "127.0.0.1:50051", kTieredConfigJson),
                  std::runtime_error);
 }
 
 TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesDefaults) {
-    auto config = ClientConfigBuilder::build_p2p_real_client(
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
         std::nullopt, "127.0.0.1:50051", kTieredConfigJson);
 
@@ -97,9 +98,9 @@ TEST(ClientConfigBuilderTest, P2PLocalOnlyStartupIsExplicit) {
         {"tiered_backend_config", kTieredConfigJson},
         {"start_local_only", "true"},
     };
-    EXPECT_TRUE(ClientConfigBuilder::build_p2p_real_client(values).start_local_only);
+    EXPECT_TRUE(P2PClientConfigBuilder::build_p2p_real_client(values).start_local_only);
     values["start_local_only"] = "false";
-    EXPECT_FALSE(ClientConfigBuilder::build_p2p_real_client(values).start_local_only);
+    EXPECT_FALSE(P2PClientConfigBuilder::build_p2p_real_client(values).start_local_only);
 }
 
 TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesRedisDiscoveryDefaults) {
@@ -110,29 +111,25 @@ TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesRedisDiscoveryDefaults) {
         {"tiered_backend_config", kTieredConfigJson},
     };
 
-    auto config = ClientConfigBuilder::build_p2p_real_client(raw_config);
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(raw_config);
 
     EXPECT_EQ(config.redis_master_view_ttl_sec, 4);
     EXPECT_EQ(config.redis_heartbeat_interval_sec, 1);
 }
 
-TEST(ClientConfigBuilderTest,
-     BuildCentralizedClientConfigUsesRedisDiscoveryDefaults) {
+TEST(ClientConfigBuilderTest, CentralizedConfigKeepsDiscoveryForBackendValidation) {
     std::unordered_map<std::string, std::string> raw_config = {
         {"local_hostname", "127.0.0.1:12345"},
-        {"metadata_server", "http://127.0.0.1:8080/metadata"},
+        {"metadata_server", "P2PHANDSHAKE"},
         {"master_server_addr", "redis://127.0.0.1:6379"},
     };
-
-    auto config =
-        ClientConfigBuilder::build_centralized_real_client(raw_config);
-
-    EXPECT_EQ(config.redis_master_view_ttl_sec, 4);
-    EXPECT_EQ(config.redis_heartbeat_interval_sec, 1);
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(raw_config);
+    EXPECT_EQ(config.master_server_entry, "redis://127.0.0.1:6379");
+    EXPECT_EQ(config.offload_rpc_port, 0);
 }
 
 TEST(ClientConfigBuilderTest, BuildP2PClientConfigKeyLeaseOverrides) {
-    auto config = ClientConfigBuilder::build_p2p_real_client(
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
         std::nullopt, "127.0.0.1:50051", kTieredConfigJson, 0, nullptr, "",
         12345, 8, 2048, 512 * 1024 * 1024, 120000, "te", 32, 9003, true, {}, 0,
@@ -155,7 +152,7 @@ TEST(ClientConfigBuilderTest, BuildP2PClientConfigReadsRedisDiscoveryConfig) {
         {"redis_heartbeat_interval_sec", "4"},
     };
 
-    auto config = ClientConfigBuilder::build_p2p_real_client(raw_config);
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(raw_config);
 
     EXPECT_EQ(config.redis_cluster_id, "test-cluster");
     EXPECT_EQ(config.redis_password, "test-password");
@@ -164,32 +161,35 @@ TEST(ClientConfigBuilderTest, BuildP2PClientConfigReadsRedisDiscoveryConfig) {
     EXPECT_EQ(config.redis_heartbeat_interval_sec, 4);
 }
 
-TEST(ClientConfigBuilderTest,
-     BuildCentralizedClientConfigReadsRedisDiscoveryConfig) {
-    std::unordered_map<std::string, std::string> raw_config = {
-        {"local_hostname", "127.0.0.1:12345"},
-        {"metadata_server", "http://127.0.0.1:8080/metadata"},
-        {"master_server_addr", "redis://127.0.0.1:6379"},
-        {"redis_cluster_id", "test-cluster"},
-        {"redis_password", "test-password"},
-        {"redis_db_index", "3"},
-        {"redis_master_view_ttl_sec", "9"},
-        {"redis_heartbeat_interval_sec", "4"},
+TEST(ClientConfigBuilderTest, CentralizedConfigRejectsRemovedParameters) {
+    for (const auto* key : {"redis_cluster_id", "http_port", "enable_http_server",
+                            "enable_metric_collection", "metric_report_interval_seconds",
+                            "local_rpc_port"}) {
+        std::unordered_map<std::string, std::string> config = {
+            {"local_hostname", "127.0.0.1"}, {"metadata_server", "P2PHANDSHAKE"},
+            {key, "1"},
+        };
+        EXPECT_THROW(CentralizedClientConfigBuilder::build_centralized_real_client(config),
+                     std::invalid_argument) << key;
+    }
+}
+
+TEST(ClientConfigBuilderTest, CentralizedOffloadPortIsIndependent) {
+    std::unordered_map<std::string, std::string> config = {
+        {"local_hostname", "127.0.0.1:12345"}, {"metadata_server", "P2PHANDSHAKE"},
+        {"enable_offload", "true"}, {"offload_rpc_port", "12346"},
     };
-
-    auto config =
-        ClientConfigBuilder::build_centralized_real_client(raw_config);
-
-    EXPECT_EQ(config.redis_cluster_id, "test-cluster");
-    EXPECT_EQ(config.redis_password, "test-password");
-    EXPECT_EQ(config.redis_db_index, 3);
-    EXPECT_EQ(config.redis_master_view_ttl_sec, 9);
-    EXPECT_EQ(config.redis_heartbeat_interval_sec, 4);
+    auto parsed = CentralizedClientConfigBuilder::build_centralized_real_client(config);
+    EXPECT_EQ(parsed.te_port, 12345);
+    EXPECT_TRUE(parsed.enable_offload);
+    EXPECT_EQ(parsed.offload_rpc_port, 12346);
+    config["offload_rpc_port"] = "65536";
+    EXPECT_THROW(CentralizedClientConfigBuilder::build_centralized_real_client(config), std::invalid_argument);
 }
 
 TEST(ClientConfigBuilderTest,
      BuildP2PClientConfigAcceptsCustomAsyncCopyConfig) {
-    auto config = ClientConfigBuilder::build_p2p_real_client(
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
         std::nullopt, "127.0.0.1:50051", kTieredConfigJson, 0, nullptr, "",
         12345, 8, 2048, 512 * 1024 * 1024, 120000, "memcpy", 3);
@@ -200,7 +200,7 @@ TEST(ClientConfigBuilderTest,
 }
 
 TEST(ClientConfigBuilderTest, BuildP2PTeModePassesTeAsyncPollWorkerArg) {
-    auto config = ClientConfigBuilder::build_p2p_real_client(
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
         std::nullopt, "127.0.0.1:50051", kTieredConfigJson, 0, nullptr, "",
         12345, 2, 1024, 100 * 1024 * 1024, 60 * 1000, "te", 5, 9003, true, {},
@@ -213,7 +213,7 @@ TEST(ClientConfigBuilderTest, BuildP2PTeModePassesTeAsyncPollWorkerArg) {
 }
 
 TEST(ClientConfigBuilderTest, BuildP2PMemcpyModePassesTeAsyncPollWorkerArg) {
-    auto config = ClientConfigBuilder::build_p2p_real_client(
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
         std::nullopt, "127.0.0.1:50051", kTieredConfigJson, 0, nullptr, "",
         12345, 2, 1024, 100 * 1024 * 1024, 60 * 1000, "memcpy", 5, 9003, true,
@@ -233,12 +233,12 @@ TEST(ClientConfigBuilderTest, BuildP2PDictConfigPassesTeAsyncPollWorkerNum) {
         {"local_transfer_mode", "te"},
         {"te_async_poll_worker_num", "7"},
     };
-    auto config = ClientConfigBuilder::build_p2p_real_client(raw_config);
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(raw_config);
     EXPECT_EQ(config.te_async_poll_worker_num, 7u);
 }
 
 TEST(ClientConfigBuilderTest, BuildP2PClientConfigParsesTransferDirectionMode) {
-    auto forward = ClientConfigBuilder::build_p2p_real_client(
+    auto forward = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
         std::nullopt, "127.0.0.1:50051", kTieredConfigJson, 0, nullptr, "",
         12345, 2, 1024, 300 * 1024 * 1024, 5 * 60 * 1000, "te", 32, 9003, true,
@@ -249,7 +249,7 @@ TEST(ClientConfigBuilderTest, BuildP2PClientConfigParsesTransferDirectionMode) {
 TEST(ClientConfigBuilderTest,
      BuildP2PClientConfigRejectsInvalidTransferDirectionMode) {
     EXPECT_THROW(
-        ClientConfigBuilder::build_p2p_real_client(
+        P2PClientConfigBuilder::build_p2p_real_client(
             "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
             std::nullopt, "127.0.0.1:50051", kTieredConfigJson, 0, nullptr, "",
             12345, 2, 1024, 300 * 1024 * 1024, 5 * 60 * 1000, "te", 32, 9003,
@@ -259,7 +259,7 @@ TEST(ClientConfigBuilderTest,
 
 TEST(ClientConfigBuilderTest, BuildP2PClientConfigRejectsInvalidTransferMode) {
     EXPECT_THROW(
-        ClientConfigBuilder::build_p2p_real_client(
+        P2PClientConfigBuilder::build_p2p_real_client(
             "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
             std::nullopt, "127.0.0.1:50051", kTieredConfigJson, 0, nullptr, "",
             12345, 8, 2048, 512 * 1024 * 1024, 120000, "invalid_mode"),
@@ -275,7 +275,7 @@ TEST(ClientConfigBuilderTest, LoadFromFilePath) {
         f << kTieredConfigJson;
     }
 
-    auto config = ClientConfigBuilder::build_p2p_real_client(
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
         std::nullopt, "127.0.0.1:50051", tmp_path);
 
@@ -290,7 +290,7 @@ TEST(ClientConfigBuilderTest, LoadFromFilePath) {
 
 TEST(ClientConfigBuilderTest, InvalidFilePathThrows) {
     EXPECT_THROW(
-        ClientConfigBuilder::build_p2p_real_client(
+        P2PClientConfigBuilder::build_p2p_real_client(
             "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
             std::nullopt, "127.0.0.1:50051", "/nonexistent/path/tiered.json"),
         std::runtime_error);
@@ -302,7 +302,7 @@ TEST(ClientConfigBuilderTest, MalformedJsonStringThrows) {
     // Starts with '{' so LoadTieredConfig treats it as inline JSON, but it is
     // syntactically invalid and will fail to parse.
     std::string bad_json = "{ not valid json";
-    EXPECT_THROW(ClientConfigBuilder::build_p2p_real_client(
+    EXPECT_THROW(P2PClientConfigBuilder::build_p2p_real_client(
                      "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
                      std::nullopt, "127.0.0.1:50051", bad_json),
                  std::runtime_error);
@@ -312,7 +312,7 @@ TEST(ClientConfigBuilderTest, MalformedJsonStringThrows) {
 // ----
 
 TEST(ClientConfigBuilderTest, EmptyStringThrows) {
-    EXPECT_THROW(ClientConfigBuilder::build_p2p_real_client(
+    EXPECT_THROW(P2PClientConfigBuilder::build_p2p_real_client(
                      "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
                      std::nullopt, "127.0.0.1:50051", ""),
                  std::runtime_error);

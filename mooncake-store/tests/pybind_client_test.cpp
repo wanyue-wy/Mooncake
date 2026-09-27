@@ -7,6 +7,7 @@
 #include <random>
 #include <barrier>
 
+#include "centralized_client_config_builder.h"
 #include "real_client.h"
 #include "test_server_helpers.h"
 
@@ -80,7 +81,7 @@ TEST_F(RealClientTest, BasicPutGetOperations) {
     // TODO(C2.1/C2.2 / Real fixture; see p2p-split-plan-v3.md): native Client
     // is restored, but Real still calls the removed shared factory. Connect
     // Backend creation and InitStorage, preserving these deployment assertions.
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         "localhost:17813", "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
                              : std::optional<std::string>(rdma_devices),
@@ -131,7 +132,7 @@ TEST_F(RealClientTest, GetWithLeaseTimeOut) {
     const std::string rdma_devices = (FLAGS_protocol == std::string("rdma"))
                                          ? FLAGS_device_name
                                          : std::string("");
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         "localhost:17813", "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
                              : std::optional<std::string>(rdma_devices),
@@ -264,7 +265,7 @@ TEST_F(RealClientTest, ConcurrentPutGetWithLeaseTimeOut) {
     const std::string rdma_devices = (FLAGS_protocol == std::string("rdma"))
                                          ? FLAGS_device_name
                                          : std::string("");
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         "localhost:17813", "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
                              : std::optional<std::string>(rdma_devices),
@@ -525,7 +526,7 @@ TEST_F(RealClientTest, TestSetupExistTransferEngine) {
     } else {
         ASSERT_TRUE(false) << "Unsupported protocol: " << FLAGS_protocol;
     }
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         "localhost:17813", "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
                              : std::optional<std::string>(rdma_devices),
@@ -555,7 +556,7 @@ TEST_F(RealClientTest, TestBatchPutAndGetMultiBuffers) {
     const std::string rdma_devices = (FLAGS_protocol == std::string("rdma"))
                                          ? FLAGS_device_name
                                          : std::string("");
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         "localhost:17813", "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
                              : std::optional<std::string>(rdma_devices),
@@ -632,7 +633,7 @@ TEST_F(RealClientTest, TestBatchAndNormalGetReplicaDesc) {
     const std::string rdma_devices = (FLAGS_protocol == std::string("rdma"))
                                          ? FLAGS_device_name
                                          : std::string("");
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         "localhost:17813", "P2PHANDSHAKE", FLAGS_protocol,
         rdma_devices.empty() ? std::nullopt
                              : std::optional<std::string>(rdma_devices),
@@ -683,7 +684,7 @@ TEST_F(RealClientTest, TestCopyMoveQueryTask) {
 
     // Setup client 1
     const std::string client1_addr = "localhost:17813";
-    auto setup_config = ClientConfigBuilder::build_centralized_real_client(
+    auto setup_config = CentralizedClientConfigBuilder::build_centralized_real_client(
         client1_addr, "P2PHANDSHAKE", FLAGS_protocol,
         std::optional<std::string>(rdma_devices), master_address_,
         16 * 1024 * 1024, 16 * 1024 * 1024);
@@ -692,7 +693,7 @@ TEST_F(RealClientTest, TestCopyMoveQueryTask) {
     // Setup client 2
     auto py_client2 = RealClient::create();
     const std::string client2_addr = "localhost:17814";
-    auto setup_config2 = ClientConfigBuilder::build_centralized_real_client(
+    auto setup_config2 = CentralizedClientConfigBuilder::build_centralized_real_client(
         client2_addr, "P2PHANDSHAKE", FLAGS_protocol,
         std::optional<std::string>(rdma_devices), master_address_,
         16 * 1024 * 1024, 16 * 1024 * 1024);

@@ -2,6 +2,8 @@
 #include <pybind11/stl.h>
 #include <numa.h>
 
+#include "centralized_client_config_builder.h"
+#include "p2p/client/p2p_client_config_builder.h"
 #include "pyclient.h"
 #include "dummy_client.h"
 #include "real_client.h"
@@ -1222,7 +1224,7 @@ PYBIND11_MODULE(store, m) {
                         engine.cast<std::shared_ptr<TransferEngine>>();
                 }
 
-                auto config = ClientConfigBuilder::build_p2p_real_client(
+                auto config = P2PClientConfigBuilder::build_p2p_real_client(
                     local_hostname, metadata_server, protocol,
                     rdma_devices.empty()
                         ? std::optional<std::string>(std::nullopt)
@@ -1294,7 +1296,7 @@ PYBIND11_MODULE(store, m) {
                         engine.cast<std::shared_ptr<TransferEngine>>();
                 }
                 auto config =
-                    ClientConfigBuilder::build_centralized_real_client(
+                    CentralizedClientConfigBuilder::build_centralized_real_client(
                         local_hostname, metadata_server, protocol,
                         rdma_devices.empty()
                             ? std::optional<std::string>(std::nullopt)
@@ -1333,7 +1335,7 @@ PYBIND11_MODULE(store, m) {
                 }
 
                 auto centralized_config =
-                    ClientConfigBuilder::build_centralized_real_client(config);
+                    CentralizedClientConfigBuilder::build_centralized_real_client(config);
                 auto ret = real_client->setup(centralized_config);
                 return ret;
             },
@@ -1363,7 +1365,7 @@ PYBIND11_MODULE(store, m) {
                 }
 
                 auto p2p_config =
-                    ClientConfigBuilder::build_p2p_real_client(config);
+                    P2PClientConfigBuilder::build_p2p_real_client(config);
                 auto ret = real_client->setup(p2p_config);
                 return ret;
             },

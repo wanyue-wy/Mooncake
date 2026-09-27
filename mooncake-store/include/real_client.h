@@ -1,7 +1,5 @@
 #pragma once
 
-#include "client_config_builder.h"
-
 #include <atomic>
 #include <boost/lockfree/queue.hpp>
 #include <memory>

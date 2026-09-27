@@ -31,11 +31,12 @@
 #include "master_metric_manager.h"
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include <ylt/coro_http/coro_http_server.hpp>
-#include "client_config_builder.h"
 #include "client_buffer.hpp"
 #include "client_resources.h"
 
 namespace mooncake {
+
+struct CentralizedClientConfig;
 
 using WriteConfig = std::variant<ReplicateConfig, WriteRouteRequestConfig>;
 

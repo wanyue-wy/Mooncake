@@ -27,6 +27,7 @@
 // Read private heartbeat thread / Service state for state assertions.
 #define private public
 #define protected public
+#include "p2p/client/p2p_client_config_builder.h"
 #include "p2p/client/p2p_client_service.h"
 #undef protected
 #undef private
@@ -60,7 +61,7 @@ class P2PRegisterConcurrencyTest : public ::testing::Test {
         const uint16_t http_port = static_cast<uint16_t>(getFreeTcpPort());
         const std::string host_name = "localhost:" + std::to_string(te_port);
 
-        auto config = ClientConfigBuilder::build_p2p_real_client(
+        auto config = P2PClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
             /*local_buffer_size=*/0, nullptr, "", rpc_port,

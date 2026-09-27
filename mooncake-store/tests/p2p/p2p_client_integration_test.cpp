@@ -20,6 +20,7 @@
 #include <thread>
 #include <vector>
 
+#include "p2p/client/p2p_client_config_builder.h"
 #include "p2p/client/p2p_client_metric.h"
 #include "p2p/client/p2p_client_service.h"
 #include "test_p2p_server_helpers.h"
@@ -43,7 +44,7 @@ class P2PClientIntegrationTest : public ::testing::Test {
             TransferDirectionMode::REVERSE,
         size_t te_async_poll_worker_num = 32) {
 
-        auto config = ClientConfigBuilder::build_p2p_real_client(
+        auto config = P2PClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
             /*local_buffer_size=*/0, nullptr, "", rpc_port);

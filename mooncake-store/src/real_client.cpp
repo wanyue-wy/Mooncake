@@ -14,6 +14,8 @@
 #include <optional>
 #include <vector>
 
+#include "centralized_client_config_builder.h"
+#include "p2p/client/p2p_client_config_builder.h"
 #include "real_client.h"
 #include "client_buffer.hpp"
 #include "mutex.h"
@@ -230,7 +232,7 @@ tl::expected<void, ErrorCode> RealClient::initAll_internal(
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
     uint64_t buffer_allocator_size = 1024 * 1024 * 1024;
-    auto config = ClientConfigBuilder::build_centralized_real_client(
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
         "localhost:12345", "127.0.0.1:2379", protocol,
         device_name.empty() ? std::nullopt
                             : std::optional<std::string>(device_name),

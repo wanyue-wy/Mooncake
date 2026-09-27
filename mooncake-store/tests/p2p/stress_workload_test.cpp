@@ -11,6 +11,7 @@
 #include <mutex>
 #include <condition_variable>
 
+#include "p2p/client/p2p_client_config_builder.h"
 #include "p2p/client/p2p_client_service.h"
 #include "types.h"
 #include "utils.h"
@@ -107,7 +108,7 @@ bool initialize_client() {
                         std::to_string(capacity_bytes) +
                         ", \"priority\": 10, \"allocator_type\": \"OFFSET\"}]}";
     }
-    auto config = ClientConfigBuilder::build_p2p_real_client(
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
         FLAGS_local_hostname, FLAGS_metadata_connection_string, FLAGS_protocol,
         device_names, FLAGS_master_address, tiered_config, 0, nullptr, "",
         12345,
