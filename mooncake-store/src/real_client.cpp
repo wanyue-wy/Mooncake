@@ -1829,23 +1829,4 @@ tl::expected<QueryTaskResponse, ErrorCode> RealClient::query_task(
     return client_service_->QueryTask(task_id);
 }
 
-tl::expected<BatchGetOffloadObjectResponse, ErrorCode>
-RealClient::batch_get_offload_object(const std::vector<std::string>& keys,
-                                     const std::vector<int64_t>& sizes) {
-    // TODO(C2.2 / offload serving; see p2p-split-plan-v3.md): this is an
-    // intentionally unresolved old downcast after C3.2 removed the subclass.
-    // Replace the whole body with build-selected Backend forwarding to native
-    // Client::BatchGetOffloadObjectFromStorage; P2P retains INVALID_PARAMS.
-    // FileStorage remains owned by native Client, never by Real or Backend.
-    // Keep RealClient::batch_get_offload_object as the wire method. Do not
-    // restore a compatibility class or change ClientRequester to a new ID.
-    auto* centralized =
-        dynamic_cast<CentralizedClientService*>(client_service_.get());
-    if (!centralized) {
-        LOG(ERROR)
-            << "batch_get_offload_object requires CentralizedClientService";
-        return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
-    }
-    return centralized->BatchGetOffloadObjectFromStorage(keys, sizes);
-}
 }  // namespace mooncake

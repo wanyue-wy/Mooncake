@@ -14,8 +14,8 @@ struct CentralizedClientConfig : RealClientConfigBase {
     // Whether to enable file storage offloading.
     bool enable_offload = false;
 
-    // Native offload listener; 0 requests an available port.
-    uint16_t offload_rpc_port = 0;
+    // Native client-to-client RPC listener; 0 requests an available port.
+    uint16_t client_rpc_port = 0;
 };
 
 class CentralizedClientConfigBuilder : private ClientConfigBuilder {
@@ -31,7 +31,7 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
         const std::string& ipc_socket_path = "", bool enable_offload = false,
         const std::map<std::string, std::string>& labels = {},
         const std::string& runtime_config = "", uint16_t heartbeat_rpc_port = 0,
-        uint16_t offload_rpc_port = 0) {
+        uint16_t client_rpc_port = 0) {
         if (!runtime_config.empty()) {
             LOG(ERROR) << "Centralized clients do not support runtime_config";
             throw std::invalid_argument(
@@ -45,7 +45,7 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
         config.global_segment_size = global_segment_size;
         config.enable_offload = enable_offload;
         config.heartbeat_rpc_port = heartbeat_rpc_port;
-        config.offload_rpc_port = offload_rpc_port;
+        config.client_rpc_port = client_rpc_port;
         return config;
     }
 
@@ -63,7 +63,7 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
             }
         }
         auto devices = get_config_str(config, DictCommon::kRdmaDevices);
-        auto offload_port = get_config_port(config, "offload_rpc_port");
+        auto client_port = get_config_port(config, "client_rpc_port");
         auto heartbeat_port = static_cast<uint16_t>(
             get_config_size(config, DictCentralized::kHeartbeatRpcPort,
                             DictCentralized::kDefaultHeartbeatRpcPort));
@@ -83,7 +83,7 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
             nullptr, get_config_str(config, DictCommon::kIpcSocketPath),
             get_config_bool(config, "enable_offload", false), {},
             get_config_str(config, DictCentralized::kRuntimeConfig),
-            heartbeat_port, offload_port);
+            heartbeat_port, client_port);
     }
 
    private:
