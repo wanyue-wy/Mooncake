@@ -10,6 +10,7 @@
 #include <vector>
 #include <condition_variable>
 #include <mutex>
+#include <shared_mutex>
 
 #include "pyclient.h"
 #if defined(MOONCAKE_STORE_CLIENT_P2P)
@@ -74,6 +75,11 @@ class ResourceTracker {
 };
 
 class RealClient : public PyClient {
+    enum class State { UNINITIALIZED, READY, CLOSING, CLOSED };
+    // Outlive worker threads that may still observe shutdown during destruction.
+    mutable std::shared_mutex inflight_lock_;
+    State state_{State::UNINITIALIZED};
+
    public:
     RealClient();
     ~RealClient();
@@ -90,7 +96,8 @@ class RealClient : public PyClient {
     uint64_t alloc_from_mem_pool(size_t size) override { return 0; };
 
     bool is_initialized() const override {
-        return client_service_ != nullptr && !closed_.load();
+        std::shared_lock lock(inflight_lock_);
+        return state_ == State::READY;
     }
     DeploymentMode deployment_mode() const override;
     std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const;
@@ -380,6 +387,17 @@ class RealClient : public PyClient {
 
     // Internal versions that return tl::expected
     tl::expected<DeploymentMode, ErrorCode> service_ready_internal() {
+        std::shared_lock inflight_guard(inflight_lock_);
+        if (state_ == State::CLOSING || state_ == State::CLOSED) {
+            LOG(ERROR) << "service_ready_internal failed, error="
+                       << ErrorCode::SHUTTING_DOWN;
+            return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+        }
+        // The shared lock also protects the readiness check.
+        if (state_ != State::READY) {
+            LOG(ERROR) << "Real client is not ready";
+            return tl::unexpected(ErrorCode::INVALID_PARAMS);
+        }
         return deployment_mode();
     }
 
@@ -486,23 +504,23 @@ class RealClient : public PyClient {
 
     tl::expected<DummyHeartbeatResponse, ErrorCode> ping(const UUID& client_id);
 
-    std::string protocol;
-    std::string device_name;
+    std::string protocol_;
+    std::string device_name_;
 
     struct MappedShm {
-        std::string shm_name;
+        std::string shm_name_;
         // Offset = real_base - dummy_base
-        uintptr_t shm_addr_offset = 0;
-        void* shm_buffer = nullptr;
-        size_t shm_size = 0;
-        uintptr_t dummy_base_addr = 0;
+        uintptr_t shm_addr_offset_ = 0;
+        void* shm_buffer_ = nullptr;
+        size_t shm_size_ = 0;
+        uintptr_t dummy_base_addr_ = 0;
     };
 
     struct ShmContext {
-        mutable SharedMutex mutex;
-        std::vector<MappedShm> mapped_shms GUARDED_BY(mutex);
-        std::shared_ptr<ClientBufferAllocator> client_buffer_allocator
-            GUARDED_BY(mutex) = nullptr;
+        mutable SharedMutex mutex_;
+        std::vector<MappedShm> mapped_shms_ GUARDED_BY(mutex_);
+        std::shared_ptr<ClientBufferAllocator> client_buffer_allocator_
+            GUARDED_BY(mutex_) = nullptr;
     };
 
     mutable SharedMutex dummy_client_mutex_;
@@ -510,9 +528,6 @@ class RealClient : public PyClient {
         shm_contexts_ GUARDED_BY(dummy_client_mutex_);
 
     std::shared_ptr<ShmContext> find_shm_context(const UUID& client_id);
-
-    // Ensure cleanup executes at most once across multiple entry points
-    std::atomic<bool> closed_{false};
 
     // Dummy Client manage related members
     void dummy_client_monitor_func();
@@ -522,17 +537,17 @@ class RealClient : public PyClient {
     std::atomic<bool> dummy_client_monitor_running_{false};
     std::condition_variable dummy_client_monitor_cv_;
     std::mutex dummy_client_monitor_cv_mutex_;
-    static constexpr uint64_t kDummyClientMonitorSleepMs =
+    static constexpr uint64_t kDummyClientMonitorSleepMs_ =
         1000;  // 1000 ms sleep between client monitor checks
     // boost lockfree queue requires trivial assignment operator
     struct PodUUID {
-        uint64_t first;
-        uint64_t second;
+        uint64_t first_;
+        uint64_t second_;
     };
-    static constexpr size_t kDummyClientPingQueueSize =
+    static constexpr size_t kDummyClientPingQueueSize_ =
         128 * 1024;  // Size of the client ping queue
     boost::lockfree::queue<PodUUID> dummy_client_ping_queue_{
-        kDummyClientPingQueueSize};
+        kDummyClientPingQueueSize_};
     const int64_t dummy_client_live_ttl_sec_ =
         DEFAULT_DUMMY_CLIENT_LIVE_TTL_SEC;
 

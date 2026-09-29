@@ -56,7 +56,7 @@ TEST(RealClientRemountTest, PingStatusFollowsMapPresence) {
 
 // ping() reports the number of segments RealClient has mapped for the client,
 // so the dummy can detect a partial loss (present but under-mapped) and
-// re-register. mapped_shm_count is 0 when absent and tracks mapped_shms.size().
+// re-register. mapped_shm_count is 0 when absent and tracks mapped_shms_.size().
 TEST(RealClientRemountTest, PingReportsMappedShmCount) {
     RealClient rc;
     UUID id{5, 6};
@@ -78,8 +78,8 @@ TEST(RealClientRemountTest, PingReportsMappedShmCount) {
         SharedMutexLocker lock(&rc.dummy_client_mutex_);
         auto& ctx = rc.shm_contexts_[id];
         SharedMutexLocker ctx_lock(&ctx->mutex);
-        ctx->mapped_shms.push_back(RealClient::MappedShm{});
-        ctx->mapped_shms.push_back(RealClient::MappedShm{});
+        ctx->mapped_shms_.push_back(RealClient::MappedShm{});
+        ctx->mapped_shms_.push_back(RealClient::MappedShm{});
     }
     auto mapped = rc.ping(id);
     EXPECT_EQ(mapped.value().status, DummyClientStatus::HEALTH);

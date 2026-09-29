@@ -200,6 +200,12 @@ RealClient::batch_get_into_multi_buffers_internal(
 
 std::vector<ObjectDescriptor> RealClient::get_replica_desc(
     const std::string& key) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "get_replica_desc failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return {};
+    }
     auto query_result = client_service_->Query(key);
     if (!query_result) {
         std::vector<ObjectDescriptor> replica_list = {};
@@ -222,6 +228,12 @@ std::vector<ObjectDescriptor> RealClient::get_replica_desc(
 
 std::map<std::string, std::vector<ObjectDescriptor>>
 RealClient::batch_get_replica_desc(const std::vector<std::string>& keys) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "batch_get_replica_desc failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return {};
+    }
     auto query_results = client_service_->BatchQuery(keys);
     std::map<std::string, std::vector<ObjectDescriptor>> replica_map;
     if (query_results.size() != keys.size()) {
@@ -243,6 +255,12 @@ RealClient::batch_get_replica_desc(const std::vector<std::string>& keys) {
 }
 
 tl::expected<int64_t, ErrorCode> RealClient::removeAllLocal_internal() {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "removeAllLocal_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -256,6 +274,12 @@ tl::expected<int64_t, ErrorCode> RealClient::removeAllLocal_internal() {
 
 tl::expected<void, ErrorCode> RealClient::removeLocal_internal(
     const std::string& key) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "removeLocal_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -269,6 +293,12 @@ tl::expected<void, ErrorCode> RealClient::removeLocal_internal(
 
 tl::expected<UUID, ErrorCode> RealClient::create_copy_task(
     const std::string& key, const std::vector<std::string>& targets) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "create_copy_task failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     (void)key;
     (void)targets;
     LOG(ERROR) << "create_copy_task is not supported by this build";
@@ -278,6 +308,12 @@ tl::expected<UUID, ErrorCode> RealClient::create_copy_task(
 tl::expected<UUID, ErrorCode> RealClient::create_move_task(
     const std::string& key, const std::string& source,
     const std::string& target) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "create_move_task failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     (void)key;
     (void)source;
     (void)target;
@@ -287,6 +323,12 @@ tl::expected<UUID, ErrorCode> RealClient::create_move_task(
 
 tl::expected<QueryTaskResponse, ErrorCode> RealClient::query_task(
     const UUID& task_id) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "query_task failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     (void)task_id;
     LOG(ERROR) << "query_task is not supported by this build";
     return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
@@ -294,6 +336,12 @@ tl::expected<QueryTaskResponse, ErrorCode> RealClient::query_task(
 
 tl::expected<int64_t, ErrorCode> RealClient::getSize_internal(
     const std::string& key) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "getSize_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);

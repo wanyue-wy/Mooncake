@@ -166,7 +166,7 @@ static int send_fd(int socket, int fd, void* data, size_t data_len) {
 
     memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
 
-    return sendmsg(socket, &msg, 0);
+    return sendmsg(socket, &msg, MSG_NOSIGNAL);
 }
 
 template <auto ServiceMethod, typename ReturnType, typename... Args>

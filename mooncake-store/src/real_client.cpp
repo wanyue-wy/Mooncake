@@ -191,35 +191,37 @@ template int RealClient::setup(P2PClientConfig&);
 
 template <typename ConfigT>
 tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT& config) {
-    this->protocol = config.protocol;
-    this->ipc_socket_path_ = config.ipc_socket_path;
+    std::unique_lock setup_lock(inflight_lock_);
+    if (state_ != State::UNINITIALIZED) {
+        LOG(ERROR) << "Cannot setup a closed or initialized RealClient";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
     auto client = CreateService(config);
     if (!client) {
         LOG(ERROR) << "Failed to create native client: " << client.error();
         return tl::unexpected(client.error());
     }
     client_service_ = std::move(*client);
-
-    // TODO(C2.2 / Dummy startup; see p2p-split-plan-v3.md): start_ipc_server
-    // only starts a thread today. Wait for bind/listen success and propagate
-    // failure through setup before the Real RPC listener admits Dummy calls.
-    // The separate deployment-lifecycle review completes this wiring.
-    // A00 setup starts IPC after segment setup but before FileStorage::Init.
-    // Review that ordering when wiring native InitStorage; do not move IPC
-    // ownership into Client or assume the old and split startup are identical.
-    // Start IPC server to accept FD from dummy clients
+    protocol_ = config.protocol;
+    ipc_socket_path_ = config.ipc_socket_path;
+    int startup_result = 0;
     if (!ipc_socket_path_.empty()) {
-        if (start_ipc_server() != 0) {
-            LOG(ERROR) << "Failed to start IPC server at " << ipc_socket_path_;
-            return tl::unexpected(ErrorCode::INTERNAL_ERROR);
+        startup_result = start_ipc_server();
+    }
+    if (startup_result != 0) {
+        LOG(ERROR) << "Failed to start deployment workers";
+        setup_lock.unlock();
+        auto cleanup = tearDownAll_internal();
+        if (!cleanup) {
+            LOG(ERROR) << "Deployment startup cleanup failed: "
+                       << cleanup.error();
         }
-        LOG(INFO) << "Starting IPC server at " << ipc_socket_path_;
-    }
-    auto res = start_dummy_client_monitor();
-    if (res != 0) {
-        LOG(ERROR) << "Failed to start dummy client monitor";
         return tl::unexpected(ErrorCode::INTERNAL_ERROR);
+    } else {
+        LOG(INFO) << "Starting IPC server at " << ipc_socket_path_;
+        startup_result = start_dummy_client_monitor();
     }
+    state_ = State::READY;
     return {};
 }
 
@@ -247,31 +249,25 @@ int RealClient::initAll(const std::string& protocol_,
 }
 
 tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
-    // Ensure cleanup executes once across destructor/close/signal paths
-    bool expected = false;
-    if (!closed_.compare_exchange_strong(expected, true,
-                                         std::memory_order_acq_rel)) {
-        return {};
+    {
+        // The exclusive lock drains admitted calls before closing admission.
+        std::unique_lock lock(inflight_lock_);
+        if (state_ == State::CLOSING || state_ == State::CLOSED) {
+            return {};
+        }
+        state_ = State::CLOSING;
     }
-
-    // TODO(C2.2 / Dummy shutdown; see p2p-split-plan-v3.md): close Real RPC
-    // admission and join IPC registration work before releasing the native
-    // client or unmapping SHM.
-    // stop_ipc_server currently only wakes the thread. Remove
-    // this TODO once RPC/IPC teardown owns and drains both entry points.
-    // Centralized Client now has no Stop/Destroy or operation tracker: drain
-    // Dummy RPC handlers before releasing it, and unregister SHM while TE
-    // still exists. Direct-call/close concurrency is outside this refactor.
     stop_ipc_server();
     stop_dummy_client_monitor();
 
     if (!client_service_) {
-        // Not initialized or already cleaned; treat as success for idempotence
+        std::unique_lock lock(inflight_lock_);
+        state_ = State::CLOSED;
         return {};
     }
     client_service_.reset();
-    device_name = "";
-    protocol = "";
+    device_name_ = "";
+    protocol_ = "";
     // Detach the map, then tear down each context under its own lock.
     std::unordered_map<UUID, std::shared_ptr<ShmContext>, boost::hash<UUID>>
         contexts;
@@ -281,21 +277,24 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
     }
     for (auto& entry : contexts) {
         ShmContext& context = *entry.second;
-        SharedMutexLocker lock(&context.mutex);
-        context.client_buffer_allocator.reset();
+        SharedMutexLocker lock(&context.mutex_);
+        context.client_buffer_allocator_.reset();
 
-        // Iterate over all mapped_shms to unmap them
-        for (auto& seg : context.mapped_shms) {
-            if (seg.shm_buffer) {
+        for (auto& seg : context.mapped_shms_) {
+            if (seg.shm_buffer_) {
                 // Memory mapped from memfd needs munmap
-                if (munmap(seg.shm_buffer, seg.shm_size) != 0) {
-                    LOG(ERROR) << "Failed to unmap shm: " << seg.shm_name
+                if (munmap(seg.shm_buffer_, seg.shm_size_) != 0) {
+                    LOG(ERROR) << "Failed to unmap shm: " << seg.shm_name_
                                << ", error: " << strerror(errno);
                 }
-                seg.shm_buffer = nullptr;
+                seg.shm_buffer_ = nullptr;
             }
         }
-        context.mapped_shms.clear();
+        context.mapped_shms_.clear();
+    }
+    {
+        std::unique_lock lock(inflight_lock_);
+        state_ = State::CLOSED;
     }
     return {};
 }
@@ -350,14 +349,20 @@ tl::expected<void, ErrorCode> RealClient::put_internal(
 tl::expected<void, ErrorCode> RealClient::put_dummy_helper(
     const std::string& key, std::span<const char> value,
     const std::optional<WriteConfig>& config, const UUID& client_id) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "put_dummy_helper failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
     auto& context = *context_ptr;
-    SharedMutexLocker lock(&context.mutex, shared_lock);
-    return put_internal(key, value, config, context.client_buffer_allocator);
+    SharedMutexLocker lock(&context.mutex_, shared_lock);
+    return put_internal(key, value, config, context.client_buffer_allocator_);
 }
 
 int RealClient::put(const std::string& key, std::span<const char> value,
@@ -440,15 +445,21 @@ tl::expected<void, ErrorCode> RealClient::put_batch_dummy_helper(
     const std::vector<std::string>& keys,
     const std::vector<std::span<const char>>& values,
     const std::optional<WriteConfig>& config, const UUID& client_id) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "put_batch_dummy_helper failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
     auto& context = *context_ptr;
-    SharedMutexLocker lock(&context.mutex, shared_lock);
+    SharedMutexLocker lock(&context.mutex_, shared_lock);
     return put_batch_internal(keys, values, config,
-                              context.client_buffer_allocator);
+                              context.client_buffer_allocator_);
 }
 
 int RealClient::put_batch(const std::vector<std::string>& keys,
@@ -529,15 +540,21 @@ tl::expected<void, ErrorCode> RealClient::put_parts_dummy_helper(
     const std::string& key, std::vector<std::span<const char>> values,
     const std::optional<WriteConfig>& config, const UUID& client_id,
     WriteOperation operation) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "put_parts_dummy_helper failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
     auto& context = *context_ptr;
-    SharedMutexLocker lock(&context.mutex, shared_lock);
+    SharedMutexLocker lock(&context.mutex_, shared_lock);
     return put_parts_internal(key, values, config,
-                              context.client_buffer_allocator, operation);
+                              context.client_buffer_allocator_, operation);
 }
 
 int RealClient::put_parts(const std::string& key,
@@ -551,6 +568,12 @@ int RealClient::put_parts(const std::string& key,
 
 tl::expected<void, ErrorCode> RealClient::remove_internal(
     const std::string& key, bool force) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "remove_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -570,6 +593,12 @@ int RealClient::remove(const std::string& key, bool force) {
 
 tl::expected<long, ErrorCode> RealClient::removeByRegex_internal(
     const std::string& str, bool force) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "removeByRegex_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -587,6 +616,12 @@ long RealClient::removeByRegex(const std::string& str, bool force) {
 }
 
 tl::expected<int64_t, ErrorCode> RealClient::removeAll_internal(bool force) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "removeAll_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -613,6 +648,12 @@ int RealClient::removeLocal(const std::string& key) {
 
 tl::expected<bool, ErrorCode> RealClient::isExist_internal(
     const std::string& key) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "isExist_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -659,6 +700,15 @@ int64_t RealClient::getSize(const std::string& key) {
 tl::expected<void, ErrorCode> RealClient::map_shm_internal(
     int fd, uint64_t dummy_base_addr, size_t shm_size, bool is_local_buffer,
     const UUID& client_id) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "map_shm_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        if (fd >= 0) {
+            close(fd);
+        }
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     std::stringstream addr_stream;
     addr_stream << "0x" << std::hex << dummy_base_addr;
 
@@ -669,15 +719,15 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
     // Skip the mmap/registration below if this segment is already mapped.
     if (auto context_ptr = find_shm_context(client_id)) {
         auto& context = *context_ptr;
-        SharedMutexLocker lock(&context.mutex, shared_lock);
-        for (const auto& shm : context.mapped_shms) {
-            if (shm.dummy_base_addr ==
+        SharedMutexLocker lock(&context.mutex_, shared_lock);
+        for (const auto& shm : context.mapped_shms_) {
+            if (shm.dummy_base_addr_ ==
                 static_cast<uintptr_t>(dummy_base_addr)) {
                 LOG(WARNING)
                     << "Segment already mapped: " << shm_name
                     << ", client_id=" << client_id << ", dummy_base_addr=0x"
                     << std::hex << dummy_base_addr << std::dec
-                    << ", shm_size=" << shm.shm_size;
+                    << ", shm_size=" << shm.shm_size_;
                 if (fd >= 0) {
                     close(fd);
                 }
@@ -706,16 +756,16 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
     close(fd);  // Close FD after mapping
 
     MappedShm shm;
-    shm.shm_name = shm_name;
-    shm.shm_buffer = shm_buffer;
-    shm.shm_size = shm_size;
-    shm.dummy_base_addr = static_cast<uintptr_t>(dummy_base_addr);
-    shm.shm_addr_offset = reinterpret_cast<uintptr_t>(shm_buffer) -
+    shm.shm_name_ = shm_name;
+    shm.shm_buffer_ = shm_buffer;
+    shm.shm_size_ = shm_size;
+    shm.dummy_base_addr_ = static_cast<uintptr_t>(dummy_base_addr);
+    shm.shm_addr_offset_ = reinterpret_cast<uintptr_t>(shm_buffer) -
                           reinterpret_cast<uintptr_t>(dummy_base_addr);
 
     if (shm_size > 0) {
         auto result = client_service_->RegisterLocalMemory(
-            shm.shm_buffer, shm_size, kWildcardLocation, false, true);
+            shm.shm_buffer_, shm_size, kWildcardLocation, false, true);
         if (!result.has_value()) {
             LOG(ERROR) << "Failed to register memory";
             munmap(shm_buffer, shm_size);
@@ -728,7 +778,7 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
     std::shared_ptr<ClientBufferAllocator> new_allocator;
     if (is_local_buffer) {
         new_allocator =
-            ClientBufferAllocator::create(shm_buffer, shm_size, this->protocol);
+            ClientBufferAllocator::create(shm_buffer, shm_size, this->protocol_);
         if (!new_allocator) {
             LOG(ERROR) << "Failed to create allocator";
             return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
@@ -742,9 +792,9 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
             slot = std::make_shared<ShmContext>();
         }
         ShmContext& context = *slot;
-        SharedMutexLocker ctx_lock(&context.mutex);
+        SharedMutexLocker ctx_lock(&context.mutex_);
         if (is_local_buffer) {
-            if (context.client_buffer_allocator) {
+            if (context.client_buffer_allocator_) {
                 // A client may map at most one local buffer; roll back ours.
                 LOG(ERROR)
                     << "A local buffer is already mapped for this client "
@@ -756,9 +806,9 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
                 munmap(shm_buffer, shm_size);
                 return tl::make_unexpected(ErrorCode::OBJECT_ALREADY_EXISTS);
             }
-            context.client_buffer_allocator = std::move(new_allocator);
+            context.client_buffer_allocator_ = std::move(new_allocator);
         }
-        context.mapped_shms.push_back(std::move(shm));
+        context.mapped_shms_.push_back(std::move(shm));
 
         LOG(INFO) << "Mapped new shared memory: " << shm_name
                   << ", client_id=" << client_id << ", dummy_base_addr=0x"
@@ -770,6 +820,12 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
 
 tl::expected<void, ErrorCode> RealClient::unmap_shm_internal(
     const UUID& client_id) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "unmap_shm_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     std::shared_ptr<ShmContext> context_ptr;
     {
         SharedMutexLocker lock(&dummy_client_mutex_);
@@ -783,39 +839,39 @@ tl::expected<void, ErrorCode> RealClient::unmap_shm_internal(
     }
 
     ShmContext& context = *context_ptr;
-    SharedMutexLocker lock(&context.mutex);
-    context.client_buffer_allocator.reset();
+    SharedMutexLocker lock(&context.mutex_);
+    context.client_buffer_allocator_.reset();
 
     bool had_error = false;
-    for (auto& shm : context.mapped_shms) {
-        if (!shm.shm_buffer) {
+    for (auto& shm : context.mapped_shms_) {
+        if (!shm.shm_buffer_) {
             continue;
         }
-        if (shm.shm_size > 0) {
+        if (shm.shm_size_ > 0) {
             auto rc =
-                client_service_->unregisterLocalMemory(shm.shm_buffer, true);
+                client_service_->unregisterLocalMemory(shm.shm_buffer_, true);
             if (!rc) {
                 LOG(WARNING) << "Failed to unregister memory for "
-                             << shm.shm_name << ", client_id=" << client_id
+                             << shm.shm_name_ << ", client_id=" << client_id
                              << ", error=" << toString(rc.error())
                              << ", proceeding with cleanup";
                 had_error = true;
             }
         }
-        if (munmap(shm.shm_buffer, shm.shm_size) != 0) {
-            LOG(WARNING) << "munmap failed for " << shm.shm_name
+        if (munmap(shm.shm_buffer_, shm.shm_size_) != 0) {
+            LOG(WARNING) << "munmap failed for " << shm.shm_name_
                          << ", client_id=" << client_id << ": "
                          << strerror(errno);
             had_error = true;
         } else {
-            LOG(INFO) << "Unmapped shared memory: " << shm.shm_name
+            LOG(INFO) << "Unmapped shared memory: " << shm.shm_name_
                       << ", client_id=" << client_id << ", dummy_base_addr=0x"
-                      << std::hex << shm.dummy_base_addr << std::dec
-                      << ", shm_buffer=" << shm.shm_buffer
-                      << ", shm_size=" << shm.shm_size;
+                      << std::hex << shm.dummy_base_addr_ << std::dec
+                      << ", shm_buffer=" << shm.shm_buffer_
+                      << ", shm_size=" << shm.shm_size_;
         }
     }
-    context.mapped_shms.clear();
+    context.mapped_shms_.clear();
     if (had_error) {
         LOG(ERROR) << "Failed to unmap shared memory for client_id="
                    << client_id;
@@ -826,25 +882,31 @@ tl::expected<void, ErrorCode> RealClient::unmap_shm_internal(
 
 tl::expected<void, ErrorCode> RealClient::unregister_shm_buffer_internal(
     uint64_t dummy_base_addr, const UUID& client_id) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "unregister_shm_buffer_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(INFO) << "client_id=" << client_id << ", shm already unmapped";
         return {};
     }
     ShmContext& context = *context_ptr;
-    SharedMutexLocker lock(&context.mutex);  // exclusive: modifies mapped_shms
+    SharedMutexLocker lock(&context.mutex_);  // exclusive: modifies mapped_shms_
 
     // Find the shm corresponding to this dummy address
-    auto shm_it = context.mapped_shms.end();
-    for (auto sit = context.mapped_shms.begin();
-         sit != context.mapped_shms.end(); ++sit) {
-        if (dummy_base_addr == sit->dummy_base_addr) {
+    auto shm_it = context.mapped_shms_.end();
+    for (auto sit = context.mapped_shms_.begin();
+         sit != context.mapped_shms_.end(); ++sit) {
+        if (dummy_base_addr == sit->dummy_base_addr_) {
             shm_it = sit;
             break;
         }
     }
 
-    if (shm_it == context.mapped_shms.end()) {
+    if (shm_it == context.mapped_shms_.end()) {
         std::stringstream addr_stream;
         addr_stream << "0x" << std::hex << dummy_base_addr;
         LOG(ERROR) << "Share memory not found for dummy address: "
@@ -853,34 +915,34 @@ tl::expected<void, ErrorCode> RealClient::unregister_shm_buffer_internal(
     }
 
     // Unmap and clean up the shm
-    if (shm_it->shm_buffer) {
+    if (shm_it->shm_buffer_) {
         // Unregister from transfer engine if it was registered
-        if (shm_it->shm_size > 0) {
+        if (shm_it->shm_size_ > 0) {
             // Matching the usage in unmap_shm_internal
             auto res = client_service_->unregisterLocalMemory(
-                shm_it->shm_buffer, true);
+                shm_it->shm_buffer_, true);
             if (!res) {
                 LOG(WARNING)
                     << "Failed to unregister local memory for shared memory: "
-                    << shm_it->shm_name << ", error: " << toString(res.error());
+                    << shm_it->shm_name_ << ", error: " << toString(res.error());
             }
         }
 
-        if (munmap(shm_it->shm_buffer, shm_it->shm_size) != 0) {
-            LOG(ERROR) << "Failed to munmap shared memory: " << shm_it->shm_name
+        if (munmap(shm_it->shm_buffer_, shm_it->shm_size_) != 0) {
+            LOG(ERROR) << "Failed to munmap shared memory: " << shm_it->shm_name_
                        << ", error: " << strerror(errno);
         } else {
             LOG(INFO) << "Unmapped and cleaned up shared memory: "
-                      << shm_it->shm_name << ", client_id=" << client_id
+                      << shm_it->shm_name_ << ", client_id=" << client_id
                       << ", dummy_base_addr=0x" << std::hex
-                      << shm_it->dummy_base_addr << std::dec
-                      << ", shm_buffer=" << shm_it->shm_buffer
-                      << ", shm_size=" << shm_it->shm_size;
+                      << shm_it->dummy_base_addr_ << std::dec
+                      << ", shm_buffer=" << shm_it->shm_buffer_
+                      << ", shm_size=" << shm_it->shm_size_;
         }
     }
 
     // Remove shm from list
-    context.mapped_shms.erase(shm_it);
+    context.mapped_shms_.erase(shm_it);
 
     return {};
 }
@@ -908,16 +970,22 @@ tl::expected<std::tuple<uint64_t, size_t>, ErrorCode>
 RealClient::get_buffer_info_dummy_helper(
     const std::string& key, const std::optional<ReadConfig>& config,
     const UUID& client_id) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "get_buffer_info_dummy_helper failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
         return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
     }
     ShmContext& context = *context_ptr;
-    SharedMutexLocker lock(&context.mutex, shared_lock);
+    SharedMutexLocker lock(&context.mutex_, shared_lock);
 
     auto buffer_handle =
-        get_buffer_internal(key, context.client_buffer_allocator, config);
+        get_buffer_internal(key, context.client_buffer_allocator_, config);
     if (!buffer_handle) {
         LOG(ERROR) << "Failed to get buffer for key: " << key;
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -925,13 +993,13 @@ RealClient::get_buffer_info_dummy_helper(
     uint64_t buffer_base = reinterpret_cast<uint64_t>(buffer_handle->ptr());
     size_t buffer_size = buffer_handle->size();
 
-    for (const auto& shm : context.mapped_shms) {
-        uint64_t shm_start = reinterpret_cast<uint64_t>(shm.shm_buffer);
-        uint64_t shm_end = shm_start + shm.shm_size;
+    for (const auto& shm : context.mapped_shms_) {
+        uint64_t shm_start = reinterpret_cast<uint64_t>(shm.shm_buffer_);
+        uint64_t shm_end = shm_start + shm.shm_size_;
 
         if (buffer_base >= shm_start && buffer_base < shm_end) {
             // Convert real address to dummy address.
-            return std::make_tuple(buffer_base - shm.shm_addr_offset,
+            return std::make_tuple(buffer_base - shm.shm_addr_offset_,
                                    buffer_size);
         }
     }
@@ -1015,6 +1083,13 @@ RealClient::batch_put_from_dummy_helper(
     const std::vector<size_t>& sizes, const std::optional<WriteConfig>& config,
     const UUID& client_id,
     WriteOperation operation) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "batch_put_from_dummy_helper failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return std::vector<tl::expected<void, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
@@ -1024,7 +1099,7 @@ RealClient::batch_put_from_dummy_helper(
     // Hold the context lock across translation and the transfer so a concurrent
     // unmap can't munmap the segments mid-transfer.
     ShmContext& context = *context_ptr;
-    SharedMutexLocker lock(&context.mutex, shared_lock);
+    SharedMutexLocker lock(&context.mutex_, shared_lock);
 
     std::vector<void*> buffers;
     buffers.reserve(dummy_buffers.size());
@@ -1035,18 +1110,18 @@ RealClient::batch_put_from_dummy_helper(
         size_t size = sizes[i];
         bool found = false;
 
-        if (last_hit_shm && dummy_addr >= last_hit_shm->dummy_base_addr &&
+        if (last_hit_shm && dummy_addr >= last_hit_shm->dummy_base_addr_ &&
             dummy_addr + size <=
-                last_hit_shm->dummy_base_addr + last_hit_shm->shm_size) {
+                last_hit_shm->dummy_base_addr_ + last_hit_shm->shm_size_) {
             buffers.push_back(reinterpret_cast<void*>(
-                dummy_addr + last_hit_shm->shm_addr_offset));
+                dummy_addr + last_hit_shm->shm_addr_offset_));
             found = true;
         } else {
-            for (const auto& shm : context.mapped_shms) {
-                if (dummy_addr >= shm.dummy_base_addr &&
-                    dummy_addr + size <= shm.dummy_base_addr + shm.shm_size) {
+            for (const auto& shm : context.mapped_shms_) {
+                if (dummy_addr >= shm.dummy_base_addr_ &&
+                    dummy_addr + size <= shm.dummy_base_addr_ + shm.shm_size_) {
                     buffers.push_back(reinterpret_cast<void*>(
-                        dummy_addr + shm.shm_addr_offset));
+                        dummy_addr + shm.shm_addr_offset_));
                     found = true;
                     last_hit_shm = &shm;
                     break;
@@ -1174,6 +1249,8 @@ tl::expected<void, ErrorCode> RealClient::put_from_internal(
 
     auto put_result = client_service_->Put(key, slices, config);
     if (!put_result) {
+        LOG(ERROR) << "put_from_internal failed, key=" << key
+                   << ", error=" << put_result.error();
         return tl::unexpected(put_result.error());
     }
 
@@ -1206,6 +1283,13 @@ RealClient::batch_get_into_dummy_helper(
     const std::vector<uint64_t>& dummy_buffers,
     const std::vector<size_t>& sizes, const std::optional<ReadConfig>& config,
     const UUID& client_id) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "batch_get_into_dummy_helper failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return std::vector<tl::expected<int64_t, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
@@ -1215,7 +1299,7 @@ RealClient::batch_get_into_dummy_helper(
     // Hold the context lock across translation and the transfer so a concurrent
     // unmap can't munmap the segments mid-transfer.
     ShmContext& context = *context_ptr;
-    SharedMutexLocker lock(&context.mutex, shared_lock);
+    SharedMutexLocker lock(&context.mutex_, shared_lock);
 
     std::vector<void*> buffers;
     buffers.reserve(dummy_buffers.size());
@@ -1226,18 +1310,18 @@ RealClient::batch_get_into_dummy_helper(
         size_t size = sizes[i];
         bool found = false;
 
-        if (last_hit_shm && dummy_addr >= last_hit_shm->dummy_base_addr &&
+        if (last_hit_shm && dummy_addr >= last_hit_shm->dummy_base_addr_ &&
             dummy_addr + size <=
-                last_hit_shm->dummy_base_addr + last_hit_shm->shm_size) {
+                last_hit_shm->dummy_base_addr_ + last_hit_shm->shm_size_) {
             buffers.push_back(reinterpret_cast<void*>(
-                dummy_addr + last_hit_shm->shm_addr_offset));
+                dummy_addr + last_hit_shm->shm_addr_offset_));
             found = true;
         } else {
-            for (const auto& shm : context.mapped_shms) {
-                if (dummy_addr >= shm.dummy_base_addr &&
-                    dummy_addr + size <= shm.dummy_base_addr + shm.shm_size) {
+            for (const auto& shm : context.mapped_shms_) {
+                if (dummy_addr >= shm.dummy_base_addr_ &&
+                    dummy_addr + size <= shm.dummy_base_addr_ + shm.shm_size_) {
                     buffers.push_back(reinterpret_cast<void*>(
-                        dummy_addr + shm.shm_addr_offset));
+                        dummy_addr + shm.shm_addr_offset_));
                     found = true;
                     last_hit_shm = &shm;
                     break;
@@ -1259,6 +1343,13 @@ RealClient::batch_get_into_dummy_helper(
 
 std::vector<tl::expected<bool, ErrorCode>> RealClient::batchIsExist_internal(
     const std::vector<std::string>& keys) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "batchIsExist_internal failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return std::vector<tl::expected<bool, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return std::vector<tl::expected<bool, ErrorCode>>(
@@ -1420,6 +1511,12 @@ std::vector<int> RealClient::batch_get_into_multi_buffers(
 
 tl::expected<DummyHeartbeatResponse, ErrorCode> RealClient::ping(
     const UUID& client_id) {
+    std::shared_lock inflight_guard(inflight_lock_);
+    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+        LOG(ERROR) << "ping failed, error="
+                   << ErrorCode::SHUTTING_DOWN;
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     DummyHeartbeatResponse resp;
     auto context = find_shm_context(client_id);
     if (!context) {
@@ -1431,8 +1528,8 @@ tl::expected<DummyHeartbeatResponse, ErrorCode> RealClient::ping(
     }
     resp.status = DummyClientStatus::HEALTH;
     {
-        SharedMutexLocker lock(&context->mutex, shared_lock);
-        resp.mapped_shm_count = context->mapped_shms.size();
+        SharedMutexLocker lock(&context->mutex_, shared_lock);
+        resp.mapped_shm_count = context->mapped_shms_.size();
     }
 
     // Record the heartbeat (lock-free queue) to refresh this client's TTL.
@@ -1457,7 +1554,7 @@ void RealClient::dummy_client_monitor_func() {
         // Update the client ttl
         PodUUID pod_client_id;
         while (dummy_client_ping_queue_.pop(pod_client_id)) {
-            UUID client_id = {pod_client_id.first, pod_client_id.second};
+            UUID client_id = {pod_client_id.first_, pod_client_id.second_};
             client_ttl[client_id] =
                 now + std::chrono::seconds(dummy_client_live_ttl_sec_);
         }
@@ -1485,7 +1582,7 @@ void RealClient::dummy_client_monitor_func() {
 
         std::unique_lock<std::mutex> lock(dummy_client_monitor_cv_mutex_);
         dummy_client_monitor_cv_.wait_for(
-            lock, std::chrono::milliseconds(kDummyClientMonitorSleepMs),
+            lock, std::chrono::milliseconds(kDummyClientMonitorSleepMs_),
             [this] { return !dummy_client_monitor_running_.load(); });
     }
 }
@@ -1570,6 +1667,7 @@ static int recv_fd(int socket, void* data, size_t data_len) {
         memcpy(&fd, CMSG_DATA(cmsg), sizeof(int));
         return fd;
     }
+    LOG(ERROR) << "IPC registration is missing an SCM_RIGHTS descriptor";
     return -1;
 }
 
@@ -1634,7 +1732,7 @@ void RealClient::ipc_server_func() {
         }
 
         // Send response
-        if (send(client_sock, &status, sizeof(status), 0) < 0) {
+        if (send(client_sock, &status, sizeof(status), MSG_NOSIGNAL) < 0) {
             LOG(ERROR) << "Failed to send response to client";
         }
         close(client_sock);
