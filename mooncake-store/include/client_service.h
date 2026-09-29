@@ -457,8 +457,10 @@ class Client {
     std::vector<tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>> BatchGet(
         const std::vector<std::string>& keys,
         std::shared_ptr<ClientBufferAllocator> allocator);
-    tl::expected<int64_t, ErrorCode> Get(
-        const std::string& key, const std::vector<void*>& buffers,
+    tl::expected<int64_t, ErrorCode> Get(const std::string& key, void* buffer,
+                                         size_t size);
+    std::vector<tl::expected<int64_t, ErrorCode>> BatchGet(
+        const std::vector<std::string>& keys, const std::vector<void*>& buffers,
         const std::vector<size_t>& sizes);
     std::vector<tl::expected<int64_t, ErrorCode>> BatchGet(
         const std::vector<std::string>& keys,
