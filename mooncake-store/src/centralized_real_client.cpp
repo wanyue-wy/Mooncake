@@ -146,7 +146,7 @@ tl::expected<int64_t, ErrorCode> RealClient::get_into_internal(
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
 
-    auto result = client_service_->Get(key, {buffer}, {size});
+    auto result = client_service_->Get(key, buffer, size);
     if (!result) {
         LOG(ERROR) << "Get failed, key=" << key << ", error=" << result.error();
     }
@@ -177,13 +177,7 @@ RealClient::batch_get_into_internal(
         return {};
     }
 
-    std::vector<std::vector<void*>> all_buffers(keys.size());
-    std::vector<std::vector<size_t>> all_sizes(keys.size());
-    for (size_t i = 0; i < keys.size(); ++i) {
-        all_buffers[i] = {buffers[i]};
-        all_sizes[i] = {sizes[i]};
-    }
-    auto results = client_service_->BatchGet(keys, all_buffers, all_sizes);
+    auto results = client_service_->BatchGet(keys, buffers, sizes);
     for (size_t i = 0; i < results.size(); ++i) {
         if (!results[i]) {
             LOG(ERROR) << "BatchGet failed, key=" << keys[i]
