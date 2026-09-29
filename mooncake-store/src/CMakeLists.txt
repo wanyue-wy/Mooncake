@@ -2,7 +2,7 @@
 add_subdirectory(cachelib_memory_allocator)
 
 set(MOONCAKE_MASTER_SUPPORT_SOURCES
-    types.cpp
+    common_types.cpp
     utils.cpp
     etcd_helper.cpp
 )
@@ -47,10 +47,6 @@ set(MOONCAKE_P2P_MASTER_SOURCES
     p2p/ha/ha_metric_manager.cpp
 )
 
-# TODO(C2.1/C2.2 / native client linkage; see p2p-split-plan-v3.md): Real still
-# references the declaration-only legacy factory and offload downcast. Connect
-# the build-selected Backend before claiming this aggregate target builds.
-# D1/I2 must then prove architecture isolation in the actual linked artifacts.
 set(MOONCAKE_STORE_SOURCES
     ${MOONCAKE_MASTER_SUPPORT_SOURCES}
     ${MOONCAKE_CENTRALIZED_MASTER_SOURCES}
@@ -67,6 +63,12 @@ set(MOONCAKE_STORE_SOURCES
     dummy_client.cpp
     file_storage.cpp
 )
+
+if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    list(APPEND MOONCAKE_STORE_SOURCES p2p/client/p2p_real_client.cpp)
+else()
+    list(APPEND MOONCAKE_STORE_SOURCES centralized_real_client.cpp)
+endif()
 
 set(EXTRA_LIBS "")
 
@@ -125,6 +127,9 @@ endif()
 # The cache_allocator library
 include_directories(${Python3_INCLUDE_DIRS})
 add_library(mooncake_store ${MOONCAKE_STORE_SOURCES})
+if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    target_compile_definitions(mooncake_store PUBLIC MOONCAKE_STORE_CLIENT_P2P)
+endif()
 # Note: transfer_engine is PRIVATE to avoid propagating its dependencies (e.g., vendor-specific hardware)
 # to targets that don't need it (e.g., mooncake_master).
 # Targets that need transfer_engine should link it explicitly.
@@ -147,9 +152,11 @@ target_link_libraries(mooncake_store
         transfer_engine
 )
 
-# V3 C2-C4 separate the native clients; D1 audits aggregate dependencies before
-# the I1 Python binding work (see p2p-split-plan-v3.md). Master executables use
-# the isolated targets below.
+# TODO(D1/I2 / client aggregate dependencies; see p2p-split-plan-v3.md):
+# The deployment build still combines native source groups through the targets
+# below. Complete the queued C2 build selection, audit shared dependencies and
+# verify each produced library/executable before removing this TODO. Shared
+# CacheLib/Slab dependencies are allowed; opposite-architecture business is not.
 list(APPEND MOONCAKE_STORE_P2P_SOURCES
     ${MOONCAKE_P2P_MASTER_SOURCES}
     p2p/master/p2p_master_client.cpp

@@ -24,7 +24,7 @@
 #include "mutex.h"
 #include "p2p/client/p2p_client_metric.h"
 #include "p2p/common/p2p_rpc_types.h"
-#include "types.h"
+#include "p2p/common/p2p_types.h"
 
 namespace mooncake {
 

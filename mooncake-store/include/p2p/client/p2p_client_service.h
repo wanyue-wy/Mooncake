@@ -98,22 +98,22 @@ class P2PClientService final {
      * @param config Replicate configuration.
      * @return An ErrorCode indicating the status.
      */
-    tl::expected<void, ErrorCode> Put(const ObjectKey& key,
-                                      std::vector<Slice>& slices,
-                                      const P2PWriteRouteConfig& config);
+    tl::expected<void, ErrorCode> Put(
+        const ObjectKey& key, std::vector<Slice>& slices,
+        const std::optional<P2PWriteRouteConfig>& config = std::nullopt);
 
     /**
      * @brief Batch put data for multiple keys.
      * currently.
      * @param keys The list of object keys.
      * @param batched_slices The list of data slices for each key.
-     * @param config Replicate configuration.
+     * @param config Explicit routing config, or a runtime snapshot if omitted.
      * @return A vector of ErrorCode results for each key.
      */
     std::vector<tl::expected<void, ErrorCode>> BatchPut(
         const std::vector<ObjectKey>& keys,
         std::vector<std::vector<Slice>>& batched_slices,
-        const P2PWriteRouteConfig& config);
+        const std::optional<P2PWriteRouteConfig>& config = std::nullopt);
 
     /**
      * @brief Gets object metadata without transferring data
@@ -141,23 +141,23 @@ class P2PClientService final {
     tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Get(
         const std::string& key,
         std::shared_ptr<ClientBufferAllocator> allocator,
-        const P2PReadRouteConfig& config = {});
+        const std::optional<P2PReadRouteConfig>& config = std::nullopt);
 
     std::vector<tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>>
     BatchGet(const std::vector<std::string>& keys,
              std::shared_ptr<ClientBufferAllocator> allocator,
-             const P2PReadRouteConfig& config = {});
+             const std::optional<P2PReadRouteConfig>& config = std::nullopt);
 
-    tl::expected<int64_t, ErrorCode> Get(const std::string& key,
-                                         const std::vector<void*>& buffers,
-                                         const std::vector<size_t>& sizes,
-                                         const P2PReadRouteConfig& config = {});
+    tl::expected<int64_t, ErrorCode> Get(
+        const std::string& key, const std::vector<void*>& buffers,
+        const std::vector<size_t>& sizes,
+        const std::optional<P2PReadRouteConfig>& config = std::nullopt);
 
     std::vector<tl::expected<int64_t, ErrorCode>> BatchGet(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
         const std::vector<std::vector<size_t>>& all_sizes,
-        const P2PReadRouteConfig& config = {},
+        const std::optional<P2PReadRouteConfig>& config = std::nullopt,
         bool aggregate_same_segment_task = false);
 
     /**
@@ -234,17 +234,6 @@ class P2PClientService final {
     RuntimeConfigStore& getRuntimeConfigStore() {
         return *runtime_config_store_;
     }
-    // TODO(C2.1/C2.2 / default-config interface; see p2p-split-plan-v3.md):
-    // ClientBackend should read this Service-owned RuntimeConfigStore and
-    // convert native snapshots to entry types. Remove both forwarding getters
-    // after callers migrate; the backend must not keep a second config store.
-    P2PWriteRouteConfig getDefaultWriteConfig() const {
-        return runtime_config_store_->getDefaultWriteConfig();
-    }
-    P2PReadRouteConfig getDefaultReadConfig() const {
-        return runtime_config_store_->getDefaultReadConfig();
-    }
-
     std::string local_endpoint() const {
         return local_ip_ + ":" +
                std::to_string(resources_.GetTransferEnginePort());
@@ -570,11 +559,13 @@ class P2PClientService final {
 
     tl::expected<ReadTaskHandle, ErrorCode> CreateRemoteGetHandle(
         std::string_view key, std::shared_ptr<ClientBufferAllocator> allocator,
-        const P2PReadRouteConfig& config, std::vector<ResolvedRoute> pre_fetched);
+        const P2PReadRouteConfig& config,
+        std::vector<ResolvedRoute> pre_fetched);
 
     tl::expected<ReadTaskHandle, ErrorCode> CreateRemoteGetHandle(
         std::string_view key, std::vector<Slice>& slices,
-        const P2PReadRouteConfig& config, std::vector<ResolvedRoute> pre_fetched);
+        const P2PReadRouteConfig& config,
+        std::vector<ResolvedRoute> pre_fetched);
 
     /**
      * @brief Launch async reads driven by a RouteIterator.
@@ -642,7 +633,7 @@ class P2PClientService final {
     tl::expected<std::vector<std::string>, ErrorCode> GetLocalKeys(
         size_t limit = 0);
 
-      private:
+   private:
     // Technical resources outlive every business member declared below.
     ClientResources resources_;
 
@@ -707,9 +698,9 @@ class P2PClientService final {
     // Async route notifier (nullptr when disabled)
     std::unique_ptr<AsyncMetadataNotifier> async_route_notifier_;
 
-    // Stopped before DataManager/notifier destruction; never owns Service state.
+    // Stopped before DataManager/notifier destruction;
+    // never owns Service state.
     std::unique_ptr<MetadataRecoveryWorker> recovery_worker_;
-
 
     // Cross-node transfer direction from P2PClientConfig at Init().
     TransferDirectionMode transfer_direction_mode_ =

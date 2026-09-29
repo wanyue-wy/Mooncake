@@ -107,6 +107,8 @@ void RegisterClientRpcService(coro_rpc::coro_rpc_server& server,
     server.register_handler<&RealClient::isExist_internal>(&real_client);
     server.register_handler<&RealClient::batchIsExist_internal>(&real_client);
     server.register_handler<&RealClient::getSize_internal>(&real_client);
+    server.register_handler<&RealClient::get_replica_desc>(&real_client);
+    server.register_handler<&RealClient::batch_get_replica_desc>(&real_client);
     server.register_handler<&RealClient::get_buffer_info_dummy_helper>(
         &real_client);
     server.register_handler<&RealClient::batch_put_from_dummy_helper>(
@@ -187,14 +189,9 @@ int main(int argc, char* argv[]) {
                 FLAGS_master_server_address, global_segment_size,
                 local_buffer_size, nullptr,
                 "@mooncake_client_" + std::to_string(FLAGS_port) + ".sock",
-                FLAGS_enable_offload, static_cast<uint16_t>(FLAGS_http_port),
-                FLAGS_enable_http_server, {}, static_cast<uint16_t>(FLAGS_port),
-                FLAGS_runtime_config, FLAGS_enable_client_metric_collection,
-                FLAGS_metric_report_interval_seconds, FLAGS_redis_cluster_id,
-                FLAGS_redis_password, FLAGS_redis_db_index,
-                FLAGS_redis_master_view_ttl_sec,
-                FLAGS_redis_heartbeat_interval_sec, FLAGS_redis_username,
-                static_cast<uint16_t>(FLAGS_heartbeat_rpc_port));
+                FLAGS_enable_offload, {}, FLAGS_runtime_config,
+                static_cast<uint16_t>(FLAGS_heartbeat_rpc_port),
+                static_cast<uint16_t>(FLAGS_client_rpc_port));
         }
     }();
 

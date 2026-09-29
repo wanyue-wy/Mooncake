@@ -875,7 +875,6 @@ tl::expected<ReadTaskHandle, ErrorCode> DataManagerV1::BuildDataCopier(
         LOG(ERROR) << "Failed to get data for key: " << key;
         return tl::unexpected(ErrorCode::INTERNAL_ERROR);
     }
-
     switch (local_transfer_config_.mode) {
         case LocalTransferMode::TE:
             return BuildDataCopierViaTe(handle, slices);
@@ -889,7 +888,22 @@ tl::expected<ReadTaskHandle, ErrorCode> DataManagerV1::BuildDataCopierViaTe(
     const AllocationHandle& handle, const std::vector<Slice>& slices) {
     // using Te, treat local memory as remote memory
     const size_t source_size = handle->loc.data.buffer->size();
-    auto dest_buffers = SlicesToRemoteBufferDescs(slices);
+    std::vector<RemoteBufferDesc> dest_buffers;
+    dest_buffers.reserve(slices.size());
+    size_t offset = 0;
+    for (const auto& slice : slices) {
+        if (offset >= source_size) break;
+        const size_t length = std::min(slice.size, source_size - offset);
+        if (length == 0) continue;
+        dest_buffers.push_back({local_transfer_config_.te_endpoint,
+                                reinterpret_cast<uintptr_t>(slice.ptr), length});
+        offset += length;
+    }
+    if (offset != source_size) {
+        LOG(ERROR) << "Local TE read destination is too small: required="
+                   << source_size << ", provided=" << offset;
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
     auto validate_result = ValidateRemoteBuffers(dest_buffers);
     if (!validate_result) {
         LOG(ERROR) << "BuildDataCopierViaTe: Buffer validation failed"

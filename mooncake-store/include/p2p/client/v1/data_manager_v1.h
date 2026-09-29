@@ -38,7 +38,7 @@
 #include "p2p/client/task_handle.h"
 #include "p2p/client/tiered_cache/tiered_backend.h"
 #include "transfer_engine.h"
-#include "types.h"
+#include "p2p/common/p2p_types.h"
 #include "utils.h"
 #include "p2p/client/client_rpc_types.h"
 

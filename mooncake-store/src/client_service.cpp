@@ -633,9 +633,12 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchGet(
     return results;
 }
 
-tl::expected<void, ErrorCode> Client::Put(const ObjectKey& key,
-                                          std::vector<Slice>& slices,
-                                          const ReplicateConfig& config) {
+tl::expected<void, ErrorCode> Client::Put(
+    const ObjectKey& key, std::vector<Slice>& slices,
+    const std::optional<ReplicateConfig>& config_opt) {
+    ReplicateConfig default_config;
+    const auto& config = config_opt ? *config_opt : default_config;
+
     // Prepare slice lengths
     std::vector<size_t> slice_lengths;
     for (size_t i = 0; i < slices.size(); ++i) {
@@ -1201,7 +1204,10 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchPutWhenPreferSameNode(
 std::vector<tl::expected<void, ErrorCode>> Client::BatchPut(
     const std::vector<ObjectKey>& keys,
     std::vector<std::vector<Slice>>& batched_slices,
-    const ReplicateConfig& config) {
+    const std::optional<ReplicateConfig>& config_opt) {
+    ReplicateConfig default_config;
+    const auto& config = config_opt ? *config_opt : default_config;
+
     ReplicateConfig client_cfg = config;
     if (protocol_ == "cxl") {
         client_cfg.preferred_segment = local_hostname_;
@@ -1869,7 +1875,7 @@ ErrorCode Client::InitStorage(uint64_t global_segment_size,
     auto rpc_error = StartClientRpcServer(client_rpc_port);
     if (rpc_error != ErrorCode::OK) {
         LOG(ERROR) << "Failed to start client rpc server: "
-                   << toString(rpc_error.error());
+                   << toString(rpc_error);
         return rpc_error;
     }
 

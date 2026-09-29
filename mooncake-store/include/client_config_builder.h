@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <glog/logging.h>
 #include "common.h"
-#include "types.h"
+#include "common_types.h"
 
 namespace mooncake {
 

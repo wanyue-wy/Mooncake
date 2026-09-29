@@ -29,15 +29,6 @@ struct PingResponse {
 YLT_REFL(PingResponse, view_version_id, client_status);
 
 /**
- * @brief Response structure for the DummyClient ping RPC (RealClient::ping).
- */
-struct DummyHeartbeatResponse {
-    DummyClientStatus status = DummyClientStatus::HEALTH;
-    uint64_t mapped_shm_count = 0;
-};
-YLT_REFL(DummyHeartbeatResponse, status, mapped_shm_count);
-
-/**
  * @brief Response structure for GetReplicaList operation
  */
 struct GetReplicaListResponse {

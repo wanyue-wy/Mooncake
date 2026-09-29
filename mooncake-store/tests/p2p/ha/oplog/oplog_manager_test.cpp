@@ -1,4 +1,5 @@
 #include "p2p/ha/oplog/oplog_manager.h"
+#include "p2p/common/p2p_types.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>

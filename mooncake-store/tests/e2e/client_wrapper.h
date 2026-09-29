@@ -2,15 +2,19 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "allocator.h"
-#include "legacy_client_service.h"
 #include "types.h"
 
 namespace mooncake {
+
+class Client;
+class P2PClientService;
+
 namespace testing {
 
 struct SegmentInfo {
@@ -24,10 +28,6 @@ struct SegmentInfo {
  * This class is used to wrap the client and provide a more convenient interface
  * for the tests.
  */
-// TODO(C2.2/C3.3 / mixed e2e wrapper): neither native Client derives from
-// ClientService. Replace this old factory/owner with architecture-specific
-// fixtures after Backend wiring; preserve workload assertions and never cast
-// P2PClientService or Client to the removed business base.
 class ClientTestWrapper {
    public:
     /**
@@ -36,9 +36,10 @@ class ClientTestWrapper {
      * @param client The client instance.
      * @param allocator Allocate slice memory for get and put operations.
      */
-    ClientTestWrapper(std::shared_ptr<ClientService> client,
-                      std::shared_ptr<SimpleAllocator> allocator,
-                      bool is_p2p = false);
+    ClientTestWrapper(std::shared_ptr<Client> client,
+                      std::shared_ptr<SimpleAllocator> allocator);
+    ClientTestWrapper(std::shared_ptr<P2PClientService> client,
+                      std::shared_ptr<SimpleAllocator> allocator);
     ~ClientTestWrapper();
 
     // The client wrapper is not copyable.
@@ -57,8 +58,8 @@ class ClientTestWrapper {
      * and put operations.
      * @param redis_cluster_id Optional Redis HA cluster ID for tests using
      * redis:// master discovery.
-     * @param enable_http_server Whether to start the client's HTTP metrics
-     * server.
+     * @param enable_http_server Whether to start the P2P client's HTTP metrics
+     * server. Centralized metrics use native environment controls.
      * @return The client wrapper.
      */
     static std::optional<std::shared_ptr<ClientTestWrapper>>
@@ -105,9 +106,9 @@ class ClientTestWrapper {
         ~SliceGuard();
     };
 
-    // The client instance.
-    std::shared_ptr<ClientService> client_;
-    bool is_p2p_{false};
+    // Exactly one native client is selected by deployment_mode.
+    std::shared_ptr<Client> client_;
+    std::shared_ptr<P2PClientService> p2p_client_;
     // The segments that are mounted by the client.
     std::unordered_map<uintptr_t, SegmentInfo> segments_;
     // Manage the memory allocation for get and put operations.

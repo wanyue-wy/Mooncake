@@ -3,9 +3,10 @@
 // TODO(C2.1/C2.2/C3.3 / deployment migration; see p2p-split-plan-v3.md):
 // Declaration-only remainder of the removed shared business service. Neither
 // native Client derives from it and its factory has no implementation. Move
-// Real/PyClient and the mixed e2e wrapper to the build-selected ClientBackend,
-// then delete this header. Do not add a compatibility subclass or factory.
-// LegacyQueryResult is only an old deployment signature, not a native model.
+// the remaining mixed e2e wrapper to the selected native service API, then
+// delete this header after its final caller is migrated. Do not add a
+// compatibility subclass or factory. LegacyQueryResult is only an old
+// deployment signature, not a native model.
 
 #include <csignal>
 #include <boost/functional/hash.hpp>
@@ -32,13 +33,13 @@
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include <ylt/coro_http/coro_http_server.hpp>
 #include "client_buffer.hpp"
+#include "pyclient.h"
 #include "client_resources.h"
 
 namespace mooncake {
 
 struct CentralizedClientConfig;
 
-using WriteConfig = std::variant<ReplicateConfig, WriteRouteRequestConfig>;
 
 /**
  * @brief Result of a query operation containing replica information

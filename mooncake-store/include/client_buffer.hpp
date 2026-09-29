@@ -6,7 +6,7 @@
 #include <string>
 
 #include "offset_allocator/offset_allocator.hpp"
-#include "types.h"
+#include "common_types.h"
 #include "replica.h"
 
 namespace mooncake {
@@ -111,6 +111,11 @@ std::vector<Slice> split_into_slices(BufferHandle& handle);
  * @param replica The replica descriptor to calculate size for
  * @return Total size in bytes
  */
+// TODO(C4.1/C4.3 / buffer replica boundary; see p2p-split-plan-v3.md):
+// These two helpers expose centralized Replica::Descriptor through the shared
+// buffer header. Move replica adaptation to its native owner and update
+// callers. Remove this TODO and the replica include once shared buffer/Slice
+// operations no longer depend on centralized descriptors.
 uint64_t calculate_total_size(const Replica::Descriptor& replica);
 
 /**

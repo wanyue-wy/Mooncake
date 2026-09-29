@@ -55,11 +55,7 @@ std::ostream& operator<<(std::ostream& os, const Replica::Descriptor& desc) {
                 os << "type: LOCAL_DISK, client: " << d.client_id
                    << ", size: " << d.object_size
                    << ", endpoint: " << d.transport_endpoint;
-            } else if constexpr (std::is_same_v<T, P2PProxyDescriptor>) {
-                os << "type: P2P_PROXY, client: " << d.client_id
-                   << ", segment: " << d.segment_id
-                   << ", endpoint: " << d.ip_address << ":" << d.rpc_port
-                   << ", size: " << d.object_size;
+
             }
         },
         desc.descriptor_variant);

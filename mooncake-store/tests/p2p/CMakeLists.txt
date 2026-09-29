@@ -56,6 +56,17 @@ target_link_libraries(stress_workload_test_p2p PUBLIC
 )
 
 # client side
+if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    add_p2p_store_executable(p2p_real_client_test p2p_real_client_test.cpp)
+    add_test(NAME p2p_real_client_test COMMAND p2p_real_client_test
+        --gtest_filter=-P2PRealClientTest.IPv6LoopbackPutGet)
+    add_test(NAME p2p_real_client_ipv6_test COMMAND p2p_real_client_test
+        --gtest_filter=P2PRealClientTest.IPv6LoopbackPutGet)
+    set_tests_properties(p2p_real_client_test p2p_real_client_ipv6_test
+        PROPERTIES LABELS "p2p;client;integration" TIMEOUT 120)
+    set_tests_properties(p2p_real_client_ipv6_test
+        PROPERTIES ENVIRONMENT "MC_USE_IPV6=1")
+endif()
 add_p2p_store_test(p2p_client_integration_test p2p_client_integration_test.cpp)
 add_p2p_store_test(p2p_client_http_endpoints_test p2p_client_http_endpoints_test.cpp)
 add_p2p_store_test(p2p_register_concurrency_test p2p_register_concurrency_test.cpp)

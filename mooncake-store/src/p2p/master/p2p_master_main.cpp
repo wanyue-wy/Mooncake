@@ -2,7 +2,7 @@
 
 #include "p2p/common/p2p_master_config.h"
 #include "p2p/master/p2p_master.h"
-#include "types.h"
+#include "p2p/common/p2p_types.h"
 
 #include <gflags/gflags.h>
 

@@ -30,7 +30,6 @@ enum class ReplicaType {
     MEMORY,      // Memory replica
     DISK,        // Disk replica
     LOCAL_DISK,  // Local disk replica
-    P2P_PROXY,   // routing replica (only for P2P structure)
 };
 
 /**
@@ -41,8 +40,7 @@ inline std::ostream& operator<<(std::ostream& os,
     static const std::unordered_map<ReplicaType, std::string_view>
         replica_type_strings{{ReplicaType::MEMORY, "MEMORY"},
                              {ReplicaType::DISK, "DISK"},
-                             {ReplicaType::LOCAL_DISK, "LOCAL_DISK"},
-                             {ReplicaType::P2P_PROXY, "P2P_PROXY"}};
+                             {ReplicaType::LOCAL_DISK, "LOCAL_DISK"}};
 
     os << (replica_type_strings.count(replicaType)
                ? replica_type_strings.at(replicaType)
@@ -143,20 +141,6 @@ struct LocalDiskDescriptor {
     uint64_t object_size = 0;
     std::string transport_endpoint;
     YLT_REFL(LocalDiskDescriptor, client_id, object_size, transport_endpoint);
-};
-
-// TODO(C3.3 / replica isolation; see p2p-split-plan-v3.md): Remove this
-// Descriptor alternative after native P2P queries and route-cache callers use
-// P2PRouteDescriptor. Master/HA already use routes; Python wrapping belongs
-// to I1.
-struct P2PProxyDescriptor {
-    UUID client_id;
-    UUID segment_id;
-    std::string ip_address;
-    uint16_t rpc_port = 0;
-    uint64_t object_size = 0;
-    YLT_REFL(P2PProxyDescriptor, client_id, segment_id, ip_address, rpc_port,
-             object_size);
 };
 
 class Replica {
@@ -339,8 +323,7 @@ class Replica {
 
     struct Descriptor {
         ReplicaID id;
-        std::variant<MemoryDescriptor, DiskDescriptor, LocalDiskDescriptor,
-                     P2PProxyDescriptor>
+        std::variant<MemoryDescriptor, DiskDescriptor, LocalDiskDescriptor>
             descriptor_variant;
         ReplicaStatus status;
         YLT_REFL(Descriptor, id, descriptor_variant, status);
@@ -350,14 +333,13 @@ class Replica {
             return std::visit(
                 [](const auto& desc) -> ReplicaType {
                     using T = std::decay_t<decltype(desc)>;
-                    if constexpr (std::is_same_v<T, MemoryDescriptor>)
+                    if constexpr (std::is_same_v<T, MemoryDescriptor>) {
                         return ReplicaType::MEMORY;
-                    else if constexpr (std::is_same_v<T, DiskDescriptor>)
+                    } else if constexpr (std::is_same_v<T, DiskDescriptor>) {
                         return ReplicaType::DISK;
-                    else if constexpr (std::is_same_v<T, LocalDiskDescriptor>)
+                    } else {
                         return ReplicaType::LOCAL_DISK;
-                    else
-                        return ReplicaType::P2P_PROXY;
+                    }
                 },
                 descriptor_variant);
         }
@@ -384,16 +366,6 @@ class Replica {
 
         bool is_local_disk_replica() const noexcept {
             return std::holds_alternative<LocalDiskDescriptor>(
-                descriptor_variant);
-        }
-
-        bool is_p2p_proxy_replica() noexcept {
-            return std::holds_alternative<P2PProxyDescriptor>(
-                descriptor_variant);
-        }
-
-        bool is_p2p_proxy_replica() const noexcept {
-            return std::holds_alternative<P2PProxyDescriptor>(
                 descriptor_variant);
         }
 
@@ -441,22 +413,6 @@ class Replica {
                 return *desc;
             }
             throw std::runtime_error("Expected LocalDiskDescriptor");
-        }
-
-        P2PProxyDescriptor& get_p2p_proxy_descriptor() {
-            if (auto* desc =
-                    std::get_if<P2PProxyDescriptor>(&descriptor_variant)) {
-                return *desc;
-            }
-            throw std::runtime_error("Expected P2PProxyDescriptor");
-        }
-
-        const P2PProxyDescriptor& get_p2p_proxy_descriptor() const {
-            if (auto* desc =
-                    std::get_if<P2PProxyDescriptor>(&descriptor_variant)) {
-                return *desc;
-            }
-            throw std::runtime_error("Expected P2PProxyDescriptor");
         }
 
         friend std::ostream& operator<<(std::ostream& os,
