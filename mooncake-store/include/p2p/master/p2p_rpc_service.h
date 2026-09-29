@@ -18,7 +18,7 @@
 #include "p2p/common/p2p_rpc_types.h"
 #include "p2p/master/p2p_master_metric_manager.h"
 #include "p2p/master/p2p_master_service.h"
-#include "types.h"
+#include "p2p/common/p2p_types.h"
 
 namespace mooncake {
 

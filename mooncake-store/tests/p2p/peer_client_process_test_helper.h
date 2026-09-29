@@ -25,7 +25,7 @@
 #include "p2p/client/v1/data_manager_v1.h"
 #include "test_exit_codes.h"
 #include "transfer_engine.h"
-#include "types.h"
+#include "common_types.h"
 #include "utils.h"
 #include "../utils/common.h"
 

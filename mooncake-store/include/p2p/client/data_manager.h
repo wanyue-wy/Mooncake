@@ -33,7 +33,7 @@
 #include "p2p/client/data_manager_types.h"
 #include "p2p/client/task_handle.h"
 #include "transfer_engine.h"
-#include "types.h"
+#include "p2p/common/p2p_types.h"
 
 namespace mooncake {
 

@@ -2,11 +2,15 @@
 
 #include "client_config_builder.h"
 #include <csignal>
+#include <ylt/coro_io/client_pool.hpp>
 #include <ylt/coro_rpc/coro_rpc_client.hpp>
 
 #include "pyclient.h"
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <thread>
 
 namespace mooncake {
 
@@ -92,6 +96,10 @@ class DummyClient : public PyClient {
 
     int setup(DummyClientConfig& config);
 
+    bool is_initialized() const override {
+        return initialized_.load(std::memory_order_acquire);
+    }
+
     int initAll(const std::string& protocol, const std::string& device_name,
                 size_t mount_segment_size) override {
         // Dummy client does not support real setup
@@ -105,63 +113,75 @@ class DummyClient : public PyClient {
     DeploymentMode deployment_mode() const override { return deployment_mode_; }
 
     int put(const std::string& key, std::span<const char> value,
-            const WriteConfig& config) override;
+            const std::optional<WriteConfig>& config = std::nullopt) override;
 
     int register_buffer(void* buffer, size_t size) override;
 
     int unregister_buffer(void* buffer) override;
 
     int64_t get_into(const std::string& key, void* buffer, size_t size,
-                     const ReadRouteConfig& config = {}) override;
+                     const std::optional<ReadConfig>& config =
+                         std::nullopt) override;
 
-    std::vector<int64_t> batch_get_into(
-        const std::vector<std::string>& keys, const std::vector<void*>& buffers,
-        const std::vector<size_t>& sizes,
-        const ReadRouteConfig& config = {}) override;
+    std::vector<int64_t> batch_get_into(const std::vector<std::string>& keys,
+                                        const std::vector<void*>& buffers,
+                                        const std::vector<size_t>& sizes,
+                                        const std::optional<ReadConfig>&
+                                            config = std::nullopt) override;
 
     std::vector<int> batch_get_into_multi_buffers(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
         const std::vector<std::vector<size_t>>& all_sizes,
         bool aggregate_same_segment_task,
-        const ReadRouteConfig& config = {}) override;
+        const std::optional<ReadConfig>& config =
+            std::nullopt) override;
 
-    int put_from(const std::string& key, void* buffer, size_t size,
-                 const WriteConfig& config) override;
+    int put_from(
+        const std::string& key, void* buffer, size_t size,
+        const std::optional<WriteConfig>& config = std::nullopt) override;
 
-    int put_from_with_metadata(const std::string& key, void* buffer,
-                               void* metadata_buffer, size_t size,
-                               size_t metadata_size,
-                               const WriteConfig& config) override;
+    int put_from_with_metadata(
+        const std::string& key, void* buffer, void* metadata_buffer,
+        size_t size, size_t metadata_size,
+        const std::optional<WriteConfig>& config = std::nullopt) override;
 
-    std::vector<int> batch_put_from(const std::vector<std::string>& keys,
-                                    const std::vector<void*>& buffers,
-                                    const std::vector<size_t>& sizes,
-                                    const WriteConfig& config) override;
+    std::vector<int> batch_put_from(
+        const std::vector<std::string>& keys, const std::vector<void*>& buffers,
+        const std::vector<size_t>& sizes,
+        const std::optional<WriteConfig>& config = std::nullopt,
+        WriteOperation operation = WriteOperation::Put) override;
 
     std::vector<int> batch_put_from_multi_buffers(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
         const std::vector<std::vector<size_t>>& all_sizes,
-        const WriteConfig& config) override;
+        const std::optional<WriteConfig>& config = std::nullopt) override;
 
     std::shared_ptr<BufferHandle> get_buffer(
-        const std::string& key, const ReadRouteConfig& config = {}) override;
+        const std::string& key,
+        const std::optional<ReadConfig>& config =
+            std::nullopt) override;
 
     std::tuple<uint64_t, size_t> get_buffer_info(
-        const std::string& key, const ReadRouteConfig& config = {}) override;
+        const std::string& key,
+        const std::optional<ReadConfig>& config =
+            std::nullopt) override;
 
     std::vector<std::shared_ptr<BufferHandle>> batch_get_buffer(
         const std::vector<std::string>& keys,
-        const ReadRouteConfig& config = {}) override;
+        const std::optional<ReadConfig>& config =
+            std::nullopt) override;
 
-    int put_parts(const std::string& key,
-                  std::vector<std::span<const char>> values,
-                  const WriteConfig& config) override;
+    int put_parts(
+        const std::string& key, std::vector<std::span<const char>> values,
+        const std::optional<WriteConfig>& config = std::nullopt,
+        WriteOperation operation = WriteOperation::Put) override;
 
-    int put_batch(const std::vector<std::string>& keys,
-                  const std::vector<std::span<const char>>& values,
-                  const WriteConfig& config) override;
+    int put_batch(
+        const std::vector<std::string>& keys,
+        const std::vector<std::span<const char>>& values,
+        const std::optional<WriteConfig>& config = std::nullopt) override;
 
     [[nodiscard]] std::string get_hostname() const override;
 
@@ -182,9 +202,9 @@ class DummyClient : public PyClient {
 
     int64_t getSize(const std::string& key) override;
 
-    std::map<std::string, std::vector<Replica::Descriptor>>
-    batch_get_replica_desc(const std::vector<std::string>& keys);
-    std::vector<Replica::Descriptor> get_replica_desc(const std::string& key);
+    std::map<std::string, std::vector<ObjectDescriptor>> batch_get_replica_desc(
+        const std::vector<std::string>& keys);
+    std::vector<ObjectDescriptor> get_replica_desc(const std::string& key);
 
     int tearDownAll() override;
 
@@ -280,7 +300,8 @@ class DummyClient : public PyClient {
     std::thread ping_thread_;
     std::atomic<bool> ping_running_{false};
     void ping_thread_main();
-    volatile bool connected_ = false;
+    std::atomic<bool> connected_{false};
+    std::atomic<bool> initialized_{false};
 };
 
 }  // namespace mooncake

@@ -2,9 +2,17 @@
 
 #include <string>
 #include <memory>
+#include <optional>
 #include <vector>
+#include <span>
+#include <tuple>
+#include <ylt/util/tl/expected.hpp>
 
-#include "legacy_client_service.h"
+#include "common_types.h"
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+#include "p2p/common/p2p_types.h"
+#endif
+#include "rpc_types.h"
 #include "client_buffer.hpp"
 
 namespace mooncake {
@@ -19,6 +27,18 @@ struct ShmRegisterRequest {
     bool is_local_buffer;
 };
 
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+using WriteConfig = P2PWriteRouteConfig;
+using ReadConfig = P2PReadRouteConfig;
+using ObjectDescriptor = P2PRouteDescriptor;
+#else
+using WriteConfig = ReplicateConfig;
+using ReadConfig = CentralizedReadConfig;
+using ObjectDescriptor = Replica::Descriptor;
+#endif
+
+enum class WriteOperation { Put, Publish };
+
 // Python-specific wrapper class for client interface
 class PyClient {
    public:
@@ -32,63 +52,72 @@ class PyClient {
 
     virtual DeploymentMode deployment_mode() const = 0;
 
-    virtual int put(const std::string& key, std::span<const char> value,
-                    const WriteConfig& config) = 0;
+    virtual int put(
+        const std::string& key, std::span<const char> value,
+        const std::optional<WriteConfig>& config = std::nullopt) = 0;
 
     virtual int register_buffer(void* buffer, size_t size) = 0;
 
     virtual int unregister_buffer(void* buffer) = 0;
 
-    virtual int64_t get_into(const std::string& key, void* buffer, size_t size,
-                             const ReadRouteConfig& config = {}) = 0;
+    virtual int64_t get_into(
+        const std::string& key, void* buffer, size_t size,
+        const std::optional<ReadConfig>& config = std::nullopt) = 0;
 
     virtual std::vector<int64_t> batch_get_into(
         const std::vector<std::string>& keys, const std::vector<void*>& buffers,
         const std::vector<size_t>& sizes,
-        const ReadRouteConfig& config = {}) = 0;
+        const std::optional<ReadConfig>& config = std::nullopt) = 0;
 
     virtual std::vector<int> batch_get_into_multi_buffers(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
         const std::vector<std::vector<size_t>>& all_sizes,
         bool aggregate_same_segment_task,
-        const ReadRouteConfig& config = {}) = 0;
+        const std::optional<ReadConfig>& config = std::nullopt) = 0;
 
-    virtual int put_from(const std::string& key, void* buffer, size_t size,
-                         const WriteConfig& config) = 0;
+    virtual int put_from(
+        const std::string& key, void* buffer, size_t size,
+        const std::optional<WriteConfig>& config = std::nullopt) = 0;
 
-    virtual int put_from_with_metadata(const std::string& key, void* buffer,
-                                       void* metadata_buffer, size_t size,
-                                       size_t metadata_size,
-                                       const WriteConfig& config) = 0;
+    virtual int put_from_with_metadata(
+        const std::string& key, void* buffer, void* metadata_buffer,
+        size_t size, size_t metadata_size,
+        const std::optional<WriteConfig>& config = std::nullopt) = 0;
 
     virtual std::vector<int> batch_put_from(
         const std::vector<std::string>& keys, const std::vector<void*>& buffers,
-        const std::vector<size_t>& sizes, const WriteConfig& config) = 0;
+        const std::vector<size_t>& sizes,
+        const std::optional<WriteConfig>& config = std::nullopt,
+        WriteOperation operation = WriteOperation::Put) = 0;
 
     virtual std::vector<int> batch_put_from_multi_buffers(
         const std::vector<std::string>& keys,
         const std::vector<std::vector<void*>>& all_buffers,
         const std::vector<std::vector<size_t>>& all_sizes,
-        const WriteConfig& config) = 0;
+        const std::optional<WriteConfig>& config = std::nullopt) = 0;
 
     virtual std::shared_ptr<BufferHandle> get_buffer(
-        const std::string& key, const ReadRouteConfig& config = {}) = 0;
+        const std::string& key,
+        const std::optional<ReadConfig>& config = std::nullopt) = 0;
 
     virtual std::tuple<uint64_t, size_t> get_buffer_info(
-        const std::string& key, const ReadRouteConfig& config = {}) = 0;
+        const std::string& key,
+        const std::optional<ReadConfig>& config = std::nullopt) = 0;
 
     virtual std::vector<std::shared_ptr<BufferHandle>> batch_get_buffer(
         const std::vector<std::string>& keys,
-        const ReadRouteConfig& config = {}) = 0;
+        const std::optional<ReadConfig>& config = std::nullopt) = 0;
 
-    virtual int put_parts(const std::string& key,
-                          std::vector<std::span<const char>> values,
-                          const WriteConfig& config) = 0;
+    virtual int put_parts(
+        const std::string& key, std::vector<std::span<const char>> values,
+        const std::optional<WriteConfig>& config = std::nullopt,
+        WriteOperation operation = WriteOperation::Put) = 0;
 
-    virtual int put_batch(const std::vector<std::string>& keys,
-                          const std::vector<std::span<const char>>& values,
-                          const WriteConfig& config) = 0;
+    virtual int put_batch(
+        const std::vector<std::string>& keys,
+        const std::vector<std::span<const char>>& values,
+        const std::optional<WriteConfig>& config = std::nullopt) = 0;
 
     [[nodiscard]] virtual std::string get_hostname() const = 0;
 
@@ -109,9 +138,9 @@ class PyClient {
 
     virtual int64_t getSize(const std::string& key) = 0;
 
-    virtual std::map<std::string, std::vector<Replica::Descriptor>>
+    virtual std::map<std::string, std::vector<ObjectDescriptor>>
     batch_get_replica_desc(const std::vector<std::string>& keys) = 0;
-    virtual std::vector<Replica::Descriptor> get_replica_desc(
+    virtual std::vector<ObjectDescriptor> get_replica_desc(
         const std::string& key) = 0;
 
     virtual int tearDownAll() = 0;
@@ -126,12 +155,7 @@ class PyClient {
     virtual tl::expected<QueryTaskResponse, ErrorCode> query_task(
         const UUID& task_id) = 0;
 
-    // TODO(C2.1/C2.2 / Service ownership; see p2p-split-plan-v3.md): This base
-    // pointer cannot own P2PClientService. Move native Service ownership behind
-    // RealClient's build-selected ClientBackend; expose state, allocator and
-    // default-config access through PyClient. Remove this field and the Service
-    // header dependency after all callers use those interfaces.
-    std::shared_ptr<mooncake::ClientService> client_service_ = nullptr;
+    virtual bool is_initialized() const = 0;
 };
 
 }  // namespace mooncake

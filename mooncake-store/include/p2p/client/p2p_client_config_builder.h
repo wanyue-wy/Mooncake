@@ -5,6 +5,7 @@
 #include <sstream>
 #include <json/json.h>
 #include "client_config_builder.h"
+#include "p2p/common/p2p_types.h"
 
 namespace mooncake {
 
@@ -162,6 +163,7 @@ class P2PClientConfigBuilder : private ClientConfigBuilder {
             config.runtime_config_json = LoadJsonConfig(rc_source);
             if (config.runtime_config_json.isNull() ||
                 !config.runtime_config_json.isObject()) {
+                LOG(ERROR) << "P2P runtime configuration must be a JSON object";
                 throw std::runtime_error(
                     "Invalid runtime configuration provided via runtime_config "
                     "or MC_RUNTIME_CONFIG");
@@ -192,6 +194,7 @@ class P2PClientConfigBuilder : private ClientConfigBuilder {
 
         if (tiered_config.isNull() || !tiered_config.isMember("tiers") ||
             tiered_config["tiers"].empty()) {
+            LOG(ERROR) << "P2P tiered backend configuration requires tiers";
             throw std::runtime_error(
                 "Tiered backend configuration is missing or invalid. Please "
                 "provide a valid JSON string or a path to a JSON config file "
@@ -411,9 +414,9 @@ class P2PClientConfigBuilder : private ClientConfigBuilder {
             // Treat as file path
             std::ifstream file(json_or_path);
             if (!file.is_open()) {
-                LOG(ERROR) << "Failed to open tiered backend config file: "
+                LOG(ERROR) << "Failed to open P2P config file: "
                            << json_or_path;
-                return config;  // Returns null Json::Value
+                return Json::Value{};
             }
             std::ostringstream ss;
             ss << file.rdbuf();
@@ -429,6 +432,7 @@ class P2PClientConfigBuilder : private ClientConfigBuilder {
                            json_content.data() + json_content.length(), &config,
                            &errors)) {
             LOG(ERROR) << "Failed to parse JSON config: " << errors;
+            return Json::Value{};
         }
         return config;
     }

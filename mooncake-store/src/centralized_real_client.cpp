@@ -1,0 +1,336 @@
+#include "real_client.h"
+
+#include "centralized_client_config_builder.h"
+
+namespace mooncake {
+
+tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
+RealClient::CreateService(const P2PClientConfig&) {
+    LOG(ERROR) << "Requested setup does not match this centralized build";
+    return tl::unexpected(ErrorCode::INVALID_PARAMS);
+}
+
+tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
+RealClient::CreateService(const CentralizedClientConfig& config) {
+    if (config.heartbeat_rpc_port != 0 ||
+        config.master_server_entry.rfind("redis://", 0) == 0) {
+        LOG(ERROR) << "Centralized setup does not support Redis discovery or a "
+                      "dedicated heartbeat port";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    const auto host = config.local_ip.find(':') == std::string::npos
+                          ? config.local_ip
+                          : "[" + config.local_ip + "]";
+    auto client = Client::Create(
+        host + ":" + std::to_string(config.te_port), config.metadata_connstring,
+        config.protocol, config.rdma_devices, config.master_server_entry,
+        config.transfer_engine, config.labels);
+    if (!client) {
+        LOG(ERROR) << "Failed to create native client";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    auto error = (*client)->InitStorage(
+        config.global_segment_size, config.local_buffer_size,
+        config.enable_offload, config.client_rpc_port);
+    if (error != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to initialize centralized storage: " << error;
+        return tl::unexpected(error);
+    }
+    return std::move(*client);
+}
+
+DeploymentMode RealClient::deployment_mode() const {
+    return client_service_ ? DeploymentMode::CENTRALIZATION
+                           : DeploymentMode::UNKNOWN;
+}
+
+std::string RealClient::get_hostname() const {
+    return client_service_ ? client_service_->GetLocalHostname() : "";
+}
+
+tl::expected<void, ErrorCode> RealClient::ValidateWriteOperation(
+    WriteOperation operation, const std::optional<WriteConfig>& config) {
+    if (operation == WriteOperation::Put) {
+        return {};
+    }
+    if (operation != WriteOperation::Publish) {
+        LOG(ERROR) << "Unknown write operation: "
+                   << static_cast<int>(operation);
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+
+    if (config && !config->preferred_segments.empty() &&
+        config->preferred_segments.size() != config->replica_num) {
+        LOG(ERROR) << "Preferred segments size ("
+                   << config->preferred_segments.size()
+                   << ") must match replica_num (" << config->replica_num
+                   << ")";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    return {};
+}
+
+tl::expected<void, ErrorCode> RealClient::ValidateWriteEntryConfig(
+    const std::optional<WriteConfig>& config) {
+    if (config && config->prefer_alloc_in_same_node) {
+        LOG(ERROR) << "This write entry does not support same-node allocation";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    return {};
+}
+
+// Both an absent and an explicit placeholder config use the existing native
+// read API. CentralizedReadConfig does not add routing or filtering semantics.
+// Implementation of get_buffer_internal method
+std::shared_ptr<BufferHandle> RealClient::get_buffer_internal(
+    const std::string& key,
+    std::shared_ptr<ClientBufferAllocator> client_buffer_allocator,
+    const std::optional<ReadConfig>& /*config*/) {
+    if (!client_service_) {
+        LOG(ERROR) << "Client is not initialized";
+        return nullptr;
+    }
+    if (!client_buffer_allocator) {
+        LOG(ERROR) << "Client buffer allocator is not provided";
+        return nullptr;
+    }
+
+    auto result = client_service_->Get(key, client_buffer_allocator);
+    if (!result) {
+        LOG(ERROR) << "Get failed for key: " << key
+                   << " with error: " << toString(result.error());
+        return nullptr;
+    }
+    return result.value();
+}
+
+// Implementation of batch_get_buffer_internal method
+std::vector<std::shared_ptr<BufferHandle>>
+RealClient::batch_get_buffer_internal(
+    const std::vector<std::string>& keys,
+    const std::optional<ReadConfig>& /*config*/) {
+    std::vector<std::shared_ptr<BufferHandle>> final_results(keys.size(),
+                                                             nullptr);
+
+    if (!client_service_) {
+        LOG(ERROR) << "Client is not initialized";
+        return final_results;
+    }
+
+    if (keys.empty()) {
+        return final_results;
+    }
+
+    auto results =
+        client_service_->BatchGet(keys, client_service_->GetBufferAllocator());
+
+    for (size_t i = 0; i < keys.size(); ++i) {
+        if (results[i]) {
+            final_results[i] = results[i].value();
+        } else {
+            LOG(ERROR) << "BatchGet failed for key '" << keys[i]
+                       << "': " << toString(results[i].error());
+        }
+    }
+
+    return final_results;
+}
+
+tl::expected<int64_t, ErrorCode> RealClient::get_into_internal(
+    const std::string& key, void* buffer, size_t size,
+    const std::optional<ReadConfig>& /*config*/) {
+    // NOTE: The buffer address must be previously registered with
+    // register_buffer() for zero-copy RDMA operations to work correctly
+    if (!client_service_) {
+        LOG(ERROR) << "Client is not initialized";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+
+    auto result = client_service_->Get(key, {buffer}, {size});
+    if (!result) {
+        LOG(ERROR) << "Get failed, key=" << key << ", error=" << result.error();
+    }
+    return result;
+}
+
+std::vector<tl::expected<int64_t, ErrorCode>>
+RealClient::batch_get_into_internal(
+    const std::vector<std::string>& keys, const std::vector<void*>& buffers,
+    const std::vector<size_t>& sizes,
+    const std::optional<ReadConfig>& /*config*/) {
+    // Validate preconditions
+    if (!client_service_) {
+        LOG(ERROR) << "Client is not initialized";
+        return std::vector<tl::expected<int64_t, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::INVALID_PARAMS));
+    }
+
+    if (keys.size() != buffers.size() || keys.size() != sizes.size()) {
+        LOG(ERROR) << "Input vector sizes mismatch: keys=" << keys.size()
+                   << ", buffers=" << buffers.size()
+                   << ", sizes=" << sizes.size();
+        return std::vector<tl::expected<int64_t, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::INVALID_PARAMS));
+    }
+
+    if (keys.empty()) {
+        return {};
+    }
+
+    std::vector<std::vector<void*>> all_buffers(keys.size());
+    std::vector<std::vector<size_t>> all_sizes(keys.size());
+    for (size_t i = 0; i < keys.size(); ++i) {
+        all_buffers[i] = {buffers[i]};
+        all_sizes[i] = {sizes[i]};
+    }
+    auto results = client_service_->BatchGet(keys, all_buffers, all_sizes);
+    for (size_t i = 0; i < results.size(); ++i) {
+        if (!results[i]) {
+            LOG(ERROR) << "BatchGet failed, key=" << keys[i]
+                       << ", error=" << results[i].error();
+        }
+    }
+    return results;
+}
+
+std::vector<tl::expected<int64_t, ErrorCode>>
+RealClient::batch_get_into_multi_buffers_internal(
+    const std::vector<std::string>& keys,
+    const std::vector<std::vector<void*>>& all_buffers,
+    const std::vector<std::vector<size_t>>& all_sizes,
+    bool prefer_alloc_in_same_node,
+    const std::optional<ReadConfig>& /*config*/) {
+    // Validate preconditions
+    if (!client_service_) {
+        LOG(ERROR) << "Client is not initialized";
+        return std::vector<tl::expected<int64_t, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::INVALID_PARAMS));
+    }
+
+    if (keys.size() != all_buffers.size() || keys.size() != all_sizes.size()) {
+        LOG(ERROR) << "Input vector sizes mismatch: keys=" << keys.size()
+                   << ", buffers=" << all_buffers.size()
+                   << ", sizes=" << all_sizes.size();
+        return std::vector<tl::expected<int64_t, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::INVALID_PARAMS));
+    }
+
+    if (keys.empty()) {
+        return {};
+    }
+
+    auto results = client_service_->BatchGet(keys, all_buffers, all_sizes,
+                                             prefer_alloc_in_same_node);
+    for (size_t i = 0; i < results.size(); ++i) {
+        if (!results[i]) {
+            LOG(ERROR) << "BatchGet failed, key=" << keys[i]
+                       << ", error=" << results[i].error();
+        }
+    }
+    return results;
+}
+
+std::vector<ObjectDescriptor> RealClient::get_replica_desc(
+    const std::string& key) {
+    auto query_result = client_service_->Query(key);
+    if (!query_result) {
+        std::vector<ObjectDescriptor> replica_list = {};
+        if (query_result.error() == ErrorCode::OBJECT_NOT_FOUND ||
+            query_result.error() == ErrorCode::REPLICA_IS_NOT_READY) {
+            LOG(ERROR) << "Object not found for key: " << key;
+        } else {
+            LOG(ERROR) << "Query failed for key: " << key
+                       << " with error: " << toString(query_result.error());
+        }
+        return replica_list;
+    }
+    const std::vector<ObjectDescriptor>& replica_list = query_result->replicas;
+    if (replica_list.empty()) {
+        LOG(ERROR) << "Empty replica list for key: " << key;
+    }
+    return replica_list;
+}
+
+std::map<std::string, std::vector<ObjectDescriptor>>
+RealClient::batch_get_replica_desc(const std::vector<std::string>& keys) {
+    auto query_results = client_service_->BatchQuery(keys);
+    std::map<std::string, std::vector<ObjectDescriptor>> replica_map;
+    if (query_results.size() != keys.size()) {
+        LOG(ERROR) << "Batch query response size mismatch in "
+                      "batch_get_allocated_buffer_desc: expected "
+                   << keys.size() << ", got " << query_results.size() << ".";
+        return replica_map;
+    }
+
+    for (size_t i = 0; i < query_results.size(); ++i) {
+        if (query_results[i]) {
+            replica_map[keys[i]] = query_results[i]->replicas;
+        } else {
+            LOG(ERROR) << "batch_get_replica failed for key: " << keys[i]
+                       << " with error: " << toString(query_results[i].error());
+        }
+    }
+    return replica_map;
+}
+
+tl::expected<int64_t, ErrorCode> RealClient::removeAllLocal_internal() {
+    LOG(ERROR) << "removeAllLocal_internal is not supported by this build";
+    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
+}
+
+tl::expected<void, ErrorCode> RealClient::removeLocal_internal(
+    const std::string& key) {
+    (void)key;
+    LOG(ERROR) << "removeLocal_internal is not supported by this build";
+    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
+}
+
+tl::expected<UUID, ErrorCode> RealClient::create_copy_task(
+    const std::string& key, const std::vector<std::string>& targets) {
+    auto result = client_service_->CreateCopyTask(key, targets);
+    if (!result) {
+        LOG(ERROR) << "create_copy_task failed, error=" << result.error();
+    }
+    return result;
+}
+
+tl::expected<UUID, ErrorCode> RealClient::create_move_task(
+    const std::string& key, const std::string& source,
+    const std::string& target) {
+    auto result = client_service_->CreateMoveTask(key, source, target);
+    if (!result) {
+        LOG(ERROR) << "create_move_task failed, error=" << result.error();
+    }
+    return result;
+}
+
+tl::expected<QueryTaskResponse, ErrorCode> RealClient::query_task(
+    const UUID& task_id) {
+    auto result = client_service_->QueryTask(task_id);
+    if (!result) {
+        LOG(ERROR) << "query_task failed, error=" << result.error();
+    }
+    return result;
+}
+
+tl::expected<int64_t, ErrorCode> RealClient::getSize_internal(
+    const std::string& key) {
+    if (!client_service_) {
+        LOG(ERROR) << "Client is not initialized";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    auto result = client_service_->Query(key);
+    if (!result) {
+        LOG(ERROR) << "Query failed, key=" << key
+                   << ", error=" << result.error();
+        return tl::unexpected(result.error());
+    }
+    const auto& entries = result->replicas;
+    if (entries.empty()) {
+        LOG(ERROR) << "Empty query result, key=" << key;
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    return static_cast<int64_t>(calculate_total_size(entries.front()));
+}
+
+}  // namespace mooncake

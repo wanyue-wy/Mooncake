@@ -9,7 +9,7 @@
 #include <ylt/metric/gauge.hpp>
 
 #include "p2p/client/heartbeat_type.h"
-#include "types.h"
+#include "p2p/common/p2p_types.h"
 
 namespace mooncake {
 

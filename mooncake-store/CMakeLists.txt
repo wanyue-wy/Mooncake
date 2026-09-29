@@ -24,6 +24,14 @@ include_directories(
     ${ETCD_WRAPPER_INCLUDE}
 )
 
+set(MOONCAKE_STORE_CLIENT_ARCH "centralized" CACHE STRING
+    "Native client implementation: centralized or p2p")
+set_property(CACHE MOONCAKE_STORE_CLIENT_ARCH PROPERTY STRINGS centralized p2p)
+if(NOT MOONCAKE_STORE_CLIENT_ARCH STREQUAL "centralized" AND
+   NOT MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    message(FATAL_ERROR "Invalid MOONCAKE_STORE_CLIENT_ARCH: ${MOONCAKE_STORE_CLIENT_ARCH}")
+endif()
+
 # Until the base/P2P dependency direction is cleaned up in later phases, use a
 # native rescan group when available. Older CMake versions and toolchains
 # without RESCAN support consume the P2P object files directly, avoiding

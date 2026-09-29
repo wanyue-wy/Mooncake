@@ -14,7 +14,7 @@
 #include <boost/functional/hash.hpp>
 
 #include "p2p/master/p2p_master_client.h"
-#include "types.h"
+#include "p2p/common/p2p_types.h"
 
 namespace mooncake {
 

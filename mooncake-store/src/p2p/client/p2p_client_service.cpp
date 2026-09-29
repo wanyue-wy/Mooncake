@@ -1255,7 +1255,7 @@ std::string P2PClientService::GetHealthStatus() const {
 
 tl::expected<void, ErrorCode> P2PClientService::Put(
     const ObjectKey& key, std::vector<Slice>& slices,
-    const P2PWriteRouteConfig& config) {
+    const std::optional<P2PWriteRouteConfig>& config) {
     std::vector<std::vector<Slice>> batched_slices{std::move(slices)};
     auto result = BatchPut({key}, batched_slices, config);
     if (result.empty()) {
@@ -1269,7 +1269,13 @@ tl::expected<void, ErrorCode> P2PClientService::Put(
 std::vector<tl::expected<void, ErrorCode>> P2PClientService::BatchPut(
     const std::vector<ObjectKey>& keys,
     std::vector<std::vector<Slice>>& batched_slices,
-    const P2PWriteRouteConfig& config) {
+    const std::optional<P2PWriteRouteConfig>& config_opt) {
+    P2PWriteRouteConfig default_config;
+    if (!config_opt) {
+        default_config = runtime_config_store_->getDefaultWriteConfig();
+    }
+    const auto& config = config_opt ? *config_opt : default_config;
+
     std::vector<tl::expected<void, ErrorCode>> results(
         keys.size(), tl::unexpected(ErrorCode::INTERNAL_ERROR));
     ScopedVLogTimer timer(1, "P2PClientService::BatchPut");
@@ -1870,20 +1876,28 @@ async_simple::coro::Lazy<void> P2PClientService::RunWriteWithRetry(
 
 tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> P2PClientService::Get(
     const std::string& key, std::shared_ptr<ClientBufferAllocator> allocator,
-    const P2PReadRouteConfig& config) {
+    const std::optional<P2PReadRouteConfig>& config) {
     return std::move(BatchGet({key}, allocator, config)[0]);
 }
 
 tl::expected<int64_t, ErrorCode> P2PClientService::Get(
     const std::string& key, const std::vector<void*>& buffers,
-    const std::vector<size_t>& sizes, const P2PReadRouteConfig& config) {
+    const std::vector<size_t>& sizes,
+    const std::optional<P2PReadRouteConfig>& config) {
     return std::move(BatchGet({key}, {buffers}, {sizes}, config)[0]);
 }
 
 std::vector<tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>>
-P2PClientService::BatchGet(const std::vector<std::string>& keys,
-                           std::shared_ptr<ClientBufferAllocator> allocator,
-                           const P2PReadRouteConfig& config) {
+P2PClientService::BatchGet(
+    const std::vector<std::string>& keys,
+    std::shared_ptr<ClientBufferAllocator> allocator,
+    const std::optional<P2PReadRouteConfig>& config_opt) {
+    P2PReadRouteConfig default_config;
+    if (!config_opt) {
+        default_config = runtime_config_store_->getDefaultReadConfig();
+    }
+    const auto& config = config_opt ? *config_opt : default_config;
+
     if (!allocator) {
         LOG(ERROR) << "Client buffer allocator is not provided";
         return std::vector<
@@ -1900,11 +1914,21 @@ P2PClientService::BatchGet(const std::vector<std::string>& keys,
                                                        extract_buf);
 }
 
+// TODO:
+// The `aggregate_same_segment_task` is currently ignored. Reads of different keys
+// on the same remote peer are not aggregated
 std::vector<tl::expected<int64_t, ErrorCode>> P2PClientService::BatchGet(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<void*>>& all_buffers,
     const std::vector<std::vector<size_t>>& all_sizes,
-    const P2PReadRouteConfig& config, bool /*aggregate_same_segment_task*/) {
+    const std::optional<P2PReadRouteConfig>& config_opt,
+    bool /*aggregate_same_segment_task*/) {
+    P2PReadRouteConfig default_config;
+    if (!config_opt) {
+        default_config = runtime_config_store_->getDefaultReadConfig();
+    }
+    const auto& config = config_opt ? *config_opt : default_config;
+
     if (keys.size() != all_buffers.size() || keys.size() != all_sizes.size()) {
         LOG(ERROR) << "Input vector sizes mismatch";
         return std::vector<tl::expected<int64_t, ErrorCode>>(
@@ -2320,21 +2344,31 @@ tl::expected<ReadTaskHandle, ErrorCode> P2PClientService::CreateRemoteGetHandle(
 
 tl::expected<ReadTaskHandle, ErrorCode> P2PClientService::InnerGetViaRoute(
     std::string_view key, std::vector<Slice>& slices, RouteIterator iter) {
+    const uint64_t object_size = iter.object_size();
     auto req = std::make_shared<RemoteReadRequest>();
     req->key = key;
+    uint64_t offset = 0;
     for (const auto& s : slices) {
+        if (offset >= object_size) break;
+        const uint64_t length = std::min<uint64_t>(s.size, object_size - offset);
+        if (length == 0) continue;
         RemoteBufferDesc buf;
         buf.segment_endpoint = get_te_endpoint();
         buf.addr = reinterpret_cast<uintptr_t>(s.ptr);
-        buf.size = s.size;
+        buf.size = length;
         req->dest_buffers.push_back(buf);
+        offset += length;
+    }
+    if (offset != object_size) {
+        LOG(ERROR) << "Remote read destination is too small, key=" << key
+                   << ", required=" << object_size << ", provided=" << offset;
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
 
     auto promise = std::make_shared<
         async_simple::Promise<tl::expected<void, ErrorCode>>>();
     auto future = promise->getFuture();
 
-    const uint64_t object_size = iter.object_size();
     RunReadWithRetry(std::move(iter), req, promise)
         .via(GetCoroExecutor())
         .start([](auto&&) {});

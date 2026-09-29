@@ -234,6 +234,9 @@ ClientMetric::ClientMetric(uint64_t interval_seconds,
       master_client_metric(labels),
       should_stop_metrics_thread_(false),
       metrics_interval_seconds_(interval_seconds) {
+    // Publish initial zero counters and their labels before the first transfer.
+    transfer_metric.total_read_bytes.inc(0);
+    transfer_metric.total_write_bytes.inc(0);
     if (metrics_interval_seconds_ > 0) {
         StartMetricsReportingThread();
     }

@@ -5,11 +5,13 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "cachelib_memory_allocator/MemoryAllocator.h"
 #include "offset_allocator/offset_allocator.hpp"
-#include "types.h"
+#include "common_types.h"
+#include <ylt/reflection/user_reflect_macro.hpp>
 
 using facebook::cachelib::MemoryAllocator;
 using facebook::cachelib::PoolId;
@@ -23,6 +25,11 @@ static constexpr size_t kAllocatorUnknownFreeSpace =
 // Forward declarations
 class BufferAllocatorBase;
 
+// TODO(C4.1 / allocator business identity; see p2p-split-plan-v3.md):
+// Keep CacheLib and offset allocation shared. Separate architecture-owned
+// identity/descriptor semantics from these facilities, then migrate P2P tier
+// users in C4.3. Remove this TODO after neither architecture borrows the
+// other's business descriptor or accounting contract.
 class AllocatedBuffer {
    public:
     friend class CachelibBufferAllocator;
@@ -99,6 +106,10 @@ class BufferAllocatorBase {
    public:
     virtual ~BufferAllocatorBase() = default;
 
+    // TODO(C4.2/C4.3 / allocator accounting; see p2p-split-plan-v3.md):
+    // These observers are transitional business-statistics wiring. Restore the
+    // approved centralized accounting and migrate P2P tier statistics to their
+    // own owner before removing this bridge; shared allocation stays reusable.
     using UsageObserver = std::function<void(int64_t)>;
     void set_usage_observers(UsageObserver on_allocated,
                              UsageObserver on_deallocated) {

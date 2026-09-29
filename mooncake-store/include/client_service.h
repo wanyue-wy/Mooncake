@@ -1,6 +1,7 @@
 #pragma once
 
 #include <boost/functional/hash.hpp>
+#include <csignal>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -207,9 +208,9 @@ class Client {
      * @param config Replication configuration
      * @return ErrorCode indicating success/failure
      */
-    tl::expected<void, ErrorCode> Put(const ObjectKey& key,
-                                      std::vector<Slice>& slices,
-                                      const ReplicateConfig& config);
+    tl::expected<void, ErrorCode> Put(
+        const ObjectKey& key, std::vector<Slice>& slices,
+        const std::optional<ReplicateConfig>& config = std::nullopt);
 
     /**
      * @brief Batch put data with replication
@@ -221,7 +222,7 @@ class Client {
     std::vector<tl::expected<void, ErrorCode>> BatchPut(
         const std::vector<ObjectKey>& keys,
         std::vector<std::vector<Slice>>& batched_slices,
-        const ReplicateConfig& config);
+        const std::optional<ReplicateConfig>& config = std::nullopt);
 
     /**
      * @brief Removes an object and all its replicas
