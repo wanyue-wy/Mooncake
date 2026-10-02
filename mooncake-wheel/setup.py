@@ -1,5 +1,6 @@
 import sys
 import platform
+from pathlib import Path
 from setuptools import setup, Distribution
 from wheel.bdist_wheel import bdist_wheel
 
@@ -165,7 +166,43 @@ class CustomBdistWheel(bdist_wheel):
 # ---------------------------------------------------------------------------
 # setup()
 # ---------------------------------------------------------------------------
+def get_console_scripts():
+    scripts = [
+        "transfer_engine_bench = mooncake.cli_bench:main",
+        "mooncake_http_metadata_server = mooncake.http_metadata_server:main",
+        "mc_store_rest_server = mooncake.mooncake_store_service:main",
+        "transfer_engine_topology_dump = mooncake.transfer_engine_topology_dump:main",
+    ]
+    package_dir = Path(__file__).parent / "mooncake"
+    selected = None
+    # Select entry points while building the wheel; installed CLIs are fixed.
+    for suffix, entry in (("", "main"), ("_p2p", "p2p_main")):
+        master = package_dir / ("mooncake_master" + suffix)
+        client = package_dir / ("mooncake_client" + suffix)
+        if not master.exists() and not client.exists():
+            continue
+        if not master.is_file() or not client.is_file():
+            raise ValueError(
+                "Store wheel requires matching Master and Client binaries"
+            )
+        if selected is not None:
+            raise ValueError("Store wheel cannot contain both client architectures")
+        selected = (suffix, entry)
+    if (package_dir / "store.so").is_file() and selected is None:
+        raise ValueError("Store wheel is missing its Master and Client binaries")
+    if selected is not None:
+        suffix, entry = selected
+        scripts.extend(
+            [
+                f"mooncake_master{suffix} = mooncake.cli:{entry}",
+                f"mooncake_client{suffix} = mooncake.cli_client:{entry}",
+            ]
+        )
+    return scripts
+
+
 setup(
     distclass=BinaryDistribution,
     cmdclass={"bdist_wheel": CustomBdistWheel},
+    entry_points={"console_scripts": get_console_scripts()},
 )

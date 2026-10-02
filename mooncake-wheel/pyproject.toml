@@ -10,6 +10,7 @@ authors = [
     { name = "Mooncake Authors" }
 ]
 requires-python = ">=3.8"
+dynamic = ["scripts", "entry-points"]
 dependencies = ["aiohttp", "requests"]
 keywords = ["mooncake", "data transfer", "kv cache", "llm inference"]
 classifiers = [
@@ -25,14 +26,6 @@ Documentation = "https://github.com/kvcache-ai/Mooncake/tree/main/doc"
 Source = "https://github.com/kvcache-ai/Mooncake"
 Issues = "https://github.com/kvcache-ai/Mooncake/issues"
 
-[project.scripts]
-mooncake_master = "mooncake.cli:main"
-mooncake_client = "mooncake.cli_client:main"
-transfer_engine_bench = "mooncake.cli_bench:main"
-mooncake_http_metadata_server = "mooncake.http_metadata_server:main"
-mc_store_rest_server = "mooncake.mooncake_store_service:main"
-transfer_engine_topology_dump = "mooncake.transfer_engine_topology_dump:main"
-
 [tool.setuptools]
 zip-safe = false
 include-package-data = true
@@ -42,4 +35,4 @@ where = ["."]
 include = ["mooncake*"]
 
 [tool.setuptools.package-data]
-mooncake = ["*.so", "mooncake_master", "mooncake_client", "transfer_engine_bench"]
+mooncake = ["*.so", "mooncake_master", "mooncake_master_p2p", "mooncake_client", "mooncake_client_p2p", "transfer_engine_bench"]

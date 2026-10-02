@@ -49,26 +49,14 @@ set(MOONCAKE_P2P_MASTER_SOURCES
 
 set(MOONCAKE_STORE_SOURCES
     ${MOONCAKE_MASTER_SUPPORT_SOURCES}
-    ${MOONCAKE_CENTRALIZED_MASTER_SOURCES}
-    client_service.cpp
     client_resources.cpp
-    client_metric.cpp
-    master_client.cpp
     storage_backend.cpp
     thread_pool.cpp
-    transfer_task.cpp
     posix_file.cpp
     client_buffer.cpp
     real_client.cpp
     dummy_client.cpp
-    file_storage.cpp
 )
-
-if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
-    list(APPEND MOONCAKE_STORE_SOURCES p2p/client/p2p_real_client.cpp)
-else()
-    list(APPEND MOONCAKE_STORE_SOURCES centralized_real_client.cpp)
-endif()
 
 set(EXTRA_LIBS "")
 
@@ -124,39 +112,6 @@ if(USE_ASCEND_DRAM_TIER)
   message(STATUS "Ascend DRAM Tier enabled")
 endif()
 
-# The cache_allocator library
-include_directories(${Python3_INCLUDE_DIRS})
-add_library(mooncake_store ${MOONCAKE_STORE_SOURCES})
-if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
-    target_compile_definitions(mooncake_store PUBLIC MOONCAKE_STORE_CLIENT_P2P)
-endif()
-# Note: transfer_engine is PRIVATE to avoid propagating its dependencies (e.g., vendor-specific hardware)
-# to targets that don't need it (e.g., mooncake_master).
-# Targets that need transfer_engine should link it explicitly.
-target_include_directories(mooncake_store PUBLIC ${XXHASH_INCLUDE_DIR})
-if(STORE_USE_REDIS)
-    target_include_directories(mooncake_store PUBLIC ${HIREDIS_INCLUDE_DIR})
-    target_compile_definitions(mooncake_store PUBLIC STORE_USE_REDIS)
-endif()
-target_link_libraries(mooncake_store
-    PUBLIC
-        cachelib_memory_allocator
-        ${ETCD_WRAPPER_LIB}
-        glog::glog
-        gflags::gflags
-        JsonCpp::JsonCpp
-        ${XXHASH_LIBRARY}
-        ${EXTRA_LIBS}
-        asio_shared
-    PRIVATE
-        transfer_engine
-)
-
-# TODO(D1/I2 / client aggregate dependencies; see p2p-split-plan-v3.md):
-# The deployment build still combines native source groups through the targets
-# below. Complete the queued C2 build selection, audit shared dependencies and
-# verify each produced library/executable before removing this TODO. Shared
-# CacheLib/Slab dependencies are allowed; opposite-architecture business is not.
 list(APPEND MOONCAKE_STORE_P2P_SOURCES
     ${MOONCAKE_P2P_MASTER_SOURCES}
     p2p/master/p2p_master_client.cpp
@@ -185,15 +140,57 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
     p2p/ha/metadata_recovery_worker.cpp
 )
 
-add_library(mooncake_store_p2p_objects OBJECT ${MOONCAKE_STORE_P2P_SOURCES})
-target_link_libraries(mooncake_store_p2p_objects PUBLIC mooncake_store)
+if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    list(APPEND MOONCAKE_STORE_SOURCES
+        ${MOONCAKE_STORE_P2P_SOURCES}
+        p2p/client/p2p_real_client.cpp
+        # Existing shared descriptors/allocators; C4/D1 audit their semantics.
+        replica.cpp
+        allocator.cpp
+        offset_allocator.cpp
+        master_metric_manager.cpp
+    )
+else()
+    list(APPEND MOONCAKE_STORE_SOURCES
+        ${MOONCAKE_CENTRALIZED_MASTER_SOURCES}
+        client_service.cpp
+        centralized_real_client.cpp
+        client_metric.cpp
+        master_client.cpp
+        transfer_task.cpp
+        file_storage.cpp
+    )
+endif()
 
-# Keep the standalone P2P library artifact for installation. Internal
-# consumers use the object target above to avoid circular static-library
-# ordering constraints during the transitional split phases.
-add_library(mooncake_store_p2p
-    $<TARGET_OBJECTS:mooncake_store_p2p_objects>)
-target_link_libraries(mooncake_store_p2p PUBLIC mooncake_store)
+# TODO(D1/I2): audit linked artifacts and the remaining shared descriptor /
+# allocator dependencies; source selection alone does not prove isolation.
+# The cache_allocator library
+include_directories(${Python3_INCLUDE_DIRS})
+add_library(mooncake_store ${MOONCAKE_STORE_SOURCES})
+if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    target_compile_definitions(mooncake_store PUBLIC MOONCAKE_STORE_CLIENT_P2P)
+endif()
+# Note: transfer_engine is PRIVATE to avoid propagating its dependencies (e.g., vendor-specific hardware)
+# to targets that don't need it (e.g., mooncake_master).
+# Targets that need transfer_engine should link it explicitly.
+target_include_directories(mooncake_store PUBLIC ${XXHASH_INCLUDE_DIR})
+if(STORE_USE_REDIS)
+    target_include_directories(mooncake_store PUBLIC ${HIREDIS_INCLUDE_DIR})
+    target_compile_definitions(mooncake_store PUBLIC STORE_USE_REDIS)
+endif()
+target_link_libraries(mooncake_store
+    PUBLIC
+        cachelib_memory_allocator
+        ${ETCD_WRAPPER_LIB}
+        glog::glog
+        gflags::gflags
+        JsonCpp::JsonCpp
+        ${XXHASH_LIBRARY}
+        ${EXTRA_LIBS}
+        asio_shared
+    PRIVATE
+        transfer_engine
+)
 
 # Link Ascend ACL library if USE_ASCEND_CACHE_TIER is enabled
 if(USE_ASCEND_CACHE_TIER)
@@ -273,7 +270,7 @@ if (USE_ASCEND_DIRECT)
 endif()
 
 if (BUILD_SHARED_LIBS)
-  install(TARGETS mooncake_store mooncake_store_p2p DESTINATION lib)
+  install(TARGETS mooncake_store DESTINATION lib)
 endif()
 
 # Master executables never link the client aggregate. Explicit STATIC libraries
@@ -349,12 +346,35 @@ target_link_options(mooncake_master PRIVATE -Os -s)
 target_compile_options(mooncake_master_p2p PRIVATE -Os)
 target_link_options(mooncake_master_p2p PRIVATE -Os -s)
 
-# Client server binary
-add_executable(mooncake_client real_client_main.cpp)
-# Client needs transfer_engine for data transfer operations
-target_link_libraries(mooncake_client PRIVATE ${MOONCAKE_STORE_LIBS} transfer_engine asio_shared)
-target_compile_options(mooncake_client PRIVATE -Os)
-target_link_options(mooncake_client PRIVATE -Os -s)
+# Each build ships only the selected Dummy-facing client daemon.
+if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    set(MOONCAKE_CLIENT_TARGET mooncake_client_p2p)
+    add_executable(${MOONCAKE_CLIENT_TARGET} p2p/client/p2p_real_client_main.cpp)
+else()
+    set(MOONCAKE_CLIENT_TARGET mooncake_client)
+    add_executable(${MOONCAKE_CLIENT_TARGET} real_client_main.cpp)
+endif()
+target_link_libraries(${MOONCAKE_CLIENT_TARGET} PRIVATE
+    mooncake_store transfer_engine asio_shared)
+target_compile_options(${MOONCAKE_CLIENT_TARGET} PRIVATE -Os)
+target_link_options(${MOONCAKE_CLIENT_TARGET} PRIVATE -Os -s)
 
-install(TARGETS mooncake_master mooncake_master_p2p mooncake_client
+install(TARGETS mooncake_master mooncake_master_p2p ${MOONCAKE_CLIENT_TARGET}
         DESTINATION bin)
+
+if(BUILD_UNIT_TESTS)
+    if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "centralized")
+        set(MOONCAKE_E2E_OTHER_CLIENT_SOURCES ${MOONCAKE_STORE_P2P_SOURCES})
+        list(REMOVE_ITEM MOONCAKE_E2E_OTHER_CLIENT_SOURCES ${MOONCAKE_P2P_MASTER_SOURCES})
+        set(MOONCAKE_E2E_OTHER_MASTER mooncake_p2p_master_core)
+    else()
+        set(MOONCAKE_E2E_OTHER_CLIENT_SOURCES
+            client_service.cpp client_metric.cpp master_client.cpp
+            transfer_task.cpp file_storage.cpp)
+        set(MOONCAKE_E2E_OTHER_MASTER mooncake_master_core)
+    endif()
+    add_library(mooncake_e2e_other_client STATIC ${MOONCAKE_E2E_OTHER_CLIENT_SOURCES})
+    target_link_libraries(mooncake_e2e_other_client
+        PUBLIC mooncake_store ${MOONCAKE_E2E_OTHER_MASTER}
+        PRIVATE transfer_engine)
+endif()

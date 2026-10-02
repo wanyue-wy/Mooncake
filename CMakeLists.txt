@@ -20,11 +20,13 @@ option(WITH_EP "build mooncake with expert parallelism support" OFF)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/pybind11)
 set(PYTHON_EXECUTABLE "python3")
-execute_process(
-    COMMAND ${PYTHON_EXECUTABLE} -c "import sys; print(sys.path[-1])"
-    OUTPUT_VARIABLE PYTHON_SYS_PATH
-)
-string(STRIP ${PYTHON_SYS_PATH} PYTHON_SYS_PATH)
+if(NOT PYTHON_SYS_PATH)
+    execute_process(
+        COMMAND ${PYTHON_EXECUTABLE} -c "import sys; print(sys.path[-1])"
+        OUTPUT_VARIABLE PYTHON_SYS_PATH
+    )
+    string(STRIP ${PYTHON_SYS_PATH} PYTHON_SYS_PATH)
+endif()
 
 if (USE_ETCD)
   add_compile_definitions(USE_ETCD)

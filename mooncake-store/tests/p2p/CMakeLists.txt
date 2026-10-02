@@ -1,4 +1,4 @@
-# P2P client tests use the aggregate until the client facade is split.
+# P2P client fixtures use only the selected P2P Store implementation.
 function(add_p2p_store_executable name)
     add_executable(${name} ${ARGN})
     target_link_libraries(${name} PUBLIC
@@ -43,6 +43,10 @@ add_p2p_master_test(p2p_client_meta_test p2p_client_meta_test.cpp)
 set_tests_properties(p2p_master_rpc_test p2p_master_http_endpoints_test
     PROPERTIES LABELS "p2p;master;integration")
 
+if(NOT MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    return()
+endif()
+
 add_executable(stress_workload_test_p2p stress_workload_test.cpp)
 target_link_libraries(stress_workload_test_p2p PUBLIC
     ${MOONCAKE_STORE_LIBS}
@@ -82,6 +86,9 @@ add_p2p_store_test(runtime_config_store_test runtime_config_store_test.cpp)
 add_p2p_store_test(client_metrics_aggregator_test client_metrics_aggregator_test.cpp)
 add_p2p_store_test(p2p_client_metrics_test p2p_client_metrics_test.cpp)
 add_p2p_store_test(client_http_metrics_test client_http_metrics_test.cpp)
+# This existing comparison fixture also exercises centralized metric semantics.
+# Keep that test-only dependency out of the P2P production library.
+target_sources(client_http_metrics_test PRIVATE ../../src/client_metric.cpp)
 
 # tiered cache
 add_p2p_store_test(tiered_backend_test tiered_backend_test.cpp)

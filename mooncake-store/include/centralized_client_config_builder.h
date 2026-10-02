@@ -51,17 +51,6 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
 
     static CentralizedClientConfig build_centralized_real_client(
         const std::unordered_map<std::string, std::string>& config) {
-        for (const auto& [key, value] : config) {
-            if (key == "http_port" || key == "enable_http_server" ||
-                key == "enable_metric_collection" ||
-                key == "metric_report_interval_seconds" ||
-                key == "local_rpc_port" || key.rfind("redis_", 0) == 0) {
-                LOG(ERROR) << "Unsupported centralized setup parameter: "
-                           << key;
-                throw std::invalid_argument(
-                    "Unsupported centralized setup parameter: " + key);
-            }
-        }
         auto devices = get_config_str(config, DictCommon::kRdmaDevices);
         auto client_port = get_config_port(config, "client_rpc_port");
         auto heartbeat_port = static_cast<uint16_t>(
@@ -102,7 +91,9 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
         const std::unordered_map<std::string, std::string>& config,
         const std::string& key) {
         auto it = config.find(key);
-        if (it == config.end()) return 0;
+        if (it == config.end()) {
+            return 0;
+        }
         const auto& value = it->second;
         try {
             size_t parsed = 0;

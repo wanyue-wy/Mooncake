@@ -8,20 +8,23 @@ import sys
 import subprocess
 
 
-def main():
+def main(binary_name="mooncake_master"):
     """
-    Main entry point for the mooncake_master command.
-    Simply runs the mooncake_master binary with all arguments passed through.
+    Run the selected Master binary with all command-line arguments unchanged.
     """
-    # Get the path to the mooncake_master binary
+    # Get the path to the selected Master binary.
     package_dir = os.path.dirname(os.path.abspath(__file__))
-    bin_path = os.path.join(package_dir, "mooncake_master")
+    bin_path = os.path.join(package_dir, binary_name)
     
     # Make sure the binary is executable
     os.chmod(bin_path, 0o755)
     
     # Run the binary with all arguments passed through
     return subprocess.call([bin_path] + sys.argv[1:])
+
+
+def p2p_main():
+    return main("mooncake_master_p2p")
 
 
 if __name__ == "__main__":
