@@ -56,20 +56,19 @@ class P2PRegisterConcurrencyTest : public ::testing::Test {
     // A fresh, fully-initialized client per test so register/unregister/Stop
     // cannot leak across tests.
     static std::shared_ptr<P2PClientService> CreateClient() {
-        const uint32_t te_port = static_cast<uint32_t>(getFreeTcpPort());
-        const uint32_t rpc_port = static_cast<uint32_t>(getFreeTcpPort());
-        const uint16_t http_port = static_cast<uint16_t>(getFreeTcpPort());
-        const std::string host_name = "localhost:" + std::to_string(te_port);
+        // Let each listener own its port as soon as it is allocated. Choosing
+        // and releasing free ports first races with concurrent test servers.
+        const std::string host_name = "localhost:0";
 
         auto config = P2PClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
-            /*local_buffer_size=*/0, nullptr, "", rpc_port,
+            /*local_buffer_size=*/0, nullptr, "", /*client_rpc_port=*/0,
             /*rpc_thread_num=*/2, /*lock_shard_count=*/1024,
             /*route_cache_max_memory_bytes=*/300 * 1024 * 1024,
             /*route_cache_ttl_ms=*/60 * 1000,
             /*local_transfer_mode=*/"te",
-            /*local_memcpy_async_worker_num=*/32, http_port,
+            /*local_memcpy_async_worker_num=*/32, /*http_port=*/0,
             /*enable_http_server=*/true);
 
         auto client = std::make_shared<P2PClientService>(

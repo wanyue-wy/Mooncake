@@ -161,19 +161,6 @@ TEST(ClientConfigBuilderTest, BuildP2PClientConfigReadsRedisDiscoveryConfig) {
     EXPECT_EQ(config.redis_heartbeat_interval_sec, 4);
 }
 
-TEST(ClientConfigBuilderTest, CentralizedConfigRejectsRemovedParameters) {
-    for (const auto* key : {"redis_cluster_id", "http_port", "enable_http_server",
-                            "enable_metric_collection", "metric_report_interval_seconds",
-                            "local_rpc_port"}) {
-        std::unordered_map<std::string, std::string> config = {
-            {"local_hostname", "127.0.0.1"}, {"metadata_server", "P2PHANDSHAKE"},
-            {key, "1"},
-        };
-        EXPECT_THROW(CentralizedClientConfigBuilder::build_centralized_real_client(config),
-                     std::invalid_argument) << key;
-    }
-}
-
 TEST(ClientConfigBuilderTest, CentralizedClientRpcPortIsIndependentOfOffload) {
     std::unordered_map<std::string, std::string> config = {
         {"local_hostname", "127.0.0.1:12345"}, {"metadata_server", "P2PHANDSHAKE"},

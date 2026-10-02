@@ -77,7 +77,7 @@ TEST(RealClientRemountTest, PingReportsMappedShmCount) {
     {
         SharedMutexLocker lock(&rc.dummy_client_mutex_);
         auto& ctx = rc.shm_contexts_[id];
-        SharedMutexLocker ctx_lock(&ctx->mutex);
+        SharedMutexLocker ctx_lock(&ctx->mutex_);
         ctx->mapped_shms_.push_back(RealClient::MappedShm{});
         ctx->mapped_shms_.push_back(RealClient::MappedShm{});
     }

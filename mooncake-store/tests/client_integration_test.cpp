@@ -312,7 +312,7 @@ TEST_F(ClientIntegrationTest, BasicPutGetOperations) {
 
     buffer = client_buffer_allocator_->allocate(1 * 1024 * 1024);
     // Verify data through Get operation
-    auto get_result = test_client_->Get(key, {buffer}, {test_data.size()});
+    auto get_result = test_client_->Get(key, buffer, test_data.size());
     ASSERT_TRUE(get_result.has_value())
         << "Get operation failed: " << toString(get_result.error());
     ASSERT_EQ(get_result.value(), static_cast<int64_t>(test_data.size()));
@@ -370,7 +370,7 @@ TEST_F(ClientIntegrationTest, RemoveOperation) {
 
     // Try to get the removed data - should fail
     buffer = client_buffer_allocator_->allocate(test_data.size());
-    auto get_result = test_client_->Get(key, {buffer}, {test_data.size()});
+    auto get_result = test_client_->Get(key, buffer, test_data.size());
     ASSERT_FALSE(get_result.has_value()) << "Get should fail for removed key";
     client_buffer_allocator_->deallocate(buffer, test_data.size());
 }
@@ -451,7 +451,7 @@ TEST_F(ClientIntegrationTest, DISABLED_AllocateTest) {
         client_buffer_allocator_->deallocate(buffer, data_size);
         // Get and verify data
         buffer = client_buffer_allocator_->allocate(data_size);
-        auto get_result = test_client_->Get(key, {buffer}, {data_size});
+        auto get_result = test_client_->Get(key, buffer, data_size);
         ASSERT_TRUE(get_result.has_value())
             << "Get operation failed: " << toString(get_result.error());
         ASSERT_EQ(get_result.value(), static_cast<int64_t>(data_size));
@@ -526,10 +526,8 @@ TEST_F(ClientIntegrationTest, LargeAllocateTest) {
         memset(buffers[i], 0, data_size);
     }
 
-    // Get operation with multiple buffers
-    std::vector<void*> get_buffers(buffers.begin(), buffers.end());
-    std::vector<size_t> get_sizes(kNumBuffers, data_size);
-    auto get_result = test_client_->Get(key, get_buffers, get_sizes);
+    // Read into the original slices to preserve multi-buffer coverage.
+    auto get_result = test_client_->Get(key, slices);
     ASSERT_TRUE(get_result.has_value())
         << "Get operation failed: " << toString(get_result.error());
 
@@ -592,8 +590,8 @@ TEST_F(ClientIntegrationTest, BatchPutGetOperations) {
     for (int i = 0; i < batch_sz; i++) {
         target_buffer =
             client_buffer_allocator_->allocate(test_data_list[i].size());
-        auto get_result = test_client_->Get(keys[i], {target_buffer},
-                                            {test_data_list[i].size()});
+        auto get_result = test_client_->Get(keys[i], target_buffer,
+                                            test_data_list[i].size());
         ASSERT_TRUE(get_result.has_value())
             << "Get operation failed: " << toString(get_result.error());
         client_buffer_allocator_->deallocate(target_buffer,
