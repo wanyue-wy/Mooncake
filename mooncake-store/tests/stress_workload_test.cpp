@@ -173,8 +173,6 @@ void worker_thread(int thread_id, std::atomic<bool>& stop_flag,
     std::vector<Slice> slices;
     slices.emplace_back(
         Slice{write_buffer, static_cast<size_t>(FLAGS_value_size)});
-    const std::vector<void*> read_buffers{write_buffer};
-    const std::vector<size_t> read_sizes{static_cast<size_t>(FLAGS_value_size)};
 
     ReplicateConfig config;
     config.replica_num = 1;
@@ -215,7 +213,8 @@ void worker_thread(int thread_id, std::atomic<bool>& stop_flag,
         std::string key = stored_keys[key_index];
 
         auto start_time = std::chrono::high_resolution_clock::now();
-        auto result = g_client->Get(key, read_buffers, read_sizes);
+        auto result = g_client->Get(key, write_buffer,
+                                    static_cast<size_t>(FLAGS_value_size));
         auto end_time = std::chrono::high_resolution_clock::now();
 
         auto latency_us = std::chrono::duration_cast<std::chrono::microseconds>(

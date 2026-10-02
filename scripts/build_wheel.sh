@@ -2,9 +2,32 @@
 # Script to build the mooncake wheel package
 # Usage: ./scripts/build_wheel.sh [python_version] [output_dir]
 # Example: ./scripts/build_wheel.sh 3.10 dist-3.10
+# Select an independent CMake build with BUILD_DIR (default: build).
+# Example: BUILD_DIR=build-p2p ./scripts/build_wheel.sh 3.10 dist-p2p
 
 set -e  # Exit immediately if a command exits with a non-zero status
 set -x
+
+BUILD_DIR=${BUILD_DIR:-build}
+if [ ! -f "${BUILD_DIR}/CMakeCache.txt" ]; then
+    echo "Error: CMakeCache.txt not found in ${BUILD_DIR}" >&2
+    exit 1
+fi
+BUILD_DIR=$(cd "${BUILD_DIR}" && pwd)
+STORE_ENABLED=$(sed -n 's/^WITH_STORE:[^=]*=//p' "${BUILD_DIR}/CMakeCache.txt" | tr '[:lower:]' '[:upper:]')
+case "${STORE_ENABLED}" in
+    ON|TRUE|YES|Y|1)
+        STORE_ENABLED=ON
+        STORE_ARCH=$(sed -n 's/^MOONCAKE_STORE_CLIENT_ARCH:[^=]*=//p' "${BUILD_DIR}/CMakeCache.txt")
+        case "${STORE_ARCH}" in
+            centralized) STORE_MASTER=mooncake_master; STORE_CLIENT=mooncake_client ;;
+            p2p) STORE_MASTER=mooncake_master_p2p; STORE_CLIENT=mooncake_client_p2p ;;
+            *) echo "Error: Invalid Store client architecture: ${STORE_ARCH}" >&2; exit 1 ;;
+        esac
+        ;;
+    OFF|FALSE|NO|N|0|"") STORE_ENABLED=OFF ;;
+    *) echo "Error: Invalid WITH_STORE value: ${STORE_ENABLED}" >&2; exit 1 ;;
+esac
 
 # Get Python version from environment variable or argument
 PYTHON_VERSION=${PYTHON_VERSION:-${1:-$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")}}
@@ -26,58 +49,60 @@ echo "Cleaning wheel-build directory"
 rm -rf mooncake-wheel/mooncake_transfer_engine*
 rm -rf mooncake-wheel/build/
 rm -f mooncake-wheel/mooncake/*.so
+# Remove binaries from the previous architecture before selecting this pair.
+rm -f mooncake-wheel/mooncake/mooncake_master mooncake-wheel/mooncake/mooncake_master_p2p \
+      mooncake-wheel/mooncake/mooncake_client mooncake-wheel/mooncake/mooncake_client_p2p
 
 echo "Creating directory structure..."
 
 # Copy engine.so to mooncake directory (will be imported by transfer module)
-cp build/mooncake-integration/engine.*.so mooncake-wheel/mooncake/engine.so
+cp "${BUILD_DIR}"/mooncake-integration/engine.*.so mooncake-wheel/mooncake/engine.so
 
 # Copy store.so to mooncake directory
-if [ -f build/mooncake-integration/store.*.so ]; then
+if [ "${STORE_ENABLED}" = "ON" ]; then
     echo "Copying store.so..."
-    cp build/mooncake-integration/store.*.so mooncake-wheel/mooncake/store.so
+    cp "${BUILD_DIR}"/mooncake-integration/store.*.so mooncake-wheel/mooncake/store.so
     echo "Copying master binary..."
     # Copy master binary
-    cp build/mooncake-store/src/mooncake_master mooncake-wheel/mooncake/
+    cp "${BUILD_DIR}/mooncake-store/src/${STORE_MASTER}" mooncake-wheel/mooncake/
     # Copy client binary
-    cp build/mooncake-store/src/mooncake_client mooncake-wheel/mooncake/
+    cp "${BUILD_DIR}/mooncake-store/src/${STORE_CLIENT}" mooncake-wheel/mooncake/
     # Copy async_store.py
     cp mooncake-integration/store/async_store.py mooncake-wheel/mooncake/async_store.py
+    # Copy the selected shared Store library, if built.
+    if [ -f "${BUILD_DIR}/mooncake-store/src/libmooncake_store.so" ]; then
+        echo "Copying libmooncake_store.so..."
+        cp "${BUILD_DIR}/mooncake-store/src/libmooncake_store.so" mooncake-wheel/mooncake/libmooncake_store.so
+    fi
 else
-    echo "Skipping store.so (not built - likely WITH_STORE is set to OFF)"
-fi
-
-# Copy libmooncake_store.so to mooncake directory (only when BUILD_SHARED_LIBS is set)
-if [ -f build/mooncake-store/src/libmooncake_store.so ]; then
-    echo "Copying libmooncake_store.so..."
-    cp build/mooncake-store/src/libmooncake_store.so mooncake-wheel/mooncake/libmooncake_store.so
+    echo "Skipping Store (WITH_STORE is OFF)"
 fi
 
 # Copy libtransfer_engine.so to mooncake directory (only when USE_ETCD is set)
-if [ -f build/mooncake-common/etcd/libetcd_wrapper.so ]; then
+if [ -f "${BUILD_DIR}/mooncake-common/etcd/libetcd_wrapper.so" ]; then
     echo "Copying libetcd_wrapper.so..."
-    cp build/mooncake-common/etcd/libetcd_wrapper.so mooncake-wheel/mooncake/libetcd_wrapper.so
+    cp "${BUILD_DIR}/mooncake-common/etcd/libetcd_wrapper.so" mooncake-wheel/mooncake/libetcd_wrapper.so
 fi
 
 # Copy libtransfer_engine.so to mooncake directory (only when BUILD_SHARED_LIBS is set)
-if [ -f build/mooncake-transfer-engine/src/libtransfer_engine.so ]; then
+if [ -f "${BUILD_DIR}/mooncake-transfer-engine/src/libtransfer_engine.so" ]; then
     echo "Copying libtransfer_engine.so..."
-    cp build/mooncake-transfer-engine/src/libtransfer_engine.so mooncake-wheel/mooncake/libtransfer_engine.so
+    cp "${BUILD_DIR}/mooncake-transfer-engine/src/libtransfer_engine.so" mooncake-wheel/mooncake/libtransfer_engine.so
 fi
 
 # Copy ascend_transport.so to mooncake directory (only when USE_ASCEND_DIRECT is set)
-if [ -f build/mooncake-transfer-engine/src/transport/ascend_transport/ascend_transport.so ]; then
+if [ -f "${BUILD_DIR}/mooncake-transfer-engine/src/transport/ascend_transport/ascend_transport.so" ]; then
     echo "Copying ascend_transport.so..."
-    cp build/mooncake-transfer-engine/src/transport/ascend_transport/ascend_transport.so mooncake-wheel/mooncake/ascend_transport.so
+    cp "${BUILD_DIR}/mooncake-transfer-engine/src/transport/ascend_transport/ascend_transport.so" mooncake-wheel/mooncake/ascend_transport.so
 fi
 
 # Copy nvlink-allocator.so to mooncake directory (only if it exists - CUDA builds only)
-if [ -f build/mooncake-transfer-engine/nvlink-allocator/nvlink_allocator.so ] \
+if [ -f "${BUILD_DIR}/mooncake-transfer-engine/nvlink-allocator/nvlink_allocator.so" ] \
    || [ -f /usr/lib/libaccl_barex.so ] \
    || [ -f /usr/lib64/libaccl_barex.so ]; then
-    if [ -f build/mooncake-transfer-engine/nvlink-allocator/nvlink_allocator.so ]; then
+    if [ -f "${BUILD_DIR}/mooncake-transfer-engine/nvlink-allocator/nvlink_allocator.so" ]; then
      echo "Copying CUDA nvlink_allocator.so..."
-     cp build/mooncake-transfer-engine/nvlink-allocator/nvlink_allocator.so mooncake-wheel/mooncake/nvlink_allocator.so
+     cp "${BUILD_DIR}/mooncake-transfer-engine/nvlink-allocator/nvlink_allocator.so" mooncake-wheel/mooncake/nvlink_allocator.so
     fi
     echo "Copying allocator libraries..."
     # Copy allocator.py
@@ -88,10 +113,10 @@ fi
 
 echo "Copying transfer_engine_bench..."
 # Copy transfer_engine_bench
-cp build/mooncake-transfer-engine/example/transfer_engine_bench mooncake-wheel/mooncake/
+cp "${BUILD_DIR}/mooncake-transfer-engine/example/transfer_engine_bench" mooncake-wheel/mooncake/
 
-if [ -f "build/mooncake-transfer-engine/src/transport/ascend_transport/hccl_transport/ascend_transport_c/libascend_transport_mem.so" ]; then
-    cp build/mooncake-transfer-engine/src/transport/ascend_transport/hccl_transport/ascend_transport_c/libascend_transport_mem.so mooncake-wheel/mooncake/
+if [ -f "${BUILD_DIR}/mooncake-transfer-engine/src/transport/ascend_transport/hccl_transport/ascend_transport_c/libascend_transport_mem.so" ]; then
+    cp "${BUILD_DIR}/mooncake-transfer-engine/src/transport/ascend_transport/hccl_transport/ascend_transport_c/libascend_transport_mem.so" mooncake-wheel/mooncake/
     echo "Copying ascend_transport_mem libraries..."
 else
     echo "Skipping libascend_transport_mem.so (not built - Ascend disabled)"
@@ -176,74 +201,23 @@ rm -rf ${OUTPUT_DIR}/
 mkdir -p ${OUTPUT_DIR}
 
 echo "Installing required build packages"
-pip install --upgrade pip
-# TEMPORARY FIX: auditwheel 6.8.0 corrupts the wheel when used with
-# patchelf < 0.14.4 (upstream pypa/auditwheel#722, fixed in patchelf 0.14.4).
-# The ubuntu-22.04 CI runner only ships patchelf 0.14.3, producing wheels that
-# fail to import with "libgflags.so.2.2: cannot open shared object file".
-# Pin auditwheel to 6.7.0 until the CI wheel is built inside the manylinux
-# container (pytorch/manylinux2_28-builder, patchelf >= 0.14.4), i.e. once
-# ci.yml's test-wheel-ubuntu consumes the build-wheel/mooncake-wheel-ci
-# artifact (main commits #3137 + #3283, first released after v0.3.12).
-# Keep this pin through the v0.3.10 / v0.3.11 / v0.3.12 merges.
-pip install build setuptools wheel "auditwheel==6.7.0"
+python -m pip install --upgrade pip
+# patchelf 0.18.0 fixes rewritten sections escaping their PT_LOAD segment
+# (NixOS/patchelf#485). Install it with auditwheel instead of using an older
+# system binary, which can corrupt the packaged Master executable.
+python -m pip install build setuptools wheel "auditwheel==6.7.0" "patchelf>=0.18.0"
+export PATH="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"
+hash -r
+patchelf --version
 
 # Create directory for repaired wheels
 REPAIRED_DIR="repaired_wheels_${PYTHON_VERSION}"
 mkdir -p ${REPAIRED_DIR}
 
-# Detect architecture and glibc version for platform tag
-ARCH=$(uname -m)
+# Let auditwheel select a supported policy from the actual wheel ABI.
+# Host glibc versions such as 2.32 do not always have a named policy.
+PLATFORM_TAG=${PLATFORM_TAG:-auto}
 
-# Detect glibc version and convert to manylinux format (e.g., "2.39" -> "2_39")
-# Requires getconf (checked in dependencies.sh) or ldd as fallback
-detect_glibc_version() {
-    local ver=""
-
-    # Method 1: use getconf (POSIX standard, most reliable)
-    # getconf is checked in dependencies.sh, so it should be available
-    ver=$(getconf GNU_LIBC_VERSION 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' || true)
-    if [ -n "$ver" ]; then
-        echo "$ver" | sed 's/\./_/'
-        return
-    fi
-
-    # Method 2: use ldd --version (fallback, should also be available)
-    ver=$(ldd --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    if [ -n "$ver" ]; then
-        echo "$ver" | sed 's/\./_/'
-        return
-    fi
-
-    # Final fallback: conservative baseline (should not reach here if dependencies are met)
-    echo "2_17"
-}
-
-GLIBC_VERSION=$(detect_glibc_version)
-if [ -z "$GLIBC_VERSION" ]; then
-    GLIBC_VERSION="2_17"  # Conservative fallback
-    echo "Warning: Could not detect glibc version, using fallback: $GLIBC_VERSION"
-fi
-
-# Determine architecture (simplified)
-case "$ARCH" in
-    aarch64|arm64)
-        ARCH_SUFFIX="aarch64"
-        ;;
-    x86_64)
-        ARCH_SUFFIX="x86_64"
-        ;;
-    *)
-        echo "Error: Unknown or unsupported architecture $ARCH. Failing the build."
-        exit 1
-        ;;
-esac
-
-# Set platform tag if not already set
-PLATFORM_TAG=${PLATFORM_TAG:-"manylinux_${GLIBC_VERSION}_${ARCH_SUFFIX}"}
-
-echo "Detected architecture: $ARCH_SUFFIX"
-echo "Detected glibc version: $GLIBC_VERSION"
 echo "Using platform tag: $PLATFORM_TAG"
 
 if [ "$PYTHON_VERSION" = "3.8" ]; then
