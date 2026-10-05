@@ -102,9 +102,6 @@ ErrorCode ScopedSegmentAccess::MountSegment(const Segment& segment,
         return ErrorCode::INVALID_PARAMS;
     }
 
-    // TODO(C4.2 / allocator accounting; see p2p-split-plan-v3.md): Restore
-    // A00 centralized allocator/accounting and remove this observer wiring
-    // after C4.1 isolates P2P allocation from centralized master metrics.
     allocator->set_usage_observers(
         [name = segment.name](int64_t bytes) {
             MasterMetricManager::instance().inc_allocated_mem_size(name, bytes);
@@ -328,8 +325,6 @@ void SegmentManager::initializeCxlAllocator(const std::string& cxl_path,
 
     cxl_global_allocator_ = std::make_shared<CachelibBufferAllocator>(
         cxl_path, DEFAULT_CXL_BASE, cxl_size, cxl_path);
-    // TODO(C4.2 / CXL allocator accounting; see p2p-split-plan-v3.md): Remove
-    // alongside ordinary segment observer wiring when restoring A00 accounting.
     cxl_global_allocator_->set_usage_observers(
         [name = cxl_path](int64_t bytes) {
             MasterMetricManager::instance().inc_allocated_mem_size(name, bytes);

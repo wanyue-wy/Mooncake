@@ -92,11 +92,9 @@ inline std::ostream& operator<<(std::ostream& os,
     return os;
 }
 
-// TODO(C3.3 / shared storage metadata; see p2p-split-plan-v3.md):
-// This shared storage DTO still lives with centralized policy types. Move it
-// to the storage contract and update its consumers without changing fields or
-// reflection order. Remove this TODO when storage no longer needs this header
-// for StorageObjectMetadata.
+// TODO(P2P-008): Move StorageObjectMetadata to the shared storage contract
+// without changing fields or reflection order. Remove this marker when storage
+// consumers no longer include centralized policy types for this DTO.
 struct StorageObjectMetadata {
     int64_t bucket_id;
     int64_t offset;

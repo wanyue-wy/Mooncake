@@ -144,7 +144,8 @@ if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
     list(APPEND MOONCAKE_STORE_SOURCES
         ${MOONCAKE_STORE_P2P_SOURCES}
         p2p/client/p2p_real_client.cpp
-        # Existing shared descriptors/allocators; C4/D1 audit their semantics.
+        # TODO(P2P-008): Remove centralized business dependencies after isolating
+        # shared descriptors and allocator accounting; retain neutral facilities.
         replica.cpp
         allocator.cpp
         offset_allocator.cpp
@@ -162,8 +163,9 @@ else()
     )
 endif()
 
-# TODO(D1/I2): audit linked artifacts and the remaining shared descriptor /
-# allocator dependencies; source selection alone does not prove isolation.
+# TODO(P2P-009): Verify UT=OFF static/shared and installed artifacts exclude
+# tests-only clients. Remove this marker once object/link evidence covers both
+# architectures; source selection alone does not prove production isolation.
 # The cache_allocator library
 include_directories(${Python3_INCLUDE_DIRS})
 add_library(mooncake_store ${MOONCAKE_STORE_SOURCES})

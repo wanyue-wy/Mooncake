@@ -148,7 +148,7 @@ TEST_F(ClientHttpMetricsTest, ConfigWithLabels) {
 
 // Test HTTP server endpoints directly
 // Serializer fixtures construct metrics directly; factory policy is covered
-// separately below. Runtime handler ownership is covered in C3.1.
+// separately below. Runtime metrics handlers belong to P2PClientService.
 TEST_F(ClientHttpMetricsTest, HttpEndpointsTest) {
     // Create a simple HTTP server that mimics the metrics server behavior
     const uint16_t test_port =
@@ -170,7 +170,7 @@ TEST_F(ClientHttpMetricsTest, HttpEndpointsTest) {
 
     using namespace coro_http;
 
-    // Register handlers similar to ClientService
+    // Register handlers similar to P2PClientService
     server.set_http_handler<GET>("/metrics", [&metrics](
                                                  coro_http_request& req,
                                                  coro_http_response& resp) {
