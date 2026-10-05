@@ -111,11 +111,9 @@ std::vector<Slice> split_into_slices(BufferHandle& handle);
  * @param replica The replica descriptor to calculate size for
  * @return Total size in bytes
  */
-// TODO(C4.1/C4.3 / buffer replica boundary; see p2p-split-plan-v3.md):
-// These two helpers expose centralized Replica::Descriptor through the shared
-// buffer header. Move replica adaptation to its native owner and update
-// callers. Remove this TODO and the replica include once shared buffer/Slice
-// operations no longer depend on centralized descriptors.
+// TODO(P2P-008): Move these Replica::Descriptor helpers and their callers to
+// the centralized owner. Remove this marker and the replica include when
+// shared buffer/Slice operations no longer expose business descriptors.
 uint64_t calculate_total_size(const Replica::Descriptor& replica);
 
 /**

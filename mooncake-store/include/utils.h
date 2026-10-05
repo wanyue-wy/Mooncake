@@ -31,10 +31,9 @@ namespace mooncake {
 
 // Merge process-start cluster labels with caller-provided metric labels.
 // A configured cluster_id takes precedence over a caller-provided value.
-// TODO(D1 / P2P dependency audit; see p2p-split-plan-v3.md):
-// Audit P2P consumers of this header and utils.cpp at the include, object and
-// link-target levels after Client and before I1. Include the P2P metric helper
-// used after C1's strict baseline restoration; preserve label behavior.
+// TODO(P2P-008): Audit P2P consumers of this header, utils.cpp and metric
+// helpers at include, object and link-target levels while preserving labels.
+// Remove this marker when production dependencies contain only neutral helpers.
 std::map<std::string, std::string> merge_labels(
     const std::map<std::string, std::string>& labels);
 

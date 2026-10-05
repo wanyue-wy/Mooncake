@@ -214,9 +214,9 @@ tl::expected<void, ErrorCode> DramCacheTier::RegisterWithEngine(
     return {};
 }
 
-// TODO(C4.3 / tier allocator; see p2p-split-plan-v3.md): Use the independent
-// P2P allocator from C4.1 without centralized metric side effects. Preserve
-// tier behavior; centralized allocator/accounting restoration belongs to C4.2.
+// TODO(P2P-008): Verify shared allocators used by this tier do not update
+// centralized metrics. Remove this marker when tier accounting isolation is
+// proven; the neutral allocator can remain shared.
 tl::expected<std::shared_ptr<BufferAllocatorBase>, ErrorCode>
 DramCacheTier::CreateAllocator() {
     const uintptr_t base_address =

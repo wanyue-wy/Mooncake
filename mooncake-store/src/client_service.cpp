@@ -1774,8 +1774,6 @@ tl::expected<Replica::Descriptor, ErrorCode> Client::GetPreferredReplica(
     return replica_list[0];
 }
 
-// Storage ownership and convenience operations retained from d897.
-// Entry configuration conversion belongs to ClientBackend.
 void Client::SegmentDeleter::operator()(void* ptr) const {
     if (ptr) free(ptr);
 }

@@ -607,15 +607,8 @@ void DataManagerV1::LeaseScannerMain() {
 // Put
 // ================================================================
 
-// TODO: wanyue-wy
-// Currently, for performance optimization,
-// we only take the shared key lock during the allocation and commit phases.
-// This leads to a concurrent race issue. If multiple threads write to the same
-// key simultaneously, each thread will be allocated storage and computing
-// resources, but ultimately only one thread will succeed in writing, resulting
-// in a waste of resources.
-// In future, we will add a pre-occupation mechanism in the Allocation stage
-// to optimize this issue.
+// Both Put paths reserve a pending-write slot before allocation via
+// PreWriteInternal; an active write lease rejects competing writes on that key.
 tl::expected<std::unique_ptr<TaskHandle<void>>, ErrorCode> DataManagerV1::Put(
     std::string_view key, std::vector<Slice>& slices) {
     switch (local_transfer_config_.mode) {
@@ -1372,8 +1365,8 @@ DataManagerV1::PinKeyInternal(const KeyCtx& ctx, std::optional<UUID> tier_id) {
     // Active pin: bump ref_count / renew lease; no tiered_backend::Get.
     const auto bump_existing_pin =
         [&](auto it) -> tl::expected<PinKeyResult, ErrorCode> {
+        // TODO:
         // PinKey forward path: DRAM-only for now; non-DRAM replica handling
-        // TODO.
         if (it->second.handle->loc.data.type != MemoryType::DRAM) {
             LOG(ERROR) << "PinKey: DRAM-only forward path, non-DRAM replica"
                        << ", key=" << ctx.key << ", error="

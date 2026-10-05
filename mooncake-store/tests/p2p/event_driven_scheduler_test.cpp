@@ -229,7 +229,7 @@ TEST_F(EventDrivenSchedulerTest, EvictReclaimsFastTierAboveWatermark) {
 
 TEST_F(EventDrivenSchedulerTest,
        NonFastTierAllocationFailureDoesNotForceReclaim) {
-    // D2-B: the event-driven scheduler force-reclaims ONLY the fast tier. A
+    // The event-driven scheduler force-reclaims ONLY the fast tier. A
     // strict allocation on a full SLOW tier must fail without evicting any of
     // its residents (slow tiers own their eviction inside their own Allocate).
     TieredBackend backend;

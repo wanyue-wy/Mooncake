@@ -624,10 +624,6 @@ int64_t DummyClient::getSize(const std::string& key) {
 }
 
 // Read entrypoints share the selected ReadConfig type and forward it intact.
-// TODO(C2.3/I1 / Dummy read applicability; see p2p-split-plan-v3.md):
-// BufferHandle and direct single/multi-buffer reads retain their existing
-// unsupported returns. Verify Python dispatch and document that applicability;
-// remove this TODO once the shared-memory API coverage is reviewed.
 std::shared_ptr<BufferHandle> DummyClient::get_buffer(
     const std::string& key, const std::optional<ReadConfig>& config) {
     // Dummy client does not use BufferHandle, so we return nullptr

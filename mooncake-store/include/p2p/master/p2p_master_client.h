@@ -143,11 +143,7 @@ class P2PMasterClient final {
     BatchSyncRoutes(const P2PBatchSyncRoutesRequest& req);
 
    private:
-    // TODO: Re-evaluate extracting the pool access, invoke, batch-failure
-    // and RPC-metric plumbing into a stateless shared transport helper after
-    // the architecture-specific protocols stabilize. Keep this implementation
-    // local for now so centralized MasterClient remains identical to the A00
-    // baseline.
+    // Pool access, invocation and RPC metrics stay with the P2P protocol owner.
     template <auto ServiceMethod, typename ReturnType, typename... Args>
     [[nodiscard]] async_simple::coro::Lazy<tl::expected<ReturnType, ErrorCode>>
     invoke_rpc_async(Args&&... args) {
