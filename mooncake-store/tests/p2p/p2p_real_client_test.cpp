@@ -203,7 +203,8 @@ class P2PRealClientTest : public ::testing::Test {
 TEST_F(P2PRealClientTest, InvalidShmRegistrationClosesFdAndLeavesNoContext) {
     ASSERT_TRUE(master_.Start());
     auto client = RealClient::create();
-    ASSERT_EQ(client->setup(DeploymentConfig()), 0);
+    auto config = DeploymentConfig();
+    ASSERT_EQ(client->setup(config), 0);
     std::unique_ptr<std::FILE, decltype(&std::fclose)> file(std::tmpfile(),
                                                          std::fclose);
     ASSERT_NE(file, nullptr);
