@@ -1103,6 +1103,16 @@ RealClient::batch_put_from_dummy_helper(
         return std::vector<tl::expected<void, ErrorCode>>(
             keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
     }
+    if (keys.size() != dummy_buffers.size() || keys.size() != sizes.size()) {
+        LOG(ERROR) << "Input vector sizes mismatch: keys=" << keys.size()
+                   << ", buffers=" << dummy_buffers.size()
+                   << ", sizes=" << sizes.size();
+        return std::vector<tl::expected<void, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::INVALID_PARAMS));
+    }
+    if (keys.empty()) {
+        return {};
+    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
@@ -1301,6 +1311,16 @@ RealClient::batch_get_into_dummy_helper(
                    << ErrorCode::SHUTTING_DOWN;
         return std::vector<tl::expected<int64_t, ErrorCode>>(
             keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
+    if (keys.size() != dummy_buffers.size() || keys.size() != sizes.size()) {
+        LOG(ERROR) << "Input vector sizes mismatch: keys=" << keys.size()
+                   << ", buffers=" << dummy_buffers.size()
+                   << ", sizes=" << sizes.size();
+        return std::vector<tl::expected<int64_t, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::INVALID_PARAMS));
+    }
+    if (keys.empty()) {
+        return {};
     }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
