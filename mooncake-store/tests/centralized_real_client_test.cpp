@@ -55,7 +55,7 @@ class RealClientTest : public ::testing::Test {
     CentralizedClientConfig DeploymentConfig() {
         return CentralizedClientConfigBuilder::build_centralized_real_client(
             "127.0.0.1:0", "P2PHANDSHAKE", "tcp", std::nullopt,
-            master_.master_address(), 4 * 1024 * 1024, 4 * 1024 * 1024);
+            master_.master_address(), 16 * 1024 * 1024, 4 * 1024 * 1024);
     }
     static void SetUpTestSuite() {
         google::InitGoogleLogging("RealClientTest");
@@ -94,7 +94,8 @@ class RealClientTest : public ::testing::Test {
 TEST_F(RealClientTest, InvalidShmRegistrationClosesFdAndLeavesNoContext) {
     ASSERT_TRUE(master_.Start(InProcMasterConfigBuilder().build()));
     auto client = RealClient::create();
-    ASSERT_EQ(client->setup(DeploymentConfig()), 0);
+    auto config = DeploymentConfig();
+    ASSERT_EQ(client->setup(config), 0);
     std::unique_ptr<std::FILE, decltype(&std::fclose)> file(std::tmpfile(),
                                                          std::fclose);
     ASSERT_NE(file, nullptr);

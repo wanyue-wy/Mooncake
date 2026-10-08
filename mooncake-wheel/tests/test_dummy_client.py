@@ -404,13 +404,13 @@ class TestDummyClientRealRestart(unittest.TestCase):
         self.assertNotEqual(buffer, 0)
         self.assertEqual(store.register_buffer(buffer, 4096), 0)
         ctypes.memmove(buffer, value, len(value))
-        self.assertEqual(store.put_from(f"before_restart_{port}", buffer,
-                                        len(value)), 0)
+        self.assertEqual(store.batch_put_from([f"before_restart_{port}"],
+                                              [buffer], [len(value)]), [0])
 
         process.kill()
         process.wait(timeout=5)
-        self.assertLess(store.put_from(f"while_real_is_down_{port}", buffer,
-                                       len(value)), 0)
+        self.assertLess(store.batch_put_from([f"while_real_is_down_{port}"],
+                                             [buffer], [len(value)])[0], 0)
         self.assertEqual(ctypes.string_at(buffer, len(value)), value)
         # Let the heartbeat enter its reconnection loop while Real is down.
         time.sleep(4)
@@ -419,7 +419,7 @@ class TestDummyClientRealRestart(unittest.TestCase):
         key = f"after_restart_{port}"
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
-            if store.put_from(key, buffer, len(value)) == 0:
+            if store.batch_put_from([key], [buffer], [len(value)]) == [0]:
                 self.assertEqual(store.get(key), value)
                 return
             time.sleep(0.2)
