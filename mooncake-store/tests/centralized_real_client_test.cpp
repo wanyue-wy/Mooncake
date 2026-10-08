@@ -2,12 +2,16 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include <cstdio>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <memory>
 #include <string>
 #include <random>
 #include <barrier>
 
 #include "centralized_client_config_builder.h"
+#include "config.h"
 #include "real_client.h"
 #include "test_server_helpers.h"
 
@@ -16,6 +20,22 @@ DEFINE_string(device_name, "", "Device name to use, valid if protocol=rdma");
 
 namespace mooncake {
 namespace testing {
+
+namespace {
+
+class ScopedMaxMrSize {
+   public:
+    explicit ScopedMaxMrSize(size_t value)
+        : original_(globalConfig().max_mr_size) {
+        globalConfig().max_mr_size = value;
+    }
+    ~ScopedMaxMrSize() { globalConfig().max_mr_size = original_; }
+
+   private:
+    size_t original_;
+};
+
+}  // namespace
 
 // Helper class to temporarily mute glog output by setting log level to FATAL
 class GLogMuter {
@@ -32,6 +52,11 @@ class GLogMuter {
 
 class RealClientTest : public ::testing::Test {
    protected:
+    CentralizedClientConfig DeploymentConfig() {
+        return CentralizedClientConfigBuilder::build_centralized_real_client(
+            "127.0.0.1:0", "P2PHANDSHAKE", "tcp", std::nullopt,
+            master_.master_address(), 4 * 1024 * 1024, 4 * 1024 * 1024);
+    }
     static void SetUpTestSuite() {
         google::InitGoogleLogging("RealClientTest");
         FLAGS_logtostderr = 1;
@@ -65,6 +90,51 @@ class RealClientTest : public ::testing::Test {
     mooncake::testing::InProcMaster master_;
     std::string master_address_;
 };
+
+TEST_F(RealClientTest, InvalidShmRegistrationClosesFdAndLeavesNoContext) {
+    ASSERT_TRUE(master_.Start(InProcMasterConfigBuilder().build()));
+    auto client = RealClient::create();
+    ASSERT_EQ(client->setup(DeploymentConfig()), 0);
+    std::unique_ptr<std::FILE, decltype(&std::fclose)> file(std::tmpfile(),
+                                                         std::fclose);
+    ASSERT_NE(file, nullptr);
+    const int fd = fileno(file.get());
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(ftruncate(fd, 4096), 0);
+    struct stat original{};
+    ASSERT_EQ(fstat(fd, &original), 0);
+    const int passed_fd = dup(fd);
+    ASSERT_GE(passed_fd, 0);
+    {
+        ScopedMaxMrSize limit(1);
+        auto result =
+            client->map_shm_internal(passed_fd, 0x100000, 4096, false, {1, 2});
+        EXPECT_FALSE(result);
+    }
+    struct stat after{};
+    const bool duplicate_still_open = fstat(passed_fd, &after) == 0 &&
+                                      after.st_dev == original.st_dev &&
+                                      after.st_ino == original.st_ino;
+    EXPECT_FALSE(duplicate_still_open);
+    if (duplicate_still_open) close(passed_fd);
+    EXPECT_EQ(client->find_shm_context({1, 2}), nullptr);
+    EXPECT_EQ(client->tearDownAll(), 0);
+}
+
+TEST_F(RealClientTest, FailedLocalPoolRegistrationRejectsSetup) {
+    ASSERT_TRUE(master_.Start(InProcMasterConfigBuilder().build()));
+    auto config = DeploymentConfig();
+    auto client = RealClient::create();
+    {
+        ScopedMaxMrSize limit(1);
+        EXPECT_NE(client->setup(config), 0);
+        EXPECT_FALSE(client->is_initialized());
+    }
+    EXPECT_EQ(client->tearDownAll(), 0);
+    client = RealClient::create();
+    ASSERT_EQ(client->setup(config), 0);
+    EXPECT_EQ(client->tearDownAll(), 0);
+}
 
 // Test basic Put and Get operations
 TEST_F(RealClientTest, BasicPutGetOperations) {

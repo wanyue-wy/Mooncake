@@ -460,6 +460,10 @@ ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
     InitLocalBufferAllocator(pool_size, config.protocol,
                              std::getenv("MC_STORE_USE_HUGEPAGE") != nullptr &&
                                  config.protocol != "ascend");
+    if (!resources_.GetBufferAllocator()) {
+        LOG(ERROR) << "Failed to allocate/register the P2P local buffer";
+        return ErrorCode::INVALID_PARAMS;
+    }
 
     // 4. Construct metadata components; activation belongs to cluster join.
     if (config.async_sender_thread_count > 0) {

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <exception>
 #include <vector>
 
 #include "centralized_client_config_builder.h"
@@ -367,8 +368,7 @@ tl::expected<void, ErrorCode> RealClient::put_dummy_helper(
 
 int RealClient::put(const std::string& key, std::span<const char> value,
                     const std::optional<WriteConfig>& config) {
-    return to_py_ret(put_internal(key, value, config,
-                                  GetBufferAllocator()));
+    return to_py_ret(put_internal(key, value, config, GetBufferAllocator()));
 }
 
 tl::expected<void, ErrorCode> RealClient::put_batch_internal(
@@ -465,8 +465,8 @@ tl::expected<void, ErrorCode> RealClient::put_batch_dummy_helper(
 int RealClient::put_batch(const std::vector<std::string>& keys,
                           const std::vector<std::span<const char>>& values,
                           const std::optional<WriteConfig>& config) {
-    return to_py_ret(put_batch_internal(keys, values, config,
-                                        GetBufferAllocator()));
+    return to_py_ret(
+        put_batch_internal(keys, values, config, GetBufferAllocator()));
 }
 
 tl::expected<void, ErrorCode> RealClient::put_parts_internal(
@@ -562,8 +562,7 @@ int RealClient::put_parts(const std::string& key,
                           const std::optional<WriteConfig>& config,
                           WriteOperation operation) {
     return to_py_ret(put_parts_internal(key, values, config,
-                                        GetBufferAllocator(),
-                                        operation));
+                                        GetBufferAllocator(), operation));
 }
 
 tl::expected<void, ErrorCode> RealClient::remove_internal(
@@ -761,28 +760,34 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
     shm.shm_size_ = shm_size;
     shm.dummy_base_addr_ = static_cast<uintptr_t>(dummy_base_addr);
     shm.shm_addr_offset_ = reinterpret_cast<uintptr_t>(shm_buffer) -
-                          reinterpret_cast<uintptr_t>(dummy_base_addr);
-
-    if (shm_size > 0) {
-        auto result = client_service_->RegisterLocalMemory(
-            shm.shm_buffer_, shm_size, kWildcardLocation, false, true);
-        if (!result.has_value()) {
-            LOG(ERROR) << "Failed to register memory";
-            munmap(shm_buffer, shm_size);
-            return tl::unexpected(result.error());
-        }
-    }
+                           reinterpret_cast<uintptr_t>(dummy_base_addr);
 
     // Build the (potentially expensive) allocator BEFORE taking the global
     // lock.
     std::shared_ptr<ClientBufferAllocator> new_allocator;
     if (is_local_buffer) {
-        new_allocator =
-            ClientBufferAllocator::create(shm_buffer, shm_size, this->protocol_);
-        if (!new_allocator) {
-            LOG(ERROR) << "Failed to create allocator";
-            return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
+        try {
+            new_allocator = ClientBufferAllocator::create(shm_buffer, shm_size,
+                                                          this->protocol_);
+        } catch (const std::exception& e) {
+            LOG(ERROR) << "Failed to create SHM allocator: " << e.what();
+            if (munmap(shm_buffer, shm_size) != 0) {
+                LOG(ERROR) << "Failed to unmap SHM after allocation failure: "
+                           << strerror(errno);
+            }
+            return tl::unexpected(ErrorCode::INTERNAL_ERROR);
         }
+    }
+
+    auto registration = client_service_->RegisterLocalMemory(
+        shm_buffer, shm_size, kWildcardLocation, false, true);
+    if (!registration) {
+        LOG(ERROR) << "Failed to register SHM: " << registration.error();
+        if (munmap(shm_buffer, shm_size) != 0) {
+            LOG(ERROR) << "Failed to unmap SHM after registration failure: "
+                       << strerror(errno);
+        }
+        return tl::unexpected(registration.error());
     }
 
     {
@@ -803,7 +808,10 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
                 if (shm_size > 0) {
                     client_service_->unregisterLocalMemory(shm_buffer, true);
                 }
-                munmap(shm_buffer, shm_size);
+                if (munmap(shm_buffer, shm_size) != 0) {
+                    LOG(ERROR) << "Failed to unmap duplicate local SHM: "
+                               << strerror(errno);
+                }
                 return tl::make_unexpected(ErrorCode::OBJECT_ALREADY_EXISTS);
             }
             context.client_buffer_allocator_ = std::move(new_allocator);
@@ -894,7 +902,8 @@ tl::expected<void, ErrorCode> RealClient::unregister_shm_buffer_internal(
         return {};
     }
     ShmContext& context = *context_ptr;
-    SharedMutexLocker lock(&context.mutex_);  // exclusive: modifies mapped_shms_
+    SharedMutexLocker lock(
+        &context.mutex_);  // exclusive: modifies mapped_shms_
 
     // Find the shm corresponding to this dummy address
     auto shm_it = context.mapped_shms_.end();
@@ -914,7 +923,12 @@ tl::expected<void, ErrorCode> RealClient::unregister_shm_buffer_internal(
         return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
     }
 
+    if (context.client_buffer_allocator_ &&
+        context.client_buffer_allocator_->getBase() == shm_it->shm_buffer_) {
+        context.client_buffer_allocator_.reset();
+    }
     // Unmap and clean up the shm
+    tl::expected<void, ErrorCode> cleanup_result;
     if (shm_it->shm_buffer_) {
         // Unregister from transfer engine if it was registered
         if (shm_it->shm_size_ > 0) {
@@ -924,13 +938,16 @@ tl::expected<void, ErrorCode> RealClient::unregister_shm_buffer_internal(
             if (!res) {
                 LOG(WARNING)
                     << "Failed to unregister local memory for shared memory: "
-                    << shm_it->shm_name_ << ", error: " << toString(res.error());
+                    << shm_it->shm_name_
+                    << ", error: " << toString(res.error());
+                cleanup_result = res;
             }
         }
 
         if (munmap(shm_it->shm_buffer_, shm_it->shm_size_) != 0) {
-            LOG(ERROR) << "Failed to munmap shared memory: " << shm_it->shm_name_
-                       << ", error: " << strerror(errno);
+            LOG(ERROR) << "Failed to munmap shared memory: "
+                       << shm_it->shm_name_ << ", error: " << strerror(errno);
+            cleanup_result = tl::unexpected(ErrorCode::INTERNAL_ERROR);
         } else {
             LOG(INFO) << "Unmapped and cleaned up shared memory: "
                       << shm_it->shm_name_ << ", client_id=" << client_id
@@ -944,19 +961,17 @@ tl::expected<void, ErrorCode> RealClient::unregister_shm_buffer_internal(
     // Remove shm from list
     context.mapped_shms_.erase(shm_it);
 
-    return {};
+    return cleanup_result;
 }
 
 std::shared_ptr<BufferHandle> RealClient::get_buffer(
     const std::string& key, const std::optional<ReadConfig>& config) {
-    return get_buffer_internal(key, GetBufferAllocator(),
-                               config);
+    return get_buffer_internal(key, GetBufferAllocator(), config);
 }
 
 std::tuple<uint64_t, size_t> RealClient::get_buffer_info(
     const std::string& key, const std::optional<ReadConfig>& config) {
-    auto buffer_handle =
-        get_buffer_internal(key, GetBufferAllocator(), config);
+    auto buffer_handle = get_buffer_internal(key, GetBufferAllocator(), config);
     if (!buffer_handle) {
         LOG(ERROR) << "Failed to get buffer for key: " << key;
         return std::make_tuple(0, 0);
@@ -1061,8 +1076,7 @@ int64_t RealClient::get_into(const std::string& key, void* buffer, size_t size,
 
 std::vector<int> RealClient::batch_put_from(
     const std::vector<std::string>& keys, const std::vector<void*>& buffers,
-    const std::vector<size_t>& sizes,
-    const std::optional<WriteConfig>& config,
+    const std::vector<size_t>& sizes, const std::optional<WriteConfig>& config,
     WriteOperation operation) {
     auto internal_results =
         batch_put_from_internal(keys, buffers, sizes, config, operation);
@@ -1081,8 +1095,7 @@ RealClient::batch_put_from_dummy_helper(
     const std::vector<std::string>& keys,
     const std::vector<uint64_t>& dummy_buffers,
     const std::vector<size_t>& sizes, const std::optional<WriteConfig>& config,
-    const UUID& client_id,
-    WriteOperation operation) {
+    const UUID& client_id, WriteOperation operation) {
     std::shared_lock inflight_guard(inflight_lock_);
     if (state_ == State::CLOSING || state_ == State::CLOSED) {
         LOG(ERROR) << "batch_put_from_dummy_helper failed, error="
@@ -1143,8 +1156,7 @@ RealClient::batch_put_from_dummy_helper(
 
 std::vector<tl::expected<void, ErrorCode>> RealClient::batch_put_from_internal(
     const std::vector<std::string>& keys, const std::vector<void*>& buffers,
-    const std::vector<size_t>& sizes,
-    const std::optional<WriteConfig>& config,
+    const std::vector<size_t>& sizes, const std::optional<WriteConfig>& config,
     WriteOperation operation) {
     auto operation_result = ValidateWriteOperation(operation, config);
     if (!operation_result) {
@@ -1513,8 +1525,7 @@ tl::expected<DummyHeartbeatResponse, ErrorCode> RealClient::ping(
     const UUID& client_id) {
     std::shared_lock inflight_guard(inflight_lock_);
     if (state_ == State::CLOSING || state_ == State::CLOSED) {
-        LOG(ERROR) << "ping failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
+        LOG(ERROR) << "ping failed, error=" << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
     }
     DummyHeartbeatResponse resp;
@@ -1590,11 +1601,13 @@ void RealClient::dummy_client_monitor_func() {
 int RealClient::start_dummy_client_monitor() {
     // Start client monitor thread in all modes so TTL/heartbeat works
     dummy_client_monitor_running_ = true;
-    dummy_client_monitor_thread_ =
-        std::thread(&RealClient::dummy_client_monitor_func, this);
-    if (!dummy_client_monitor_thread_.joinable()) {
-        LOG(ERROR) << "Failed to start dummy_client_monitor_thread";
-        return -1;
+    try {
+        dummy_client_monitor_thread_ =
+            std::thread(&RealClient::dummy_client_monitor_func, this);
+    } catch (const std::exception& e) {
+        dummy_client_monitor_running_ = false;
+        LOG(ERROR) << "Failed to start Dummy monitor: " << e.what();
+        throw;
     }
     LOG(INFO) << "start dummy_client_monitor_thread";
     return 0;
@@ -1655,7 +1668,8 @@ static int recv_fd(int socket, void* data, size_t data_len) {
     msg.msg_control = buf;
     msg.msg_controllen = sizeof(buf);
 
-    if (recvmsg(socket, &msg, 0) < 0) {
+    ssize_t received = recvmsg(socket, &msg, MSG_WAITALL);
+    if (received < 0) {
         LOG(ERROR) << "Failed to receive IPC registration: " << strerror(errno);
         return -1;
     }
@@ -1665,6 +1679,12 @@ static int recv_fd(int socket, void* data, size_t data_len) {
         cmsg->cmsg_type == SCM_RIGHTS) {
         int fd;
         memcpy(&fd, CMSG_DATA(cmsg), sizeof(int));
+        if (received != static_cast<ssize_t>(data_len)) {
+            LOG(ERROR) << "Incomplete IPC registration: " << received << "/"
+                       << data_len;
+            close(fd);
+            return -1;
+        }
         return fd;
     }
     LOG(ERROR) << "IPC registration is missing an SCM_RIGHTS descriptor";
@@ -1714,7 +1734,7 @@ void RealClient::ipc_server_func() {
             break;
         }
 
-        ShmRegisterRequest req;
+        ShmRegisterRequest req{};
         int fd = recv_fd(client_sock, &req, sizeof(req));
 
         int status = 0;
@@ -1732,7 +1752,8 @@ void RealClient::ipc_server_func() {
         }
 
         // Send response
-        if (send(client_sock, &status, sizeof(status), MSG_NOSIGNAL) < 0) {
+        if (send(client_sock, &status, sizeof(status), MSG_NOSIGNAL) !=
+            static_cast<ssize_t>(sizeof(status))) {
             LOG(ERROR) << "Failed to send response to client";
         }
         close(client_sock);

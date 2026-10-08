@@ -3,6 +3,10 @@ import os
 import time
 import threading
 import random
+import ctypes
+import shlex
+import socket
+import subprocess
 from mooncake.store import MooncakeDistributedStore
 
 # The lease time of the kv object, should be set equal to
@@ -341,6 +345,86 @@ class TestDistributedObjectStoreSingleStore(unittest.TestCase):
         config_str = str(config)
         self.assertIsInstance(config_str, str)
         self.assertIn("3", config_str)  # Should contain replica_num
+
+@unittest.skipUnless(os.getenv("MOONCAKE_REAL_CLIENT_COMMAND"),
+                     "Set MOONCAKE_REAL_CLIENT_COMMAND to run the restart test")
+class TestDummyClientRealRestart(unittest.TestCase):
+    """Run this class alone with a live master and the matching client binary.
+
+    MOONCAKE_REAL_CLIENT_COMMAND includes the daemon path, master address and
+    storage flags. Selecting this class keeps one Dummy in the test process.
+    """
+
+    def test_dummy_survives_real_crash_and_reconnects(self):
+        with socket.socket() as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            port = reservation.getsockname()[1]
+        command = shlex.split(os.environ["MOONCAKE_REAL_CLIENT_COMMAND"])
+        command += [f"--port={port}", "--host=127.0.0.1",
+                    "--metadata_server=P2PHANDSHAKE", "--protocol=tcp",
+                    "--client_rpc_port=0"]
+        address = ("127.0.0.1", port)
+        process = None
+
+        def stop_real():
+            if process is not None and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+
+        self.addCleanup(stop_real)
+
+        def start_real():
+            nonlocal process
+            process = subprocess.Popen(command)
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                self.assertIsNone(process.poll(), "RealClient exited during startup")
+                try:
+                    with socket.create_connection(address, timeout=0.2):
+                        pass
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as ipc:
+                        ipc.settimeout(0.2)
+                        ipc.connect(f"\0@mooncake_client_{port}.sock")
+                    return
+                except OSError:
+                    time.sleep(0.1)
+            self.fail("RealClient did not start before the deadline")
+
+        start_real()
+        store = MooncakeDistributedStore()
+        self.addCleanup(store.close)
+        self.assertEqual(store.setup_dummy(4 << 20, 4 << 20,
+                                           f"127.0.0.1:{port}"), 0)
+        value = b"Dummy SHM survives a RealClient crash"
+        buffer = store.alloc_from_mem_pool(4096)
+        self.assertNotEqual(buffer, 0)
+        self.assertEqual(store.register_buffer(buffer, 4096), 0)
+        ctypes.memmove(buffer, value, len(value))
+        self.assertEqual(store.put_from(f"before_restart_{port}", buffer,
+                                        len(value)), 0)
+
+        process.kill()
+        process.wait(timeout=5)
+        self.assertLess(store.put_from(f"while_real_is_down_{port}", buffer,
+                                       len(value)), 0)
+        self.assertEqual(ctypes.string_at(buffer, len(value)), value)
+        # Let the heartbeat enter its reconnection loop while Real is down.
+        time.sleep(4)
+        self.assertLess(store.get_size(f"before_restart_{port}"), 0)
+        start_real()
+        key = f"after_restart_{port}"
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if store.put_from(key, buffer, len(value)) == 0:
+                self.assertEqual(store.get(key), value)
+                return
+            time.sleep(0.2)
+        self.fail("DummyClient did not reconnect before the deadline")
+
 
 if __name__ == '__main__':
     # Show which test is running; stop on first failure
