@@ -239,6 +239,8 @@ class P2PClientConfigBuilder : private ClientConfigBuilder {
         size_t local_buffer_size =
             get_config_size(config, DictCommon::kLocalBufferSize,
                             DictCommon::kDefaultLocalBufferSize);
+        std::string ipc_socket_path =
+            get_config_str(config, DictCommon::kIpcSocketPath);
         uint16_t client_rpc_port = static_cast<uint16_t>(get_config_size(
             config, DictP2P::kClientRpcPort, DictP2P::kDefaultClientRpcPort));
         uint32_t rpc_thread_num = static_cast<uint32_t>(get_config_size(
@@ -285,7 +287,7 @@ class P2PClientConfigBuilder : private ClientConfigBuilder {
         return build_p2p_real_client(
             local_hostname, metadata_server, protocol, rdma_devices,
             master_server_addr, tiered_backend_config, local_buffer_size,
-            nullptr, "", client_rpc_port, rpc_thread_num, lock_shard_count,
+            nullptr, ipc_socket_path, client_rpc_port, rpc_thread_num, lock_shard_count,
             route_cache_max_memory, route_cache_ttl_ms, local_transfer_mode,
             memcpy_async_worker_num, 9003, true, {}, async_sender_thread_count,
             async_max_batch_size, async_route_queue_size, 0, 0, "reverse",

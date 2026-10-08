@@ -103,6 +103,23 @@ TEST(ClientConfigBuilderTest, P2PLocalOnlyStartupIsExplicit) {
     EXPECT_FALSE(P2PClientConfigBuilder::build_p2p_real_client(values).start_local_only);
 }
 
+TEST(ClientConfigBuilderTest, P2PDictPreservesIpcSocketPath) {
+    std::unordered_map<std::string, std::string> values = {
+        {"local_hostname", "127.0.0.1:0"},
+        {"metadata_server", "P2PHANDSHAKE"},
+        {"tiered_backend_config", kTieredConfigJson},
+    };
+    EXPECT_TRUE(P2PClientConfigBuilder::build_p2p_real_client(values)
+                    .ipc_socket_path.empty());
+    values["ipc_socket_path"] = "custom_mooncake_ipc";
+    EXPECT_EQ(
+        P2PClientConfigBuilder::build_p2p_real_client(values).ipc_socket_path,
+        values["ipc_socket_path"]);
+    values["ipc_socket_path"] = "";
+    EXPECT_TRUE(P2PClientConfigBuilder::build_p2p_real_client(values)
+                    .ipc_socket_path.empty());
+}
+
 TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesRedisDiscoveryDefaults) {
     std::unordered_map<std::string, std::string> raw_config = {
         {"local_hostname", "127.0.0.1:12345"},

@@ -1201,8 +1201,6 @@ PYBIND11_MODULE(store, m) {
         .def(
             "setup_p2p_real_client",
             [](MooncakeStorePyWrapper& self, const py::dict& config_dict) {
-                auto real_client = self.init_real_client();
-
                 ConfigDict config;
                 for (auto item : config_dict) {
                     std::string key = py::str(item.first);
@@ -1212,6 +1210,7 @@ PYBIND11_MODULE(store, m) {
 
                 auto p2p_config =
                     P2PClientConfigBuilder::build_p2p_real_client(config);
+                auto real_client = self.init_real_client();
                 auto ret = real_client->setup(p2p_config);
                 return ret;
             },
