@@ -1,4 +1,8 @@
-# P2P client fixtures use only the selected P2P Store implementation.
+if(NOT MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    return()
+endif()
+
+# P2P fixtures use only the selected P2P Store implementation.
 function(add_p2p_store_executable name)
     add_executable(${name} ${ARGN})
     target_link_libraries(${name} PUBLIC
@@ -22,7 +26,7 @@ endfunction()
 
 function(add_p2p_master_test name)
     add_executable(${name} ${ARGN})
-    target_link_libraries(${name} PRIVATE mooncake_p2p_master_core gtest gtest_main)
+    target_link_libraries(${name} PRIVATE mooncake_master_core gtest gtest_main)
     add_test(NAME ${name} COMMAND ${name})
     set_tests_properties(${name} PROPERTIES LABELS "p2p;master;unit")
 endfunction()
@@ -42,10 +46,6 @@ add_p2p_master_test(p2p_client_manager_test p2p_client_manager_test.cpp)
 add_p2p_master_test(p2p_client_meta_test p2p_client_meta_test.cpp)
 set_tests_properties(p2p_master_rpc_test p2p_master_http_endpoints_test
     PROPERTIES LABELS "p2p;master;integration")
-
-if(NOT MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
-    return()
-endif()
 
 add_executable(stress_workload_test_p2p stress_workload_test.cpp)
 target_link_libraries(stress_workload_test_p2p PUBLIC
@@ -85,10 +85,8 @@ add_p2p_store_test(async_metadata_notifier_test async_metadata_notifier_test.cpp
 add_p2p_store_test(runtime_config_store_test runtime_config_store_test.cpp)
 add_p2p_store_test(client_metrics_aggregator_test client_metrics_aggregator_test.cpp)
 add_p2p_store_test(p2p_client_metrics_test p2p_client_metrics_test.cpp)
+add_p2p_store_test(p2p_client_config_builder_test client_config_builder_test.cpp)
 add_p2p_store_test(client_http_metrics_test client_http_metrics_test.cpp)
-# This existing comparison fixture also exercises centralized metric semantics.
-# Keep that test-only dependency out of the P2P production library.
-target_sources(client_http_metrics_test PRIVATE ../../src/client_metric.cpp)
 
 # tiered cache
 add_p2p_store_test(tiered_backend_test tiered_backend_test.cpp)
@@ -147,10 +145,10 @@ set_tests_properties(p2p_client_ha_test ha_integration_test metadata_recovery_wo
     standby_state_machine_test ha_metric_manager_test oplog_applier_test
     oplog_replicator_test p2p_oplog_test PROPERTIES LABELS "p2p;ha")
 
-# redis-dependent entries (registered only when STORE_USE_REDIS, as before)
+# Redis-dependent entries require the backend in this architecture.
+if(STORE_USE_REDIS)
 add_executable(redis_election_helper_test redis_election_helper_test.cpp)
 target_link_libraries(redis_election_helper_test PUBLIC ${MOONCAKE_STORE_LIBS} transfer_engine cachelib_memory_allocator ${ETCD_WRAPPER_LIB} glog gtest gtest_main pthread)
-if(STORE_USE_REDIS)
     add_test(NAME redis_election_helper_test COMMAND redis_election_helper_test)
     add_p2p_store_test(redis_oplog_store_test ha/oplog/redis_oplog_store_test.cpp)
     set_tests_properties(redis_election_helper_test redis_oplog_store_test

@@ -1,13 +1,13 @@
 #pragma once
 
 #include <optional>
+#include <memory>
 #include <span>
 #include <vector>
 #include <string>
 
 #include "offset_allocator/offset_allocator.hpp"
 #include "common_types.h"
-#include "replica.h"
 
 namespace mooncake {
 
@@ -105,26 +105,6 @@ class BufferHandle {
  * @return Vector of slices covering the entire buffer
  */
 std::vector<Slice> split_into_slices(BufferHandle& handle);
-
-/**
- * @brief Calculate the total size of a replica descriptor
- * @param replica The replica descriptor to calculate size for
- * @return Total size in bytes
- */
-// TODO(P2P-008): Move these Replica::Descriptor helpers and their callers to
-// the centralized owner. Remove this marker and the replica include when
-// shared buffer/Slice operations no longer expose business descriptors.
-uint64_t calculate_total_size(const Replica::Descriptor& replica);
-
-/**
- * @brief Allocate slices from a buffer handle based on replica descriptor
- * @param slices Output vector to store the allocated slices
- * @param replica The replica descriptor defining the slice structure
- * @param buffer_ptr The buffer pointer to allocate slices from
- * @return 0 on success, non-zero on error
- */
-int allocateSlices(std::vector<Slice>& slices,
-                   const Replica::Descriptor& replica, void* buffer_ptr);
 
 /**
  * @brief Build slices from user-provided buffers, trimmed to total_size.

@@ -291,49 +291,6 @@ tl::expected<void, ErrorCode> RealClient::removeLocal_internal(
     return result;
 }
 
-tl::expected<UUID, ErrorCode> RealClient::create_copy_task(
-    const std::string& key, const std::vector<std::string>& targets) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
-        LOG(ERROR) << "create_copy_task failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
-    (void)key;
-    (void)targets;
-    LOG(ERROR) << "create_copy_task is not supported by this build";
-    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
-}
-
-tl::expected<UUID, ErrorCode> RealClient::create_move_task(
-    const std::string& key, const std::string& source,
-    const std::string& target) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
-        LOG(ERROR) << "create_move_task failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
-    (void)key;
-    (void)source;
-    (void)target;
-    LOG(ERROR) << "create_move_task is not supported by this build";
-    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
-}
-
-tl::expected<QueryTaskResponse, ErrorCode> RealClient::query_task(
-    const UUID& task_id) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
-        LOG(ERROR) << "query_task failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
-    (void)task_id;
-    LOG(ERROR) << "query_task is not supported by this build";
-    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
-}
-
 tl::expected<int64_t, ErrorCode> RealClient::getSize_internal(
     const std::string& key) {
     std::shared_lock inflight_guard(inflight_lock_);

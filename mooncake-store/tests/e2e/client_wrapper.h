@@ -1,21 +1,34 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include <glog/logging.h>
+
 #include "allocator.h"
-#include "types.h"
+#include "common_types.h"
 
 namespace mooncake {
 
-class Client;
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
 class P2PClientService;
+#else
+class Client;
+#endif
 
 namespace testing {
+
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+using NativeTestClient = P2PClientService;
+#else
+using NativeTestClient = Client;
+#endif
 
 struct SegmentInfo {
     void* base;
@@ -36,9 +49,7 @@ class ClientTestWrapper {
      * @param client The client instance.
      * @param allocator Allocate slice memory for get and put operations.
      */
-    ClientTestWrapper(std::shared_ptr<Client> client,
-                      std::shared_ptr<SimpleAllocator> allocator);
-    ClientTestWrapper(std::shared_ptr<P2PClientService> client,
+    ClientTestWrapper(std::shared_ptr<NativeTestClient> client,
                       std::shared_ptr<SimpleAllocator> allocator);
     ~ClientTestWrapper();
 
@@ -71,7 +82,6 @@ class ClientTestWrapper {
                         size_t local_buffer_size = 1024 * 1024 * 128,
                         const std::string& redis_cluster_id = "",
                         bool enable_http_server = true,
-                        const std::string& deployment_mode = "Centralization",
                         const std::string& p2p_local_transfer_mode = "memcpy",
                         uint16_t p2p_client_rpc_port = 0,
                         const std::string& redis_username = "",
@@ -92,23 +102,46 @@ class ClientTestWrapper {
         std::vector<Slice> slices_;
         std::shared_ptr<SimpleAllocator> allocator_;
 
-        // Allocate memory according to the descriptors.
-        SliceGuard(const std::vector<AllocatedBuffer::Descriptor>& descriptors,
-                   std::shared_ptr<SimpleAllocator> allocator);
-
         // Allocate memory with a given size.
-        SliceGuard(size_t size, std::shared_ptr<SimpleAllocator> allocator);
+        SliceGuard(size_t size, std::shared_ptr<SimpleAllocator> allocator)
+            : allocator_(allocator) {
+            try {
+                if (size != 0) {
+                    slices_.reserve(1 + (size - 1) / kMaxSliceSize);
+                }
+                while (size != 0) {
+                    auto chunk_size = std::min(size, kMaxSliceSize);
+                    auto ptr = allocator_->allocate(chunk_size);
+                    if (!ptr) {
+                        throw std::runtime_error(
+                            "Failed to allocate memory for slice");
+                    }
+                    slices_.emplace_back(Slice{ptr, chunk_size});
+                    size -= chunk_size;
+                }
+            } catch (...) {
+                LOG(ERROR)
+                    << "Slice allocation failed; releasing partial buffers";
+                for (const auto& slice : slices_) {
+                    allocator_->deallocate(slice.ptr, slice.size);
+                }
+                throw;
+            }
+        }
 
         // Prevent copying
         SliceGuard(const SliceGuard&) = delete;
         SliceGuard& operator=(const SliceGuard&) = delete;
 
-        ~SliceGuard();
+        ~SliceGuard() {
+            for (auto& slice : slices_) {
+                allocator_->deallocate(slice.ptr, slice.size);
+            }
+        }
     };
 
-    // Exactly one native client is selected by deployment_mode.
-    std::shared_ptr<Client> client_;
-    std::shared_ptr<P2PClientService> p2p_client_;
+    // The native client type is fixed by the build architecture.
+    std::shared_ptr<NativeTestClient> client_;
     // The segments that are mounted by the client.
     std::unordered_map<uintptr_t, SegmentInfo> segments_;
     // Manage the memory allocation for get and put operations.

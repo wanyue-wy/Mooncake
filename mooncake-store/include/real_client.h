@@ -21,7 +21,6 @@
 #include "client_buffer.hpp"
 #include "mutex.h"
 #include "utils.h"
-#include "rpc_types.h"
 
 namespace mooncake {
 
@@ -306,6 +305,7 @@ class RealClient : public PyClient {
      */
     int64_t getSize(const std::string& key) override;
 
+#if !defined(MOONCAKE_STORE_CLIENT_P2P)
     /**
      * @brief Create a copy task to replicate an object's data to target
      * segments
@@ -339,6 +339,7 @@ class RealClient : public PyClient {
      */
     tl::expected<QueryTaskResponse, ErrorCode> query_task(
         const UUID& task_id) override;
+#endif
 
     // Dummy client helper functions that return tl::expected
     tl::expected<std::tuple<uint64_t, size_t>, ErrorCode>
