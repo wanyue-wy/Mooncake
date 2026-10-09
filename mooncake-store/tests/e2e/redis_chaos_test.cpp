@@ -243,7 +243,6 @@ class ClientCtlProcess {
                 "--redis_cluster_id=" + FLAGS_redis_cluster_id,
                 "--redis_username=" + FLAGS_redis_username,
                 "--redis_password=" + FLAGS_redis_password,
-                "--deployment_mode=P2P",
                 "--p2p_local_transfer_mode=memcpy",
                 "--engine_meta_url=P2PHANDSHAKE",
                 "--protocol=tcp",

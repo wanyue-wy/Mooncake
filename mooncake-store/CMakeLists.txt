@@ -25,12 +25,20 @@ include_directories(
 )
 
 set(MOONCAKE_STORE_CLIENT_ARCH "centralized" CACHE STRING
-    "Native client implementation linked into Store: centralized or p2p")
+    "Store architecture for master, client, tests and benchmarks: centralized or p2p")
 set_property(CACHE MOONCAKE_STORE_CLIENT_ARCH PROPERTY STRINGS centralized p2p)
 if(NOT MOONCAKE_STORE_CLIENT_ARCH STREQUAL "centralized" AND
    NOT MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
     message(FATAL_ERROR "Invalid MOONCAKE_STORE_CLIENT_ARCH: ${MOONCAKE_STORE_CLIENT_ARCH}")
 endif()
+
+if(DEFINED MOONCAKE_CONFIGURED_STORE_ARCH AND
+   NOT MOONCAKE_CONFIGURED_STORE_ARCH STREQUAL MOONCAKE_STORE_CLIENT_ARCH)
+    message(FATAL_ERROR
+        "Changing MOONCAKE_STORE_CLIENT_ARCH requires a new build directory")
+endif()
+set(MOONCAKE_CONFIGURED_STORE_ARCH "${MOONCAKE_STORE_CLIENT_ARCH}" CACHE INTERNAL
+    "Store architecture selected when this build directory was configured")
 
 # One deployment library, one native client, one Real implementation per build directory.
 set(MOONCAKE_STORE_LIBS mooncake_store)

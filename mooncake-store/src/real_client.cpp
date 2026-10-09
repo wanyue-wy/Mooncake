@@ -24,7 +24,6 @@
 #include "mutex.h"
 #include "types.h"
 #include "utils.h"
-#include "rpc_types.h"
 #include "default_config.h"
 
 namespace mooncake {

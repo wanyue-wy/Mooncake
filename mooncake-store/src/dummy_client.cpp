@@ -13,7 +13,6 @@
 #include "dummy_client.h"
 #include "utils.h"
 #include "utils/scoped_vlog_timer.h"
-#include "rpc_types.h"
 #include "types.h"
 #include "default_config.h"
 
@@ -768,6 +767,7 @@ std::vector<ObjectDescriptor> DummyClient::get_replica_desc(
     return replica_list;
 }
 
+#if !defined(MOONCAKE_STORE_CLIENT_P2P)
 tl::expected<UUID, ErrorCode> DummyClient::create_copy_task(
     const std::string& key, const std::vector<std::string>& targets) {
     return invoke_rpc<&RealClient::create_copy_task, UUID>(key, targets);
@@ -783,6 +783,7 @@ tl::expected<QueryTaskResponse, ErrorCode> DummyClient::query_task(
     const UUID& task_id) {
     return invoke_rpc<&RealClient::query_task, QueryTaskResponse>(task_id);
 }
+#endif
 
 // Re-register all of this dummy's segments with the RealClient.
 // - When: RealClient dropped us (DISCONNECTION) or lost some segments

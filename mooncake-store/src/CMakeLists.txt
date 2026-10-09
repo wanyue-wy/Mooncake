@@ -5,17 +5,17 @@ set(MOONCAKE_MASTER_SUPPORT_SOURCES
     common_types.cpp
     utils.cpp
     etcd_helper.cpp
+    allocator.cpp
+    offset_allocator.cpp
 )
 
 set(MOONCAKE_CENTRALIZED_MASTER_SOURCES
     replica.cpp
-    allocator.cpp
     master_service.cpp
     master_metric_manager.cpp
     ha_helper.cpp
     segment.cpp
     rpc_service.cpp
-    offset_allocator.cpp
     http_metadata_server.cpp
     task_manager.cpp
 )
@@ -61,7 +61,7 @@ set(MOONCAKE_STORE_SOURCES
 set(EXTRA_LIBS "")
 
 # Find hiredis for Redis election backend
-if(STORE_USE_REDIS)
+if(STORE_USE_REDIS AND MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
     find_path(HIREDIS_INCLUDE_DIR NAMES hiredis/hiredis.h REQUIRED)
     find_library(HIREDIS_LIB NAMES hiredis REQUIRED)
     message(STATUS "Found hiredis: include=${HIREDIS_INCLUDE_DIR} lib=${HIREDIS_LIB}")
@@ -141,17 +141,21 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
 )
 
 if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    set(MOONCAKE_MASTER_SOURCES ${MOONCAKE_P2P_MASTER_SOURCES})
+    set(MOONCAKE_MASTER_TARGET mooncake_master_p2p)
+    set(MOONCAKE_MASTER_MAIN p2p/master/p2p_master_main.cpp)
+    set(MOONCAKE_CLIENT_TARGET mooncake_client_p2p)
+    set(MOONCAKE_CLIENT_MAIN p2p/client/p2p_real_client_main.cpp)
     list(APPEND MOONCAKE_STORE_SOURCES
         ${MOONCAKE_STORE_P2P_SOURCES}
         p2p/client/p2p_real_client.cpp
-        # TODO(P2P-008): Remove centralized business dependencies after isolating
-        # shared descriptors and allocator accounting; retain neutral facilities.
-        replica.cpp
-        allocator.cpp
-        offset_allocator.cpp
-        master_metric_manager.cpp
     )
 else()
+    set(MOONCAKE_MASTER_SOURCES ${MOONCAKE_CENTRALIZED_MASTER_SOURCES})
+    set(MOONCAKE_MASTER_TARGET mooncake_master)
+    set(MOONCAKE_MASTER_MAIN master.cpp)
+    set(MOONCAKE_CLIENT_TARGET mooncake_client)
+    set(MOONCAKE_CLIENT_MAIN real_client_main.cpp)
     list(APPEND MOONCAKE_STORE_SOURCES
         ${MOONCAKE_CENTRALIZED_MASTER_SOURCES}
         client_service.cpp
@@ -163,9 +167,8 @@ else()
     )
 endif()
 
-# TODO(P2P-009): Verify UT=OFF static/shared and installed artifacts exclude
-# tests-only clients. Remove this marker once object/link evidence covers both
-# architectures; source selection alone does not prove production isolation.
+# TODO(P2P-009): Keep production, UT and benchmark artifact checks in the
+# independent architecture matrix; source selection alone is not evidence.
 # The cache_allocator library
 include_directories(${Python3_INCLUDE_DIRS})
 add_library(mooncake_store ${MOONCAKE_STORE_SOURCES})
@@ -176,7 +179,7 @@ endif()
 # to targets that don't need it (e.g., mooncake_master).
 # Targets that need transfer_engine should link it explicitly.
 target_include_directories(mooncake_store PUBLIC ${XXHASH_INCLUDE_DIR})
-if(STORE_USE_REDIS)
+if(STORE_USE_REDIS AND MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
     target_include_directories(mooncake_store PUBLIC ${HIREDIS_INCLUDE_DIR})
     target_compile_definitions(mooncake_store PUBLIC STORE_USE_REDIS)
 endif()
@@ -299,23 +302,21 @@ if(STORE_USE_ETCD)
     add_dependencies(mooncake_master_support build_etcd_wrapper)
 endif()
 
-add_library(mooncake_master_core STATIC ${MOONCAKE_CENTRALIZED_MASTER_SOURCES})
+add_library(mooncake_master_core STATIC ${MOONCAKE_MASTER_SOURCES})
 target_link_libraries(mooncake_master_core PUBLIC mooncake_master_support)
-
-add_library(mooncake_p2p_master_core STATIC ${MOONCAKE_P2P_MASTER_SOURCES})
-target_link_libraries(mooncake_p2p_master_core PUBLIC mooncake_master_support)
+if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    target_compile_definitions(mooncake_master_core PUBLIC MOONCAKE_STORE_CLIENT_P2P)
+endif()
 if(STORE_USE_ETCD)
     add_dependencies(mooncake_master_core build_etcd_wrapper)
-    add_dependencies(mooncake_p2p_master_core build_etcd_wrapper)
 endif()
-if(STORE_USE_REDIS)
-    target_include_directories(mooncake_p2p_master_core PUBLIC ${HIREDIS_INCLUDE_DIR})
-    target_link_libraries(mooncake_p2p_master_core PUBLIC ${HIREDIS_LIB})
+if(STORE_USE_REDIS AND MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
+    target_include_directories(mooncake_master_core PUBLIC ${HIREDIS_INCLUDE_DIR})
+    target_link_libraries(mooncake_master_core PUBLIC ${HIREDIS_LIB})
 endif()
 
 # Master binary
-add_executable(mooncake_master master.cpp)
-add_executable(mooncake_master_p2p p2p/master/p2p_master_main.cpp)
+add_executable(${MOONCAKE_MASTER_TARGET} ${MOONCAKE_MASTER_MAIN})
 
 set(MASTER_EXTRA_INCS)
 set(MASTER_EXTRA_LIBS)
@@ -327,56 +328,25 @@ if (STORE_USE_JEMALLOC)
     list(APPEND MASTER_EXTRA_LIBS ${JEMALLOC_STATIC_LIBRARIES})
 endif()
 
-target_include_directories(mooncake_master PRIVATE ${MASTER_EXTRA_INCS})
-target_include_directories(mooncake_master_p2p PRIVATE ${MASTER_EXTRA_INCS})
-target_link_libraries(mooncake_master PRIVATE
+target_include_directories(${MOONCAKE_MASTER_TARGET} PRIVATE ${MASTER_EXTRA_INCS})
+target_link_libraries(${MOONCAKE_MASTER_TARGET} PRIVATE
     mooncake_master_core
-    ${MASTER_EXTRA_LIBS}
-)
-target_link_libraries(mooncake_master_p2p PRIVATE
-    mooncake_p2p_master_core
     ${MASTER_EXTRA_LIBS}
 )
 
 if (STORE_USE_ETCD)
-    add_dependencies(mooncake_master build_etcd_wrapper)
-    add_dependencies(mooncake_master_p2p build_etcd_wrapper)
+    add_dependencies(${MOONCAKE_MASTER_TARGET} build_etcd_wrapper)
 endif()
 
-target_compile_options(mooncake_master PRIVATE -Os)
-target_link_options(mooncake_master PRIVATE -Os -s)
-target_compile_options(mooncake_master_p2p PRIVATE -Os)
-target_link_options(mooncake_master_p2p PRIVATE -Os -s)
+target_compile_options(${MOONCAKE_MASTER_TARGET} PRIVATE -Os)
+target_link_options(${MOONCAKE_MASTER_TARGET} PRIVATE -Os -s)
 
 # Each build ships only the selected Dummy-facing client daemon.
-if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
-    set(MOONCAKE_CLIENT_TARGET mooncake_client_p2p)
-    add_executable(${MOONCAKE_CLIENT_TARGET} p2p/client/p2p_real_client_main.cpp)
-else()
-    set(MOONCAKE_CLIENT_TARGET mooncake_client)
-    add_executable(${MOONCAKE_CLIENT_TARGET} real_client_main.cpp)
-endif()
+add_executable(${MOONCAKE_CLIENT_TARGET} ${MOONCAKE_CLIENT_MAIN})
 target_link_libraries(${MOONCAKE_CLIENT_TARGET} PRIVATE
     mooncake_store transfer_engine asio_shared)
 target_compile_options(${MOONCAKE_CLIENT_TARGET} PRIVATE -Os)
 target_link_options(${MOONCAKE_CLIENT_TARGET} PRIVATE -Os -s)
 
-install(TARGETS mooncake_master mooncake_master_p2p ${MOONCAKE_CLIENT_TARGET}
+install(TARGETS ${MOONCAKE_MASTER_TARGET} ${MOONCAKE_CLIENT_TARGET}
         DESTINATION bin)
-
-if(BUILD_UNIT_TESTS)
-    if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "centralized")
-        set(MOONCAKE_E2E_OTHER_CLIENT_SOURCES ${MOONCAKE_STORE_P2P_SOURCES})
-        list(REMOVE_ITEM MOONCAKE_E2E_OTHER_CLIENT_SOURCES ${MOONCAKE_P2P_MASTER_SOURCES})
-        set(MOONCAKE_E2E_OTHER_MASTER mooncake_p2p_master_core)
-    else()
-        set(MOONCAKE_E2E_OTHER_CLIENT_SOURCES
-            client_service.cpp client_metric.cpp master_client.cpp
-            transfer_task.cpp file_storage.cpp)
-        set(MOONCAKE_E2E_OTHER_MASTER mooncake_master_core)
-    endif()
-    add_library(mooncake_e2e_other_client STATIC ${MOONCAKE_E2E_OTHER_CLIENT_SOURCES})
-    target_link_libraries(mooncake_e2e_other_client
-        PUBLIC mooncake_store ${MOONCAKE_E2E_OTHER_MASTER}
-        PRIVATE transfer_engine)
-endif()

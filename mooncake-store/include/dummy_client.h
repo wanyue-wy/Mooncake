@@ -208,6 +208,7 @@ class DummyClient : public PyClient {
 
     int tearDownAll() override;
 
+#if !defined(MOONCAKE_STORE_CLIENT_P2P)
     tl::expected<UUID, ErrorCode> create_copy_task(
         const std::string& key,
         const std::vector<std::string>& targets) override;
@@ -218,6 +219,7 @@ class DummyClient : public PyClient {
 
     tl::expected<QueryTaskResponse, ErrorCode> query_task(
         const UUID& task_id) override;
+#endif
 
    private:
     ErrorCode connect(const std::string& server_address);

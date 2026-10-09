@@ -2,12 +2,14 @@
 add_executable(allocator_bench allocator_bench.cpp)
 target_link_libraries(allocator_bench PRIVATE cachelib_memory_allocator ${MOONCAKE_STORE_LIBS})
 
-# The benchmark uses the centralized Master RPC client in either Store build.
+# The benchmark exercises the centralized Master RPC API.
+if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "centralized")
 add_executable(master_bench
     master_bench.cpp
     ../src/master_client.cpp
 )
 target_link_libraries(master_bench PRIVATE cachelib_memory_allocator mooncake_master_core)
+endif()
 
 # Add storage backend benchmark executable
 # This benchmark tests all storage backends (OffsetAllocator, Bucket, FilePerKey)

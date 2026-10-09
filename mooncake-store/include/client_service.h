@@ -29,6 +29,11 @@
 
 namespace mooncake {
 
+// Buffer conversion helpers for centralized replica descriptors.
+uint64_t calculate_total_size(const Replica::Descriptor& replica);
+int allocateSlices(std::vector<Slice>& slices,
+                   const Replica::Descriptor& replica, void* buffer_ptr);
+
 struct BatchGetOffloadObjectResponse {
     std::vector<uint64_t> pointers;
     std::string transfer_engine_addr;
