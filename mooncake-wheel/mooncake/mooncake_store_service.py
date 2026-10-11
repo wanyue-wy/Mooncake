@@ -5,11 +5,14 @@ import argparse
 import asyncio
 import json
 import logging
+import math
+import os
+import sys
 import time
 
 from aiohttp import web
 from mooncake.store import MooncakeDistributedStore
-from mooncake.mooncake_config import MooncakeConfig
+from mooncake.mooncake_config import MooncakeConfig, _parse_segment_size
 
 
 def _timed_handler(operation_name, handler):
@@ -51,19 +54,36 @@ class MooncakeStoreService:
     def __init__(self, config_path: str = None, cli_config: dict = None):
         self.store = None
         self.config = None
+        self.runner = None
+        self.is_p2p = hasattr(MooncakeDistributedStore, "setup_p2p_real_client")
         self._setup_logging()
 
         try:
-            if config_path:
-                self.config = MooncakeConfig.from_file(config_path)
+            if self.is_p2p:
+                config_path = config_path or os.getenv("MOONCAKE_CONFIG_PATH")
+                self.config = {}
+                if config_path:
+                    with open(config_path) as source:
+                        self.config = json.load(source)
+                    if not isinstance(self.config, dict):
+                        raise ValueError("P2P configuration must be a JSON object")
+                self.config.update(cli_config or {})
+                # Native dict setup accepts JSON text for nested configuration.
+                self.config = {
+                    key: json.dumps(value) if isinstance(value, (dict, list)) else value
+                    for key, value in self.config.items()
+                }
             else:
-                self.config = MooncakeConfig.load_from_env()
-
-            # Override with CLI config if provided
-            if cli_config:
-                for key, value in cli_config.items():
-                    if hasattr(self.config, key):
-                        setattr(self.config, key, value)
+                self.config = (MooncakeConfig.from_file(config_path) if config_path
+                               else MooncakeConfig.load_from_env())
+                for key, value in (cli_config or {}).items():
+                    if not hasattr(self.config, key):
+                        raise ValueError(f"Unknown centralized configuration field: {key}")
+                    if key in ("global_segment_size", "local_buffer_size"):
+                        value = _parse_segment_size(value)
+                    elif key == "heartbeat_rpc_port":
+                        value = int(value)
+                    setattr(self.config, key, value)
 
             logging.info("Mooncake configuration loaded")
         except Exception as e:
@@ -76,70 +96,56 @@ class MooncakeStoreService:
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
 
-    async def start_store_service(self, max_wait_time: float = 60):
-        """
-        Start the store service with retry mechanism.
-
-        Args:
-            max_wait_time: Maximum total wait time in seconds (default: 60)
-
-        Returns:
-            True if successful, False otherwise
-        """
-        retry_count = 0
-        retry_interval = 1.0  # Fixed retry interval: 1 second
-        start_time = time.perf_counter()
-
-        while True:
-            elapsed = time.perf_counter() - start_time
-            if elapsed >= max_wait_time:
-                logging.error(
-                    f"Store startup failed: exceeded max wait time of {max_wait_time}s after {retry_count} attempts"
-                )
-                return False
-
+    def _close_store(self):
+        store, self.store = self.store, None
+        if store is not None:
             try:
-                retry_count += 1
-                logging.info(
-                    f"Attempting to start store service (attempt {retry_count}, "
-                    f"elapsed: {elapsed:.1f}s/{max_wait_time}s)"
-                )
+                store.close()
+            except Exception:
+                logging.exception("Failed to close Store")
+                raise
 
+    async def start_store_service(self, max_wait_time: float = 60):
+        """Retry returned errors within the deadline; native setup is synchronous."""
+        if not math.isfinite(max_wait_time) or max_wait_time <= 0:
+            logging.error("max-wait-time must be finite and positive")
+            raise ValueError("max-wait-time must be finite and positive")
+        deadline = time.monotonic() + max_wait_time
+        attempt = 0
+        while time.monotonic() < deadline:
+            attempt += 1
+            try:
                 self.store = MooncakeDistributedStore()
-                ret = self.store.setup(
-                    self.config.local_hostname,
-                    self.config.metadata_server,
-                    self.config.global_segment_size,
-                    self.config.local_buffer_size,
-                    self.config.protocol,
-                    self.config.device_name,
-                    self.config.master_server_address,
-                    heartbeat_rpc_port=self.config.heartbeat_rpc_port,
-                )
+                if self.is_p2p:
+                    ret = self.store.setup_p2p_real_client(self.config)
+                else:
+                    ret = self.store.setup(
+                        self.config.local_hostname,
+                        self.config.metadata_server,
+                        self.config.global_segment_size,
+                        self.config.local_buffer_size,
+                        self.config.protocol,
+                        self.config.device_name,
+                        self.config.master_server_address,
+                        heartbeat_rpc_port=self.config.heartbeat_rpc_port,
+                    )
+            except (Exception, asyncio.CancelledError):
+                logging.exception("Store initialization raised an exception")
+                self._close_store()
+                raise
 
-                if ret != 0:
-                    raise RuntimeError("Store initialization failed")
-
-                logging.info(f"Store service started successfully on {self.config.local_hostname}")
+            if ret == 0:
+                logging.info("Store service started successfully")
                 return True
 
-            except Exception as e:
-                # Recalculate remaining time after store.setup() attempt
-                elapsed_after_attempt = time.perf_counter() - start_time
-                remaining_time = max_wait_time - elapsed_after_attempt
+            logging.error("Store initialization failed (attempt %s, code %s)", attempt, ret)
+            self._close_store()
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(1.0, remaining))
 
-                # Calculate actual sleep duration
-                actual_sleep_time = min(retry_interval, remaining_time) if remaining_time > 0 else 0
-
-                logging.warning(
-                    f"Store startup failed (attempt {retry_count}): {e}. "
-                    f"Retrying in {actual_sleep_time:.1f}s... (remaining time: {remaining_time:.1f}s)"
-                )
-
-                # Wait before retry, but don't exceed max_wait_time
-                if actual_sleep_time > 0:
-                    await asyncio.sleep(actual_sleep_time)
-
+        logging.error("Store startup exceeded %ss after %s attempts", max_wait_time, attempt)
+        return False
 
     async def start_http_service(self, port: int = 8080):
         app = web.Application(client_max_size=1024 * 1024 * 100)  # 100MB limit
@@ -150,10 +156,15 @@ class MooncakeStoreService:
             web.delete('/api/remove/{key}', _timed_handler("REMOVE", self.handle_remove)),
             web.delete('/api/remove_all', _timed_handler("REMOVE_ALL", self.handle_remove_all))
         ])
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', port)
-        await site.start()
+        self.runner = web.AppRunner(app)
+        try:
+            await self.runner.setup()
+            site = web.TCPSite(self.runner, '0.0.0.0', port)
+            await site.start()
+        except (Exception, asyncio.CancelledError):
+            logging.exception("HTTP startup failed")
+            await self.stop()
+            raise
         logging.info(f"REST API started on port {port}")
         return True
 
@@ -285,9 +296,17 @@ class MooncakeStoreService:
             )
 
     async def stop(self):
-        if self.store:
-            self.store.close()
-            logging.info("Mooncake service stopped")
+        runner, self.runner = self.runner, None
+        try:
+            if runner is not None:
+                try:
+                    await runner.cleanup()
+                except Exception:
+                    logging.exception("Failed to clean up HTTP runner")
+                    raise
+        finally:
+            self._close_store()
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Mooncake Store Service with REST API')
@@ -307,38 +326,40 @@ def parse_arguments():
                         required=False)
     return parser.parse_args()
 
-async def main():
-    args = parse_arguments()
-
-    # Parse -D key=value pairs into a dictionary
+async def _run(args):
     cli_config = {}
     for item in args.define:
-        if '=' in item:
-            key, value = item.split('=', 1)
-            cli_config[key] = value
-        else:
-            logging.warning(f"Ignoring invalid CLI config: {item}")
+        key, separator, value = item.partition('=')
+        if not separator or not key:
+            raise ValueError(f"Invalid CLI configuration: {item}; expected key=value")
+        cli_config[key] = value
 
     service = MooncakeStoreService(args.config, cli_config)
-
     try:
         if not await service.start_store_service(max_wait_time=args.max_wait_time):
             raise RuntimeError("Failed to start store service")
-
-        if not await service.start_http_service(args.port):
-            raise RuntimeError("Failed to start HTTP service")
-
+        await service.start_http_service(args.port)
         logging.info("Mooncake Store Service is running. Press Ctrl+C to stop.")
-        while True:
-            await asyncio.sleep(1)
+        await asyncio.Event().wait()
+    finally:
+        await service.stop()
 
-    except KeyboardInterrupt:
+
+def main():
+    args = parse_arguments()
+    try:
+        asyncio.run(_run(args))
+        return 0
+    except asyncio.CancelledError:
         logging.info("Received shutdown signal")
-        await service.stop()
-    except Exception as e:
-        logging.error("Service error: %s", e)
-        await service.stop()
-        raise
+        return 0
+    except KeyboardInterrupt:
+        logging.info("Received interrupt")
+        return 130
+    except Exception:
+        logging.exception("Store service failed")
+        return 1
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(main())

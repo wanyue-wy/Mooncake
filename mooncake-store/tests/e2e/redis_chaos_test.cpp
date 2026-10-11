@@ -32,7 +32,7 @@
 
 #include <hiredis/hiredis.h>
 
-DEFINE_string(master_path, "./mooncake-store/src/mooncake_master_p2p",
+DEFINE_string(master_path, "./mooncake-store/src/mooncake_master",
               "Path to the P2P master executable");
 FLAG_out_dir;
 DEFINE_string(clientctl_path, "./mooncake-store/tests/e2e/clientctl",

@@ -3,8 +3,6 @@ project(MooncakeStore VERSION 2.0.0)
 # Extract version components for C++ usage
 set(MOONCAKE_STORE_VERSION ${PROJECT_VERSION})
 
-configure_file(include/version.h.in include/version.h @ONLY)
-
 if (STORE_USE_ETCD)
     set(ETCD_WRAPPER_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/../mooncake-common/etcd/)
     set(ETCD_WRAPPER_LIB ${CMAKE_CURRENT_BINARY_DIR}/../mooncake-common/etcd/libetcd_wrapper.so)
@@ -39,6 +37,8 @@ if(DEFINED MOONCAKE_CONFIGURED_STORE_ARCH AND
 endif()
 set(MOONCAKE_CONFIGURED_STORE_ARCH "${MOONCAKE_STORE_CLIENT_ARCH}" CACHE INTERNAL
     "Store architecture selected when this build directory was configured")
+
+configure_file(include/version.h.in include/version.h @ONLY)
 
 # One deployment library, one native client, one Real implementation per build directory.
 set(MOONCAKE_STORE_LIBS mooncake_store)

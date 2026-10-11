@@ -142,9 +142,7 @@ list(APPEND MOONCAKE_STORE_P2P_SOURCES
 
 if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
     set(MOONCAKE_MASTER_SOURCES ${MOONCAKE_P2P_MASTER_SOURCES})
-    set(MOONCAKE_MASTER_TARGET mooncake_master_p2p)
     set(MOONCAKE_MASTER_MAIN p2p/master/p2p_master_main.cpp)
-    set(MOONCAKE_CLIENT_TARGET mooncake_client_p2p)
     set(MOONCAKE_CLIENT_MAIN p2p/client/p2p_real_client_main.cpp)
     list(APPEND MOONCAKE_STORE_SOURCES
         ${MOONCAKE_STORE_P2P_SOURCES}
@@ -152,9 +150,7 @@ if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
     )
 else()
     set(MOONCAKE_MASTER_SOURCES ${MOONCAKE_CENTRALIZED_MASTER_SOURCES})
-    set(MOONCAKE_MASTER_TARGET mooncake_master)
     set(MOONCAKE_MASTER_MAIN master.cpp)
-    set(MOONCAKE_CLIENT_TARGET mooncake_client)
     set(MOONCAKE_CLIENT_MAIN real_client_main.cpp)
     list(APPEND MOONCAKE_STORE_SOURCES
         ${MOONCAKE_CENTRALIZED_MASTER_SOURCES}
@@ -167,7 +163,7 @@ else()
     )
 endif()
 
-# TODO(P2P-009): Keep production, UT and benchmark artifact checks in the
+# TODO(P2P-010.3): Keep production, UT and benchmark artifact checks in the
 # independent architecture matrix; source selection alone is not evidence.
 # The cache_allocator library
 include_directories(${Python3_INCLUDE_DIRS})
@@ -316,7 +312,7 @@ if(STORE_USE_REDIS AND MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
 endif()
 
 # Master binary
-add_executable(${MOONCAKE_MASTER_TARGET} ${MOONCAKE_MASTER_MAIN})
+add_executable(mooncake_master ${MOONCAKE_MASTER_MAIN})
 
 set(MASTER_EXTRA_INCS)
 set(MASTER_EXTRA_LIBS)
@@ -328,25 +324,25 @@ if (STORE_USE_JEMALLOC)
     list(APPEND MASTER_EXTRA_LIBS ${JEMALLOC_STATIC_LIBRARIES})
 endif()
 
-target_include_directories(${MOONCAKE_MASTER_TARGET} PRIVATE ${MASTER_EXTRA_INCS})
-target_link_libraries(${MOONCAKE_MASTER_TARGET} PRIVATE
+target_include_directories(mooncake_master PRIVATE ${MASTER_EXTRA_INCS})
+target_link_libraries(mooncake_master PRIVATE
     mooncake_master_core
     ${MASTER_EXTRA_LIBS}
 )
 
 if (STORE_USE_ETCD)
-    add_dependencies(${MOONCAKE_MASTER_TARGET} build_etcd_wrapper)
+    add_dependencies(mooncake_master build_etcd_wrapper)
 endif()
 
-target_compile_options(${MOONCAKE_MASTER_TARGET} PRIVATE -Os)
-target_link_options(${MOONCAKE_MASTER_TARGET} PRIVATE -Os -s)
+target_compile_options(mooncake_master PRIVATE -Os)
+target_link_options(mooncake_master PRIVATE -Os -s)
 
 # Each build ships only the selected Dummy-facing client daemon.
-add_executable(${MOONCAKE_CLIENT_TARGET} ${MOONCAKE_CLIENT_MAIN})
-target_link_libraries(${MOONCAKE_CLIENT_TARGET} PRIVATE
+add_executable(mooncake_client ${MOONCAKE_CLIENT_MAIN})
+target_link_libraries(mooncake_client PRIVATE
     mooncake_store transfer_engine asio_shared)
-target_compile_options(${MOONCAKE_CLIENT_TARGET} PRIVATE -Os)
-target_link_options(${MOONCAKE_CLIENT_TARGET} PRIVATE -Os -s)
+target_compile_options(mooncake_client PRIVATE -Os)
+target_link_options(mooncake_client PRIVATE -Os -s)
 
-install(TARGETS ${MOONCAKE_MASTER_TARGET} ${MOONCAKE_CLIENT_TARGET}
+install(TARGETS mooncake_master mooncake_client
         DESTINATION bin)
