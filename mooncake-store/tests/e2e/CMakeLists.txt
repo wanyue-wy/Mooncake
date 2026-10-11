@@ -33,7 +33,7 @@ if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "centralized")
 elseif(STORE_USE_REDIS)
     add_store_e2e_executable(redis_chaos_test redis_chaos_test.cpp)
     add_test(NAME redis_chaos_test COMMAND redis_chaos_test
-        --master_path=$<TARGET_FILE:mooncake_master_p2p>
+        --master_path=$<TARGET_FILE:mooncake_master>
         --clientctl_path=$<TARGET_FILE:clientctl>
         --out_dir=${CMAKE_CURRENT_BINARY_DIR}/redis_chaos_output)
     set_tests_properties(redis_chaos_test PROPERTIES

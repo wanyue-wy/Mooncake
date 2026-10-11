@@ -1,3 +1,4 @@
+#include "version.h"
 #include <gflags/gflags.h>
 #include <csignal>
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
@@ -119,13 +120,15 @@ void RegisterClientRpcService(coro_rpc::coro_rpc_server& server,
 }  // namespace mooncake
 
 int main(int argc, char* argv[]) {
+    gflags::SetVersionString(mooncake::GetMooncakeStoreBuildInfo());
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+
     // Attention !!!
-    // Initialization of ResourceTracker must be the most earliest.
+    // Initialize ResourceTracker before any business threads are started.
     // Otherwise, the main thread will not apply signal mask before other
     // spawning threads, leading to missing signal processing.
     mooncake::ResourceTracker::getInstance();
 
-    gflags::ParseCommandLineFlags(&argc, &argv, true);
     // when separately deploy real client,
     // local buffer is shared by dummy client,
     // real client does not have local buffer

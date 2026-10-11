@@ -4,6 +4,10 @@ from pathlib import Path
 from setuptools import setup, Distribution
 from wheel.bdist_wheel import bdist_wheel
 
+# PEP 517 executes setup.py without adding its directory to sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from store_build import validate_store_artifacts
+
 # ---------------------------------------------------------------------------
 # Platform guard
 # ---------------------------------------------------------------------------
@@ -174,28 +178,11 @@ def get_console_scripts():
         "transfer_engine_topology_dump = mooncake.transfer_engine_topology_dump:main",
     ]
     package_dir = Path(__file__).parent / "mooncake"
-    selected = None
-    # Select entry points while building the wheel; installed CLIs are fixed.
-    for suffix, entry in (("", "main"), ("_p2p", "p2p_main")):
-        master = package_dir / ("mooncake_master" + suffix)
-        client = package_dir / ("mooncake_client" + suffix)
-        if not master.exists() and not client.exists():
-            continue
-        if not master.is_file() or not client.is_file():
-            raise ValueError(
-                "Store wheel requires matching Master and Client binaries"
-            )
-        if selected is not None:
-            raise ValueError("Store wheel cannot contain both client architectures")
-        selected = (suffix, entry)
-    if (package_dir / "store.so").is_file() and selected is None:
-        raise ValueError("Store wheel is missing its Master and Client binaries")
-    if selected is not None:
-        suffix, entry = selected
+    if validate_store_artifacts(package_dir):
         scripts.extend(
             [
-                f"mooncake_master{suffix} = mooncake.cli:{entry}",
-                f"mooncake_client{suffix} = mooncake.cli_client:{entry}",
+                "mooncake_master = mooncake.cli:main",
+                "mooncake_client = mooncake.cli_client:main",
             ]
         )
     return scripts

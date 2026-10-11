@@ -20,15 +20,13 @@ case "${STORE_ENABLED}" in
         STORE_ENABLED=ON
         STORE_ARCH=$(sed -n 's/^MOONCAKE_STORE_CLIENT_ARCH:[^=]*=//p' "${BUILD_DIR}/CMakeCache.txt")
         case "${STORE_ARCH}" in
-            centralized) STORE_MASTER=mooncake_master; STORE_CLIENT=mooncake_client ;;
-            p2p) STORE_MASTER=mooncake_master_p2p; STORE_CLIENT=mooncake_client_p2p ;;
+            centralized|p2p) STORE_MASTER=mooncake_master; STORE_CLIENT=mooncake_client ;;
             *) echo "Error: Invalid Store client architecture: ${STORE_ARCH}" >&2; exit 1 ;;
         esac
         ;;
     OFF|FALSE|NO|N|0|"") STORE_ENABLED=OFF ;;
     *) echo "Error: Invalid WITH_STORE value: ${STORE_ENABLED}" >&2; exit 1 ;;
 esac
-
 # Get Python version from environment variable or argument
 PYTHON_VERSION=${PYTHON_VERSION:-${1:-$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")}}
 # Get output directory from environment variable or argument
@@ -50,8 +48,7 @@ rm -rf mooncake-wheel/mooncake_transfer_engine*
 rm -rf mooncake-wheel/build/
 rm -f mooncake-wheel/mooncake/*.so
 # Remove binaries from the previous architecture before selecting this pair.
-rm -f mooncake-wheel/mooncake/mooncake_master mooncake-wheel/mooncake/mooncake_master_p2p \
-      mooncake-wheel/mooncake/mooncake_client mooncake-wheel/mooncake/mooncake_client_p2p
+rm -f mooncake-wheel/mooncake/mooncake_master mooncake-wheel/mooncake/mooncake_client
 
 echo "Creating directory structure..."
 
