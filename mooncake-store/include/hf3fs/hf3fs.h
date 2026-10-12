@@ -5,7 +5,9 @@
 #include <mutex>
 #include <thread>
 #include <hf3fs_usrbio.h>
-#include "types.h"
+#include <span>
+#include <ylt/util/tl/expected.hpp>
+#include "common_types.h"
 
 namespace mooncake {
 

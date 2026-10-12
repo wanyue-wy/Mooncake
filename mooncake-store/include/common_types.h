@@ -203,6 +203,18 @@ struct Slice {
     size_t size{0};
 };
 
+// Shared storage metadata; field and reflection order are part of the wire
+// contract.
+struct StorageObjectMetadata {
+    int64_t bucket_id;
+    int64_t offset;
+    int64_t key_size;
+    int64_t data_size;
+    std::string transport_endpoint;
+    YLT_REFL(StorageObjectMetadata, bucket_id, offset, key_size, data_size,
+             transport_endpoint);
+};
+
 const static uint64_t kMinSliceSize = facebook::cachelib::Slab::kMinAllocSize;
 const static uint64_t kMaxSliceSize =
     facebook::cachelib::Slab::kSize - 16;  // should be lower than limit

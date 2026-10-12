@@ -25,9 +25,8 @@ static constexpr size_t kAllocatorUnknownFreeSpace =
 // Forward declarations
 class BufferAllocatorBase;
 
-// TODO(P2P-008): Audit handle identity and descriptor consumers; separate only
-// proven business coupling from shared CacheLib and offset allocation. Remove
-// this marker when architecture-owned adapters and accounting are isolated.
+// Allocation identity and transport metadata are shared value types. Business
+// replica descriptors and metric observers belong to their architecture owners.
 class AllocatedBuffer {
    public:
     friend class CachelibBufferAllocator;
@@ -105,9 +104,6 @@ class BufferAllocatorBase {
     virtual ~BufferAllocatorBase() = default;
 
     // Neutral allocation observers let each architecture own its accounting.
-    // TODO(P2P-008): Verify allocation, failure, unmount and live-handle release
-    // accounting; remove this marker when P2P allocation has no centralized
-    // metric effects and centralized accounting remains correct.
     using UsageObserver = std::function<void(int64_t)>;
     void set_usage_observers(UsageObserver on_allocated,
                              UsageObserver on_deallocated) {

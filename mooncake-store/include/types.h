@@ -92,17 +92,4 @@ inline std::ostream& operator<<(std::ostream& os,
     return os;
 }
 
-// TODO(P2P-008): Move StorageObjectMetadata to the shared storage contract
-// without changing fields or reflection order. Remove this marker when storage
-// consumers no longer include centralized policy types for this DTO.
-struct StorageObjectMetadata {
-    int64_t bucket_id;
-    int64_t offset;
-    int64_t key_size;
-    int64_t data_size;
-    std::string transport_endpoint;
-    YLT_REFL(StorageObjectMetadata, bucket_id, offset, key_size, data_size,
-             transport_endpoint);
-};
-
 }  // namespace mooncake

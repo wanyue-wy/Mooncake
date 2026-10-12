@@ -9,7 +9,9 @@
 #include <thread>
 #include <vector>
 #include <limits>
+#include <array>
 
+#include "p2p/client/p2p_client_metric.h"
 #include "p2p/client/tiered_cache/tiers/storage_tier.h"
 #include "p2p/client/tiered_cache/tiered_backend.h"
 #include "../utils/common.h"
@@ -35,7 +37,15 @@ class StorageTierTest : public ::testing::Test {
 
     void TearDown() override {
         unsetenv("MOONCAKE_OFFLOAD_LOCAL_BUFFER_SIZE_BYTES");
+        if (!accounting_path_.empty()) {
+            std::error_code ec;
+            fs::remove_all(accounting_path_, ec);
+            EXPECT_FALSE(ec) << "Failed to remove " << accounting_path_ << ": "
+                             << ec.message();
+        }
     }
+
+    fs::path accounting_path_;
 
     std::unique_ptr<char[]> CreateTestBuffer(size_t size) {
         auto buffer = std::make_unique<char[]>(size);
@@ -85,6 +95,73 @@ class StorageTierTest : public ::testing::Test {
         return count;
     }
 };
+
+TEST_F(StorageTierTest, StagingAllocationAccountingAndRecovery) {
+    const auto id = generate_uuid();
+    accounting_path_ =
+        fs::temp_directory_path() /
+        ("mooncake_staging_accounting_" + std::to_string(id.first) + "_" +
+         std::to_string(id.second));
+    Json::Value config;
+    config["storage_backend_type"] = "bucket_storage_backend";
+    config["storage_filepath"] = accounting_path_.string();
+    config["staging_buffer_capacity"] = Json::UInt64(4096);
+    config["total_size_limit"] = Json::Int64(1024 * 1024);
+    auto tier =
+        std::make_shared<StorageTier>(id, std::vector<std::string>{}, 8192);
+    ASSERT_TRUE(tier->Init(nullptr, nullptr, config).has_value());
+    TierMetric metrics;
+    metrics.RegisterTier(id, "staging", tier, 5);
+    const std::array<std::string, 1> label{"staging"};
+    const auto expect_usage = [&](int64_t used) {
+        std::string serialized;
+        metrics.serialize(serialized);
+        EXPECT_EQ(metrics.capacity_bytes.value(label), 8192);
+        EXPECT_EQ(metrics.used_bytes.value(label), used);
+        EXPECT_EQ(metrics.key_count.value(label), 0);
+        EXPECT_EQ(tier->GetUsage(), used);
+    };
+
+    expect_usage(0);
+    DataSource first;
+    DataSource second;
+    ASSERT_TRUE(tier->Allocate(1024, first).has_value());
+    ASSERT_TRUE(tier->Allocate(3072, second).has_value());
+    expect_usage(4096);
+    DataSource failed;
+    auto result = tier->Allocate(1, failed);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), ErrorCode::BUFFER_OVERFLOW);
+    EXPECT_EQ(failed.buffer, nullptr);
+    expect_usage(4096);
+
+    ASSERT_TRUE(tier->Free(std::move(first)).has_value());
+    expect_usage(3072);
+    DataSource recovered;
+    ASSERT_TRUE(tier->Allocate(1024, recovered).has_value());
+    expect_usage(4096);
+    ASSERT_TRUE(tier->Free(std::move(second)).has_value());
+    ASSERT_TRUE(tier->Free(std::move(recovered)).has_value());
+    expect_usage(0);
+    tier.reset();
+}
+
+TEST_F(StorageTierTest, InitFailureDoesNotReserveStagingUsage) {
+    Json::Value config;
+    config["storage_backend_type"] = "file_per_key_storage_backend";
+    config["staging_buffer_capacity"] = Json::UInt64(4096);
+    StorageTier tier(UUID{81, 82}, {}, 8192);
+    auto result = tier.Init(nullptr, nullptr, config);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), ErrorCode::INVALID_PARAMS);
+    EXPECT_EQ(tier.GetUsage(), 0);
+    DataSource data;
+    result = tier.Allocate(1024, data);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), ErrorCode::INTERNAL_ERROR);
+    EXPECT_EQ(data.buffer, nullptr);
+    EXPECT_EQ(tier.GetUsage(), 0);
+}
 
 // Test basic Storage Tier functionality with FilePerKey backend
 TEST_F(StorageTierTest, StorageTierBasic) {

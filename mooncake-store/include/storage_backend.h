@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
+#include <list>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -17,7 +18,7 @@
 #include "file_interface.h"
 #include "mutex.h"
 #include "offset_allocator/offset_allocator.hpp"
-#include "types.h"
+#include "common_types.h"
 
 namespace mooncake {
 struct FileRecord {
