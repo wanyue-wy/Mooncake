@@ -214,9 +214,6 @@ tl::expected<void, ErrorCode> DramCacheTier::RegisterWithEngine(
     return {};
 }
 
-// TODO(P2P-008): Verify shared allocators used by this tier do not update
-// centralized metrics. Remove this marker when tier accounting isolation is
-// proven; the neutral allocator can remain shared.
 tl::expected<std::shared_ptr<BufferAllocatorBase>, ErrorCode>
 DramCacheTier::CreateAllocator() {
     const uintptr_t base_address =

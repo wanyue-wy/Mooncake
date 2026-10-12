@@ -23,17 +23,15 @@
 #include <vector>
 #include <glog/logging.h>
 #include <ylt/reflection/user_reflect_macro.hpp>
+#include <ylt/struct_json/json_writer.h>
 #include <ylt/util/tl/expected.hpp>
 
-#include "types.h"
+#include "common_types.h"
 
 namespace mooncake {
 
 // Merge process-start cluster labels with caller-provided metric labels.
 // A configured cluster_id takes precedence over a caller-provided value.
-// TODO(P2P-008): Audit P2P consumers of this header, utils.cpp and metric
-// helpers at include, object and link-target levels while preserving labels.
-// Remove this marker when production dependencies contain only neutral helpers.
 std::map<std::string, std::string> merge_labels(
     const std::map<std::string, std::string>& labels);
 

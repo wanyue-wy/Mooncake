@@ -1566,6 +1566,50 @@ TEST_F(TieredBackendTest, CapacityAsPlainInteger) {
 // TierMetric Integration Tests
 // ============================================================================
 
+TEST_F(TieredBackendTest, DramOffsetAllocationAccounting) {
+    constexpr size_t capacity = 16 * 1024 * 1024;
+    Json::Value config;
+    Json::Value tier_config;
+    tier_config["type"] = "DRAM";
+    tier_config["capacity"] = Json::UInt64(capacity);
+    tier_config["priority"] = 10;
+    tier_config["allocator_type"] = "OFFSET";
+    config["tiers"].append(tier_config);
+    auto metrics = std::make_shared<TierMetric>();
+    TieredBackend backend;
+    ASSERT_TRUE(
+        backend.Init(config, nullptr, nullptr, nullptr, nullptr, metrics)
+            .has_value());
+    const auto views = backend.GetTierViews();
+    ASSERT_EQ(views.size(), 1);
+    const std::array<std::string, 1> label{
+        "tier_" + std::to_string(views[0].id.first) + "_" +
+        std::to_string(views[0].id.second)};
+    const auto expect_usage = [&](int64_t used) {
+        std::string serialized;
+        metrics->serialize(serialized);
+        EXPECT_EQ(metrics->capacity_bytes.value(label), capacity);
+        EXPECT_EQ(metrics->used_bytes.value(label), used);
+        EXPECT_EQ(metrics->key_count.value(label), 0);
+        EXPECT_EQ(backend.GetTierViews().front().usage, used);
+    };
+    expect_usage(0);
+    auto first = backend.Allocate(477);
+    auto second = backend.Allocate(2048);
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+    expect_usage(477 + 2048);
+
+    const auto failed = backend.Allocate(capacity + 1);
+    ASSERT_FALSE(failed.has_value());
+    EXPECT_EQ(failed.error(), ErrorCode::NO_AVAILABLE_HANDLE);
+    expect_usage(477 + 2048);
+    first = nullptr;
+    expect_usage(2048);
+    second = nullptr;
+    expect_usage(0);
+}
+
 // Init registers every created tier into the TierMetric, and Commit/Delete
 // maintain the per-tier key count; usage is refreshed on metrics reads.
 TEST_F(TieredBackendTest, TierMetricRegistrationAndKeyCount) {
