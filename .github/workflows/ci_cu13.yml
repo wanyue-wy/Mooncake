@@ -1,10 +1,20 @@
+# Reference: kvcache-ai/Mooncake b198a1915bce6006081281af798c4e8000400280.
+# Retain this legacy entry and add only the P2P architecture leg. The shared
+# limit_jobs.cmake carries #4368; no disk/cache/trigger refactor is backported.
+# Resolve earlier conflicts in favor of the P2P selector and artifact identity.
+# TODO(UPG-003/UPG-004): Migrate to the matching shared CUDA13 wheel profile
+# (#2723/#3137/#3283) with its scripts/toolchain, retain Store architecture as a
+# separate dimension, then remove this superseded standalone workflow.
+# TODO(MAIN-001.1): Deduplicate #4368 and reconcile later platform changes.
+# This job compiles/packages P2P. Runtime P2P TCP/SHM and Redis tests are in ci-p2p.yml;
+# GPU/NPU/RDMA execution remains in the appropriate hardware validation stage.
 name: 'Build Wheel (CUDA 13)'
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "P2P-Mooncake-Store" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "P2P-Mooncake-Store" ]
     types: [opened, synchronize, reopened, labeled]
 
 jobs:
@@ -17,11 +27,13 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.10', '3.12']
+        store-arch: [centralized, p2p]
     env:
       BUILD_WITH_EP: "1"
       EP_TORCH_VERSIONS: "2.9.0;2.9.1;2.10.0"
       TORCH_CUDA_ARCH_LIST: "8.0;9.0"
       SCCACHE_GHA_ENABLED: "true"
+      STORE_ARCH: ${{ matrix.store-arch }}
 
     steps:
     - uses: actions/checkout@v4
@@ -74,11 +86,20 @@ jobs:
       run: |
         mkdir build
         cd build
+        args=("-DMOONCAKE_STORE_CLIENT_ARCH=$STORE_ARCH")
+        # TODO(UPG-001 / v0.3.10.post1, #1722): once centralized Redis HA is
+        # integrated, remove this split and set STORE_USE_REDIS=ON for both.
+        if [ "$STORE_ARCH" = centralized ]; then
+          args+=(-DSTORE_USE_REDIS=OFF)
+        else
+          args+=(-DSTORE_USE_REDIS=ON)
+        fi
         cmake -G Ninja .. \
           -DUSE_ETCD=ON \
           -DUSE_REDIS=ON \
           -DUSE_HTTP=ON \
           -DWITH_STORE=ON \
+          "${args[@]}" \
           -DWITH_P2P_STORE=ON \
           -DWITH_EP=ON \
           -DWITH_METRICS=ON \
@@ -124,5 +145,5 @@ jobs:
     - name: Upload Python wheel artifact
       uses: actions/upload-artifact@v4
       with:
-        name: mooncake-wheel-cu130-ubuntu-py${{ steps.generate_tag.outputs.python_version_tag }}
+        name: mooncake-wheel-cu130-ubuntu-${{ matrix.store-arch }}-py${{ steps.generate_tag.outputs.python_version_tag }}
         path: mooncake-wheel/dist-py${{ steps.generate_tag.outputs.python_version_tag }}/*.whl
