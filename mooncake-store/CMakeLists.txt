@@ -40,10 +40,6 @@ set(MOONCAKE_CONFIGURED_STORE_ARCH "${MOONCAKE_STORE_CLIENT_ARCH}" CACHE INTERNA
 
 configure_file(include/version.h.in include/version.h @ONLY)
 
-# One deployment library, one native client, one Real implementation per build directory.
-set(MOONCAKE_STORE_LIBS mooncake_store)
-set(MOONCAKE_STORE_LIBS ${MOONCAKE_STORE_LIBS} PARENT_SCOPE)
-
 # Add subdirectories
 add_subdirectory(src)
 

@@ -20,13 +20,11 @@ option(WITH_EP "build mooncake with expert parallelism support" OFF)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/pybind11)
 set(PYTHON_EXECUTABLE "python3")
-if(NOT PYTHON_SYS_PATH)
-    execute_process(
-        COMMAND ${PYTHON_EXECUTABLE} -c "import sys; print(sys.path[-1])"
-        OUTPUT_VARIABLE PYTHON_SYS_PATH
-    )
-    string(STRIP ${PYTHON_SYS_PATH} PYTHON_SYS_PATH)
-endif()
+execute_process(
+    COMMAND ${PYTHON_EXECUTABLE} -c "import sys; print(sys.path[-1])"
+    OUTPUT_VARIABLE PYTHON_SYS_PATH
+)
+string(STRIP ${PYTHON_SYS_PATH} PYTHON_SYS_PATH)
 
 if (USE_ETCD)
   add_compile_definitions(USE_ETCD)
@@ -48,8 +46,6 @@ if (STORE_USE_REDIS)
 endif()
 
 option(STORE_USE_JEMALLOC "Use jemalloc in mooncake store master" OFF)
-option(USE_ASCEND_CACHE_TIER "Enable Ascend NPU cache tier support" OFF)
-option(USE_ASCEND_DRAM_TIER "Enable Ascend ACL Host memory for DRAM tier (aclrtMallocHost)" OFF)
 
 # Define ASIO macros before adding mooncake-asio subdirectory
 add_compile_definitions(ASIO_SEPARATE_COMPILATION ASIO_DYN_LINK)

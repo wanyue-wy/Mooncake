@@ -6,7 +6,7 @@ endif()
 function(add_p2p_store_executable name)
     add_executable(${name} ${ARGN})
     target_link_libraries(${name} PUBLIC
-        ${MOONCAKE_STORE_LIBS}
+        mooncake_store
         transfer_engine
         cachelib_memory_allocator
         ${ETCD_WRAPPER_LIB}
@@ -68,7 +68,7 @@ set_tests_properties(p2p_master_rpc_test p2p_master_http_endpoints_test
 
 add_executable(stress_workload_test_p2p stress_workload_test.cpp)
 target_link_libraries(stress_workload_test_p2p PUBLIC
-    ${MOONCAKE_STORE_LIBS}
+    mooncake_store
     transfer_engine
     cachelib_memory_allocator
     ${ETCD_WRAPPER_LIB}
@@ -173,7 +173,7 @@ set_tests_properties(p2p_client_ha_test ha_integration_test metadata_recovery_wo
 # Redis-dependent entries require the backend in this architecture.
 if(STORE_USE_REDIS)
 add_executable(redis_election_helper_test redis_election_helper_test.cpp)
-target_link_libraries(redis_election_helper_test PUBLIC ${MOONCAKE_STORE_LIBS} transfer_engine cachelib_memory_allocator ${ETCD_WRAPPER_LIB} glog gtest gtest_main pthread)
+target_link_libraries(redis_election_helper_test PUBLIC mooncake_store transfer_engine cachelib_memory_allocator ${ETCD_WRAPPER_LIB} glog gtest gtest_main pthread)
     add_test(NAME redis_election_helper_test COMMAND redis_election_helper_test)
     add_p2p_store_test(redis_oplog_store_test ha/oplog/redis_oplog_store_test.cpp)
     set_tests_properties(redis_election_helper_test redis_oplog_store_test
