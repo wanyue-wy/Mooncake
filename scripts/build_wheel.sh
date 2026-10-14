@@ -9,24 +9,6 @@ set -e  # Exit immediately if a command exits with a non-zero status
 set -x
 
 BUILD_DIR=${BUILD_DIR:-build}
-if [ ! -f "${BUILD_DIR}/CMakeCache.txt" ]; then
-    echo "Error: CMakeCache.txt not found in ${BUILD_DIR}" >&2
-    exit 1
-fi
-BUILD_DIR=$(cd "${BUILD_DIR}" && pwd)
-STORE_ENABLED=$(sed -n 's/^WITH_STORE:[^=]*=//p' "${BUILD_DIR}/CMakeCache.txt" | tr '[:lower:]' '[:upper:]')
-case "${STORE_ENABLED}" in
-    ON|TRUE|YES|Y|1)
-        STORE_ENABLED=ON
-        STORE_ARCH=$(sed -n 's/^MOONCAKE_STORE_CLIENT_ARCH:[^=]*=//p' "${BUILD_DIR}/CMakeCache.txt")
-        case "${STORE_ARCH}" in
-            centralized|p2p) STORE_MASTER=mooncake_master; STORE_CLIENT=mooncake_client ;;
-            *) echo "Error: Invalid Store client architecture: ${STORE_ARCH}" >&2; exit 1 ;;
-        esac
-        ;;
-    OFF|FALSE|NO|N|0|"") STORE_ENABLED=OFF ;;
-    *) echo "Error: Invalid WITH_STORE value: ${STORE_ENABLED}" >&2; exit 1 ;;
-esac
 # Get Python version from environment variable or argument
 PYTHON_VERSION=${PYTHON_VERSION:-${1:-$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")}}
 # Get output directory from environment variable or argument
@@ -56,23 +38,24 @@ echo "Creating directory structure..."
 cp "${BUILD_DIR}"/mooncake-integration/engine.*.so mooncake-wheel/mooncake/engine.so
 
 # Copy store.so to mooncake directory
-if [ "${STORE_ENABLED}" = "ON" ]; then
+if [ -f "${BUILD_DIR}"/mooncake-integration/store.*.so ]; then
     echo "Copying store.so..."
     cp "${BUILD_DIR}"/mooncake-integration/store.*.so mooncake-wheel/mooncake/store.so
     echo "Copying master binary..."
     # Copy master binary
-    cp "${BUILD_DIR}/mooncake-store/src/${STORE_MASTER}" mooncake-wheel/mooncake/
+    cp "${BUILD_DIR}/mooncake-store/src/mooncake_master" mooncake-wheel/mooncake/
     # Copy client binary
-    cp "${BUILD_DIR}/mooncake-store/src/${STORE_CLIENT}" mooncake-wheel/mooncake/
+    cp "${BUILD_DIR}/mooncake-store/src/mooncake_client" mooncake-wheel/mooncake/
     # Copy async_store.py
     cp mooncake-integration/store/async_store.py mooncake-wheel/mooncake/async_store.py
-    # Copy the selected shared Store library, if built.
-    if [ -f "${BUILD_DIR}/mooncake-store/src/libmooncake_store.so" ]; then
-        echo "Copying libmooncake_store.so..."
-        cp "${BUILD_DIR}/mooncake-store/src/libmooncake_store.so" mooncake-wheel/mooncake/libmooncake_store.so
-    fi
 else
-    echo "Skipping Store (WITH_STORE is OFF)"
+    echo "Skipping store.so (not built - likely WITH_STORE is set to OFF)"
+fi
+
+# Copy libmooncake_store.so to mooncake directory (only when BUILD_SHARED_LIBS is set)
+if [ -f "${BUILD_DIR}/mooncake-store/src/libmooncake_store.so" ]; then
+    echo "Copying libmooncake_store.so..."
+    cp "${BUILD_DIR}/mooncake-store/src/libmooncake_store.so" mooncake-wheel/mooncake/libmooncake_store.so
 fi
 
 # Copy libtransfer_engine.so to mooncake directory (only when USE_ETCD is set)
@@ -198,23 +181,65 @@ rm -rf ${OUTPUT_DIR}/
 mkdir -p ${OUTPUT_DIR}
 
 echo "Installing required build packages"
-python -m pip install --upgrade pip
-# patchelf 0.18.0 fixes rewritten sections escaping their PT_LOAD segment
-# (NixOS/patchelf#485). Install it with auditwheel instead of using an older
-# system binary, which can corrupt the packaged Master executable.
-python -m pip install build setuptools wheel "auditwheel==6.7.0" "patchelf>=0.18.0"
-export PATH="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"
-hash -r
-patchelf --version
+pip install --upgrade pip
+pip install build setuptools wheel auditwheel
 
 # Create directory for repaired wheels
 REPAIRED_DIR="repaired_wheels_${PYTHON_VERSION}"
 mkdir -p ${REPAIRED_DIR}
 
-# Let auditwheel select a supported policy from the actual wheel ABI.
-# Host glibc versions such as 2.32 do not always have a named policy.
-PLATFORM_TAG=${PLATFORM_TAG:-auto}
+# Detect architecture and glibc version for platform tag
+ARCH=$(uname -m)
 
+# Detect glibc version and convert to manylinux format (e.g., "2.39" -> "2_39")
+# Requires getconf (checked in dependencies.sh) or ldd as fallback
+detect_glibc_version() {
+    local ver=""
+
+    # Method 1: use getconf (POSIX standard, most reliable)
+    # getconf is checked in dependencies.sh, so it should be available
+    ver=$(getconf GNU_LIBC_VERSION 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' || true)
+    if [ -n "$ver" ]; then
+        echo "$ver" | sed 's/\./_/'
+        return
+    fi
+
+    # Method 2: use ldd --version (fallback, should also be available)
+    ver=$(ldd --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    if [ -n "$ver" ]; then
+        echo "$ver" | sed 's/\./_/'
+        return
+    fi
+
+    # Final fallback: conservative baseline (should not reach here if dependencies are met)
+    echo "2_17"
+}
+
+GLIBC_VERSION=$(detect_glibc_version)
+if [ -z "$GLIBC_VERSION" ]; then
+    GLIBC_VERSION="2_17"  # Conservative fallback
+    echo "Warning: Could not detect glibc version, using fallback: $GLIBC_VERSION"
+fi
+
+# Determine architecture (simplified)
+case "$ARCH" in
+    aarch64|arm64)
+        ARCH_SUFFIX="aarch64"
+        ;;
+    x86_64)
+        ARCH_SUFFIX="x86_64"
+        ;;
+    *)
+        echo "Error: Unknown or unsupported architecture $ARCH. Failing the build."
+        exit 1
+        ;;
+esac
+
+# Set platform tag if not already set
+PLATFORM_TAG=${PLATFORM_TAG:-"manylinux_${GLIBC_VERSION}_${ARCH_SUFFIX}"}
+
+echo "Detected architecture: $ARCH_SUFFIX"
+echo "Detected glibc version: $GLIBC_VERSION"
 echo "Using platform tag: $PLATFORM_TAG"
 
 if [ "$PYTHON_VERSION" = "3.8" ]; then
