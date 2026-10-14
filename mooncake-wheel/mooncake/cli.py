@@ -3,28 +3,25 @@
 Minimal CLI module for mooncake_master.
 """
 
-import logging
 import os
 import sys
+import subprocess
 
 
 def main():
     """
-    Run the selected Master binary with all command-line arguments unchanged.
+    Main entry point for the mooncake_master command.
+    Simply runs the mooncake_master binary with all arguments passed through.
     """
-    # Get the path to the selected Master binary.
+    # Get the path to the mooncake_master binary
     package_dir = os.path.dirname(os.path.abspath(__file__))
     bin_path = os.path.join(package_dir, "mooncake_master")
     
-    try:
-        # Make sure the binary is executable
-        os.chmod(bin_path, 0o755)
-
-        # Replace this wrapper so exit status and signals reach the caller.
-        os.execv(bin_path, [bin_path] + sys.argv[1:])
-    except OSError:
-        logging.exception("Failed to start %s", bin_path)
-        return 1
+    # Make sure the binary is executable
+    os.chmod(bin_path, 0o755)
+    
+    # Run the binary with all arguments passed through
+    return subprocess.call([bin_path] + sys.argv[1:])
 
 
 if __name__ == "__main__":
