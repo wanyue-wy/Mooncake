@@ -1,12 +1,9 @@
 import sys
 import platform
 from pathlib import Path
+import subprocess
 from setuptools import setup, Distribution
 from wheel.bdist_wheel import bdist_wheel
-
-# PEP 517 executes setup.py without adding its directory to sys.path.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from store_build import validate_store_artifacts
 
 # ---------------------------------------------------------------------------
 # Platform guard
@@ -170,26 +167,27 @@ class CustomBdistWheel(bdist_wheel):
 # ---------------------------------------------------------------------------
 # setup()
 # ---------------------------------------------------------------------------
-def get_console_scripts():
-    scripts = [
-        "transfer_engine_bench = mooncake.cli_bench:main",
-        "mooncake_http_metadata_server = mooncake.http_metadata_server:main",
-        "mc_store_rest_server = mooncake.mooncake_store_service:main",
-        "transfer_engine_topology_dump = mooncake.transfer_engine_topology_dump:main",
-    ]
-    package_dir = Path(__file__).parent / "mooncake"
-    if validate_store_artifacts(package_dir):
-        scripts.extend(
-            [
-                "mooncake_master = mooncake.cli:main",
-                "mooncake_client = mooncake.cli_client:main",
-            ]
+package_dir = Path(__file__).resolve().parent / "mooncake"
+store_binaries = [package_dir / name for name in ("mooncake_master", "mooncake_client")]
+if any(binary.exists() for binary in store_binaries):
+    architectures = {}
+    for binary in store_binaries:
+        output = subprocess.check_output(
+            [str(binary), "--version"], text=True, timeout=10
         )
-    return scripts
-
+        values = [line.partition("=")[2] for line in output.splitlines()
+                  if line.startswith("architecture=")]
+        if len(values) != 1 or values[0] not in ("centralized", "p2p"):
+            sys.exit(f"Error: invalid Store architecture in {binary} --version")
+        architectures[binary.name] = values[0]
+    if architectures["mooncake_master"] != architectures["mooncake_client"]:
+        sys.exit(
+            "Error: Store architecture mismatch: "
+            f"mooncake_master={architectures['mooncake_master']}, "
+            f"mooncake_client={architectures['mooncake_client']}"
+        )
 
 setup(
     distclass=BinaryDistribution,
     cmdclass={"bdist_wheel": CustomBdistWheel},
-    entry_points={"console_scripts": get_console_scripts()},
 )
