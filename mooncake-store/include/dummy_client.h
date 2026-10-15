@@ -40,19 +40,10 @@ class ShmHelper {
         return shms_;
     }
 
-    std::vector<std::shared_ptr<ShmSegment>> get_shms_snapshot() const {
-        std::lock_guard<std::mutex> lock(shm_mutex_);
-        return shms_;
-    }
-
+    // Host buffers may be registered after setup starts the heartbeat.
     void set_registered(const std::shared_ptr<ShmSegment>& shm, bool value) {
         std::lock_guard<std::mutex> lock(shm_mutex_);
         if (shm) shm->registered = value;
-    }
-
-    bool is_registered(const std::shared_ptr<ShmSegment>& shm) const {
-        std::lock_guard<std::mutex> lock(shm_mutex_);
-        return shm && shm->registered;
     }
 
     size_t count_registered() const {
@@ -96,9 +87,7 @@ class DummyClient : public PyClient {
 
     int setup(DummyClientConfig& config);
 
-    bool is_initialized() const override {
-        return initialized_.load(std::memory_order_acquire);
-    }
+    bool is_initialized() const override { return ping_running_.load(); }
 
     int initAll(const std::string& protocol, const std::string& device_name,
                 size_t mount_segment_size) override {
@@ -298,7 +287,6 @@ class DummyClient : public PyClient {
     std::atomic<bool> ping_running_{false};
     void ping_thread_main();
     std::atomic<bool> connected_{false};
-    std::atomic<bool> initialized_{false};
 };
 
 }  // namespace mooncake
