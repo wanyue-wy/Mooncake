@@ -1,13 +1,6 @@
 /**
- * @file p2p_register_concurrency_test.cpp
- * @brief Concurrency-safety tests for P2PClientService register / unregister /
- *        Stop, driven through the /register and /unregister HTTP endpoints.
- *
- * Covers: concurrent /register must not crash (B1/B2); interleaved
- * register+unregister must not deadlock and must stay state-consistent (B3);
- * Stop() racing in-flight /register must not use-after-free nor restart the
- * heartbeat after shutdown (B4). Run under TSan/ASan; a deadlock shows up as a
- * ctest timeout.
+ * @brief Exercise concurrent register/unregister and shutdown through HTTP.
+ * Check state consistency, heartbeat lifetime and completion without deadlock.
  */
 
 #include <glog/logging.h>
@@ -109,9 +102,7 @@ class P2PRegisterConcurrencyTest : public ::testing::Test {
 InProcP2PMaster P2PRegisterConcurrencyTest::master_;
 std::string P2PRegisterConcurrencyTest::master_address_;
 
-// B1/B2: a burst of concurrent /register after LOCAL_ONLY (heartbeat parked)
-// must not std::terminate / race heartbeat_thread_; the client ends registered
-// with the existing heartbeat thread.
+// Concurrent registration from LOCAL_ONLY must reuse the heartbeat thread.
 TEST_F(P2PRegisterConcurrencyTest, ConcurrentRegisterNoCrash) {
     auto client = CreateClient();
 
@@ -146,8 +137,7 @@ TEST_F(P2PRegisterConcurrencyTest, ConcurrentRegisterNoCrash) {
     client->Stop();
 }
 
-// B3: hammer /register and /unregister concurrently. Must not deadlock nor
-// crash, and the client must be drivable to a consistent terminal state.
+// Concurrent register/unregister must finish in a consistent state.
 TEST_F(P2PRegisterConcurrencyTest, RegisterUnregisterInterleaving) {
     auto client = CreateClient();
 
@@ -179,8 +169,7 @@ TEST_F(P2PRegisterConcurrencyTest, RegisterUnregisterInterleaving) {
     client->Stop();
 }
 
-// B4: Stop() while /register is in flight must not use-after-free nor restart
-// the heartbeat once shutdown has begun.
+// Shutdown must not race registration into use-after-free or restart heartbeat.
 TEST_F(P2PRegisterConcurrencyTest, StopDuringRegister) {
     auto client = CreateClient();
 

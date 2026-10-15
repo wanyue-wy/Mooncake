@@ -1,8 +1,5 @@
-# Reference: kvcache-ai/Mooncake b198a1915bce6006081281af798c4e8000400280.
-# Retain existing Ninja builds; limit_jobs.cmake carries upstream #4368.
-# Deduplicate #4368 at MAIN-001.1. Runner disconnection alone does not prove OOM.
-# TODO(UPG-003/UPG-004): Adopt the matching upstream shared wheel workflows
-# with their scripts/toolchain; retain the separate P2P entry in ci-p2p.yml.
+# TODO(UPG-003.1/UPG-004.1): Adopt shared wheel workflows and toolchains;
+# retain the separate P2P workflow.
 name: 'Build & Test (Linux)'
 
 on:
@@ -92,8 +89,7 @@ jobs:
         sudo bash -x dependencies.sh -y
         mkdir build
         cd build
-        # TODO(UPG-001 / v0.3.10.post1): enable STORE_USE_REDIS
-        # after integrating the centralized Redis backend and service.
+        # TODO(UPG-001.1): Enable STORE_USE_REDIS with centralized Redis support.
         cmake -G Ninja .. -DUSE_HTTP=ON -DUSE_CXL=ON -DUSE_ETCD=ON -DSTORE_USE_ETCD=ON -DENABLE_ASAN=ON -DENABLE_SCCACHE=ON -DCMAKE_BUILD_TYPE=Debug -DPARALLEL_LINK_JOBS=2
       shell: bash
 
@@ -435,8 +431,7 @@ jobs:
       run: |
         mkdir build
         cd build
-        # TODO(UPG-001 / v0.3.10.post1): enable STORE_USE_REDIS
-        # after integrating the centralized Redis backend and service.
+        # TODO(UPG-001.1): Enable STORE_USE_REDIS with centralized Redis support.
         cmake -G Ninja .. -DUSE_ETCD=ON -DUSE_CXL=ON -DUSE_REDIS=ON -DUSE_HTTP=ON -DWITH_STORE=ON -DWITH_P2P_STORE=ON -DWITH_EP=ON -DWITH_METRICS=ON -DBUILD_UNIT_TESTS=ON -DBUILD_EXAMPLES=ON -DENABLE_SCCACHE=ON -DUSE_CUDA=ON -DUSE_MNNVL=OFF -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs"
       shell: bash
       # TODO: lack USE_NVMEOF,USE_MNNVL

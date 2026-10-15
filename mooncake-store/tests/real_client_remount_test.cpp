@@ -1,13 +1,5 @@
-// Unit tests for the RealClient dummy-ping / DISCONNECTION signal.
-//
-// ping() reports HEALTH iff the client is present in shm_contexts_; a client
-// whose segments were dropped (monitor expiry / real-client restart) is absent
-// and gets DISCONNECTION, prompting the dummy to re-register. These tests drive
-// that logic WITHOUT any RDMA/IPC/transfer-engine setup: RealClient's
-// constructor is lightweight and ping() only touches the lock-free ping queue
-// and shm_contexts_. The full round trip (monitor expiry -> unmap -> ping
-// DISCONNECTION -> dummy re-register) needs a live transfer engine and is
-// covered by the e2e harness.
+// Test ping health from SHM registration state without a transfer engine.
+// Missing registrations report DISCONNECTION so Dummy can re-register.
 
 #include <gtest/gtest.h>
 

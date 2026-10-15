@@ -364,7 +364,7 @@ auto P2PClientManager::UnregisterClient(const UUID& client_id)
         client_metas_.erase(it);
     }
 
-    // TODO(P2P route reconciliation): Concurrent monitor cleanup can leave old
+    // TODO: Concurrent monitor cleanup can leave old
     // callbacks running after re-registration. They may remove newly published
     // routes with the same client/segment ID. See the reconciliation TODO in
     // P2PClientService::EnterOnline.

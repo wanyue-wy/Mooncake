@@ -40,8 +40,7 @@ using BufHandleList = std::vector<std::shared_ptr<AllocatedBuffer>>;
 using BufferResources =
     std::map<SegmentId, std::vector<std::shared_ptr<BufferAllocatorBase>>>;
 
-// Preserve the existing C++ type in each build. GoInt64 is long long; the
-// etcd implementation checks that mapping without exposing its generated API.
+// Match GoInt64 in etcd builds without generated-header dependencies.
 #ifdef STORE_USE_ETCD
 using ViewVersionId = long long;
 #else

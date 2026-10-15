@@ -556,9 +556,7 @@ TEST_F(RuntimeConfigTest, HttpSetSingleFieldUnknownSection) {
         400);
 }
 
-// ============================================================================
-// Review fix: /config/set returns 404 for unknown key
-// ============================================================================
+// /config/set returns 404 for unknown keys.
 
 TEST_F(RuntimeConfigTest, HttpSetSingleFieldUnknownKey) {
     auto resp =
@@ -572,9 +570,7 @@ TEST_F(RuntimeConfigTest, HttpSetSingleFieldUnknownKeyReadSection) {
     EXPECT_EQ(resp.status, 404);
 }
 
-// ============================================================================
-// Review fix: applyPatch ignores wrong JSON types (no crash)
-// ============================================================================
+// applyPatch ignores values with incorrect JSON types.
 
 TEST_F(RuntimeConfigTest, ApplyPatchIgnoresWrongTypes) {
     RuntimeConfigStore store;
@@ -614,9 +610,7 @@ TEST_F(RuntimeConfigTest, HttpUpdateWriteConfigWrongTypesNoEffect) {
     EXPECT_DOUBLE_EQ(json["remote_weight"].asDouble(), 0.9);
 }
 
-// ============================================================================
-// Review fix: loadFromJson is atomic (write+read in single lock)
-// ============================================================================
+// loadFromJson updates read/write configuration atomically.
 
 TEST_F(RuntimeConfigTest, LoadFromJsonAtomicUpdate) {
     RuntimeConfigStore store;

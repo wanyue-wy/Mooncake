@@ -825,19 +825,7 @@ TEST_F(StorageTierTest, AutoEvictionOnCapacityExceeded) {
     fs::remove_all("/tmp/mooncake_test_auto_eviction");
 }
 
-// Regression test for the autonomous bucket-eviction metadata-desync bug.
-//
-// When a StorageTier evicts a bucket on its own to reclaim space, the
-// high-level metadata index, the per-tier byte accounting, and Master must all
-// stay consistent with the physical deletion. Before the fix, eviction deleted
-// the bucket files and directly subtracted the freed bytes, but left zombie
-// AllocationHandles in the metadata index and never notified the scheduler or
-// Master. That produced two defects this test guards against:
-//   (#2) the metadata index diverged from disk — evicted keys still appeared
-//        present, so LRU / fast-reclaim could discard the only live copy; and
-//   (#1) the byte counter was decremented twice (once at eviction, once again
-//        when the zombie handle was finally freed), underflowing the unsigned
-//        counter to a huge value.
+// Bucket eviction must update replica metadata, byte accounting and Master.
 TEST_F(StorageTierTest, AutoEvictionSyncsMetadataAndByteAccounting) {
     const std::string path = "/tmp/mooncake_test_eviction_sync";
     fs::remove_all(path);
@@ -917,8 +905,7 @@ TEST_F(StorageTierTest, AutoEvictionSyncsMetadataAndByteAccounting) {
                 << "allocation should succeed after auto-eviction";
         }
 
-        // Constraint #2: evicted keys must be removed from the metadata index
-        // and reported to Master. Before the fix they lingered as zombies.
+        // Evicted keys must leave the metadata index and be reported to Master.
         int still_present = 0;
         for (const auto& k : keys) {
             if (backend.Exist(k, tier_id)) ++still_present;
@@ -939,7 +926,7 @@ TEST_F(StorageTierTest, AutoEvictionSyncsMetadataAndByteAccounting) {
             backend.Delete(k);
         }
 
-        // With the bug, the byte counter underflows to a huge value here.
+        // Byte accounting must not underflow after eviction.
         const size_t usage_after = tier->GetUsage();
         EXPECT_EQ(usage_after, 0u)
             << "persisted byte accounting underflowed or leaked after eviction";

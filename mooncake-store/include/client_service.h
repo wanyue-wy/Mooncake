@@ -441,11 +441,8 @@ class Client {
     tl::expected<Replica::Descriptor, ErrorCode> GetPreferredReplica(
         const std::vector<Replica::Descriptor>& replica_list);
 
-    // Storage ownership and convenience calls retained from d897. Their
-    // implementation follows the A00 algorithms at the end of
-    // client_service.cpp. InitStorage also starts the native client-to-client
-    // RPC server. The creation path calls InitStorage before publishing this
-    // Client. On failure discard the Client; its members own the allocated
+    // Initialize storage and the client RPC server before exposing the Client.
+    // Discard the Client on failure; its members release the allocated
     // resources.
     ErrorCode InitStorage(uint64_t global_segment_size,
                           uint64_t local_buffer_size, bool enable_offload,
@@ -602,7 +599,7 @@ class Client {
     void PingThreadMain(bool is_ha_mode, std::string current_master_address);
 };
 
-// Native client-to-client RPC requester, retained with the centralized Client.
+// Native client-to-client RPC requester.
 class ClientRequester {
    public:
     ClientRequester();

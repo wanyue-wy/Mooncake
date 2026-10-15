@@ -1,15 +1,7 @@
-# limit_jobs.cmake — Memory-aware build parallelism
-#
-# Auto-detects available memory and CPU count, calculates safe parallel job
-# limits for compilation and linking separately. With Ninja, creates job pools
-# so compilation uses many cores while memory-heavy linking is restricted.
-# On GitHub-hosted runners both limits are capped at 3 jobs.
-#
-# User overrides (cmake -D...):
-#   PARALLEL_COMPILE_JOBS  — override compile parallelism
-#   PARALLEL_LINK_JOBS     — override link parallelism
-#   MAX_COMPILER_MEMORY_MB — per-compile-job memory estimate (default: 1500)
-#   MAX_LINKER_MEMORY_MB   — per-link-job memory estimate (default: 4000)
+# Limit compile/link parallelism by memory and CPU; cap hosted runners at 3.
+# Overrides: PARALLEL_COMPILE_JOBS, PARALLEL_LINK_JOBS,
+# MAX_COMPILER_MEMORY_MB (1500), MAX_LINKER_MEMORY_MB (4000).
+# TODO(MAIN-001.1): Deduplicate the upstream build-parallelism implementation.
 
 set(MAX_COMPILER_MEMORY_MB "1500" CACHE STRING
     "Estimated peak memory per compile job in MB")
@@ -57,9 +49,7 @@ if(_link_jobs GREATER _nproc)
     set(_link_jobs ${_nproc})
 endif()
 
-# GitHub-hosted runners (4 vCPUs, 16 GB) have been killed mid-build with exit
-# code 137 while four heavy translation units compiled at once. Self-hosted
-# runners report RUNNER_ENVIRONMENT=self-hosted and keep the limits above.
+# Cap hosted-runner concurrency; self-hosted runners keep the computed limits.
 set(_github_hosted_max_jobs 3)
 if("$ENV{RUNNER_ENVIRONMENT}" STREQUAL "github-hosted")
     foreach(_jobs_var _compile_jobs _link_jobs)

@@ -349,7 +349,7 @@ TEST_F(P2PClientIntegrationTest, MissingTransferEngineFailsBeforePublication) {
     EXPECT_EQ(pending.Init(config), ErrorCode::INVALID_PARAMS);
     EXPECT_EQ(pending.GetRpcPort(), 0);
     EXPECT_EQ(pending.GetBufferAllocator(), nullptr);
-    // Preserve the current lifecycle: the caller stops a failed direct Init.
+    // The caller must stop the client after a failed direct Init.
     pending.Stop();
     EXPECT_EQ(pending.GetHealthStatus(), "STOPPED");
     pending.Destroy();
@@ -1734,8 +1734,7 @@ TEST_F(P2PClientIntegrationTest, KeyRetentionMetricsLifecycle) {
     EXPECT_NE(text.find("mooncake_p2p_key_retention_removed_age_"
                         "seconds_bucket"),
               std::string::npos);
-    // The quantile gauges were replaced by scrape-time histograms; the
-    // live-age histogram is present only while keys are alive.
+    // Export scrape-time histograms; live-age samples require live keys.
     EXPECT_EQ(text.find("mooncake_p2p_key_retention_live_age_p"),
               std::string::npos);
     EXPECT_EQ(text.find("mooncake_p2p_key_retention_removed_age_p"),
