@@ -22,9 +22,10 @@ namespace testing {
 // Init publishes the local state; Master sees it on the next heartbeat.
 // Data-path fixtures wait for that advertisement instead of assuming Init's
 // return synchronously changes the Master's route visibility.
-inline bool WaitForRoutableClient(P2PMasterClient& master, const UUID& client_id) {
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::seconds(5);
+inline bool WaitForRoutableClient(P2PMasterClient& master,
+                                  const UUID& client_id) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
     do {
         auto ips = master.BatchQueryIp({client_id});
         if (ips && ips->contains(client_id)) return true;

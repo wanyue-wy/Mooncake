@@ -10,7 +10,6 @@ set(MOONCAKE_MASTER_SUPPORT_SOURCES
 )
 
 set(MOONCAKE_CENTRALIZED_MASTER_SOURCES
-    replica.cpp
     master_service.cpp
     master_metric_manager.cpp
     ha_helper.cpp

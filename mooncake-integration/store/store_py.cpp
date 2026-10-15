@@ -606,20 +606,6 @@ class MooncakeStorePyWrapper {
         return put_tensor_impl(key, tensor, std::nullopt);
     }
 
-    int put_tensor_with_tp(const std::string& key, pybind11::object tensor,
-                           int tp_rank = 0, int tp_size = 1,
-                           int split_dim = 0) {
-        if (!is_client_initialized() || use_dummy_client_) {
-            LOG(ERROR) << "Client not initialized or Dummy client not "
-                          "supported for tensors";
-            return to_py_ret(ErrorCode::INVALID_PARAMS);
-        }
-        if (tp_size <= 1) return put_tensor(key, tensor);
-
-        return put_tensor_with_tp_impl(key, tensor, std::nullopt, tp_rank,
-                                       tp_size, split_dim);
-    }
-
     int put_tensor_with_tp_impl(
         const std::string& key, pybind11::object tensor,
         const std::optional<WriteConfig>& config_opt = std::nullopt,
@@ -649,19 +635,18 @@ class MooncakeStorePyWrapper {
         }
     }
 
-    std::vector<int> batch_put_tensor(const std::vector<std::string>& keys,
-                                      const pybind11::list& tensors_list) {
-        if (!is_client_initialized() || use_dummy_client_)
-            return std::vector<int>(keys.size(),
-                                    to_py_ret(ErrorCode::INVALID_PARAMS));
-
-        if (keys.size() != tensors_list.size() || keys.empty()) {
-            if (!keys.empty()) LOG(ERROR) << "Size mismatch in batch_put";
-            return std::vector<int>(keys.size(),
-                                    to_py_ret(ErrorCode::INVALID_PARAMS));
+    int put_tensor_with_tp(const std::string& key, pybind11::object tensor,
+                           int tp_rank = 0, int tp_size = 1,
+                           int split_dim = 0) {
+        if (!is_client_initialized() || use_dummy_client_) {
+            LOG(ERROR) << "Client not initialized or Dummy client not "
+                          "supported for tensors";
+            return to_py_ret(ErrorCode::INVALID_PARAMS);
         }
+        if (tp_size <= 1) return put_tensor(key, tensor);
 
-        return batch_put_tensor_impl(keys, tensors_list, std::nullopt);
+        return put_tensor_with_tp_impl(key, tensor, std::nullopt, tp_rank,
+                                       tp_size, split_dim);
     }
 
     std::vector<int> batch_put_tensor_impl(
@@ -744,23 +729,19 @@ class MooncakeStorePyWrapper {
         return results;
     }
 
-    std::vector<int> batch_put_tensor_with_tp(
-        const std::vector<std::string>& base_keys,
-        const pybind11::list& tensors_list, int tp_rank = 0, int tp_size = 1,
-        int split_dim = 0) {
-        if (tp_size <= 1) return batch_put_tensor(base_keys, tensors_list);
+    std::vector<int> batch_put_tensor(const std::vector<std::string>& keys,
+                                      const pybind11::list& tensors_list) {
         if (!is_client_initialized() || use_dummy_client_)
-            return std::vector<int>(base_keys.size(),
+            return std::vector<int>(keys.size(),
                                     to_py_ret(ErrorCode::INVALID_PARAMS));
 
-        if (base_keys.size() != tensors_list.size() || base_keys.empty()) {
-            if (!base_keys.empty()) LOG(ERROR) << "Size mismatch in batch_put";
-            return std::vector<int>(base_keys.size(),
+        if (keys.size() != tensors_list.size() || keys.empty()) {
+            if (!keys.empty()) LOG(ERROR) << "Size mismatch in batch_put";
+            return std::vector<int>(keys.size(),
                                     to_py_ret(ErrorCode::INVALID_PARAMS));
         }
 
-        return batch_put_tensor_with_tp_impl(
-            base_keys, tensors_list, std::nullopt, tp_rank, tp_size, split_dim);
+        return batch_put_tensor_impl(keys, tensors_list, std::nullopt);
     }
 
     std::vector<int> batch_put_tensor_with_tp_impl(
@@ -824,6 +805,25 @@ class MooncakeStorePyWrapper {
         }
 
         return final_results;
+    }
+
+    std::vector<int> batch_put_tensor_with_tp(
+        const std::vector<std::string>& base_keys,
+        const pybind11::list& tensors_list, int tp_rank = 0, int tp_size = 1,
+        int split_dim = 0) {
+        if (tp_size <= 1) return batch_put_tensor(base_keys, tensors_list);
+        if (!is_client_initialized() || use_dummy_client_)
+            return std::vector<int>(base_keys.size(),
+                                    to_py_ret(ErrorCode::INVALID_PARAMS));
+
+        if (base_keys.size() != tensors_list.size() || base_keys.empty()) {
+            if (!base_keys.empty()) LOG(ERROR) << "Size mismatch in batch_put";
+            return std::vector<int>(base_keys.size(),
+                                    to_py_ret(ErrorCode::INVALID_PARAMS));
+        }
+
+        return batch_put_tensor_with_tp_impl(
+            base_keys, tensors_list, std::nullopt, tp_rank, tp_size, split_dim);
     }
 
     int pub_tensor(const std::string& key, pybind11::object tensor,

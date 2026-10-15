@@ -1919,8 +1919,8 @@ P2PClientService::BatchGet(
 }
 
 // TODO:
-// The `aggregate_same_segment_task` is currently ignored. Reads of different keys
-// on the same remote peer are not aggregated
+// The `aggregate_same_segment_task` is currently ignored. Reads of different
+// keys on the same remote peer are not aggregated
 std::vector<tl::expected<int64_t, ErrorCode>> P2PClientService::BatchGet(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<void*>>& all_buffers,
@@ -2354,7 +2354,8 @@ tl::expected<ReadTaskHandle, ErrorCode> P2PClientService::InnerGetViaRoute(
     uint64_t offset = 0;
     for (const auto& s : slices) {
         if (offset >= object_size) break;
-        const uint64_t length = std::min<uint64_t>(s.size, object_size - offset);
+        const uint64_t length =
+            std::min<uint64_t>(s.size, object_size - offset);
         if (length == 0) continue;
         RemoteBufferDesc buf;
         buf.segment_endpoint = get_te_endpoint();

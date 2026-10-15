@@ -74,9 +74,12 @@ class P2PMasterServiceTest : public ::testing::Test {
         auto res = service.RegisterClient(req);
         EXPECT_TRUE(res.has_value())
             << "Failed to register client: " << res.error();
-        if (ready) EXPECT_TRUE(service.Heartbeat(
-            {.client_id = client_id,
-             .service_state = P2PClientServiceState::ONLINE}).has_value());
+        if (ready)
+            EXPECT_TRUE(
+                service
+                    .Heartbeat({.client_id = client_id,
+                                .service_state = P2PClientServiceState::ONLINE})
+                    .has_value());
         return req.client_id;
     }
 
@@ -2055,20 +2058,18 @@ TEST_F(P2PMasterServiceTest, FullWriteReadCycle) {
 TEST_F(P2PMasterServiceTest, HeartbeatPublishesServiceReadiness) {
     auto service = CreateService();
     auto client_id = generate_uuid();
-    RegisterP2PClient(*service, client_id, {MakeP2PSegment()}, "127.0.0.1", 50051,
-                      false);
+    RegisterP2PClient(*service, client_id, {MakeP2PSegment()}, "127.0.0.1",
+                      50051, false);
     auto client = service->GetClientManager().GetClient(client_id);
     ASSERT_NE(client, nullptr);
     EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::INITIALIZING);
-    for (auto state : {P2PClientServiceState::ONLINE,
-                      P2PClientServiceState::DEGRADED,
-                      P2PClientServiceState::LOCAL_ONLY,
-                      P2PClientServiceState::STOPPING,
-                      P2PClientServiceState::STOPPED,
-                      P2PClientServiceState::INITIALIZING,
-                      P2PClientServiceState::ONLINE}) {
-        auto heartbeat = service->Heartbeat({.client_id = client_id,
-                                             .service_state = state});
+    for (auto state :
+         {P2PClientServiceState::ONLINE, P2PClientServiceState::DEGRADED,
+          P2PClientServiceState::LOCAL_ONLY, P2PClientServiceState::STOPPING,
+          P2PClientServiceState::STOPPED, P2PClientServiceState::INITIALIZING,
+          P2PClientServiceState::ONLINE}) {
+        auto heartbeat = service->Heartbeat(
+            {.client_id = client_id, .service_state = state});
         ASSERT_TRUE(heartbeat.has_value());
         EXPECT_EQ(heartbeat->status, P2PClientStatus::HEALTH);
         EXPECT_EQ(client->GetServiceState(), state);
@@ -2080,7 +2081,8 @@ TEST_F(P2PMasterServiceTest, HeartbeatPublishesServiceReadiness) {
     ASSERT_TRUE(invalid.has_value());
     // Preserve the current raw-state storage policy: an unknown report must
     // never be interpreted as ONLINE or make the client routable.
-    EXPECT_EQ(client->GetServiceState(), static_cast<P2PClientServiceState>(99));
+    EXPECT_EQ(client->GetServiceState(),
+              static_cast<P2PClientServiceState>(99));
     EXPECT_FALSE(client->IsReady());
 }
 
@@ -2100,9 +2102,9 @@ TEST_F(P2PMasterServiceTest, ServiceStateIsPreservedWhenLivenessExpires) {
     EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::ONLINE);
 
     // Even a valid ONLINE report must not overwrite Master's CRASHED judgement.
-    auto heartbeat = service->Heartbeat(
-        {.client_id = client_id,
-         .service_state = P2PClientServiceState::ONLINE});
+    auto heartbeat =
+        service->Heartbeat({.client_id = client_id,
+                            .service_state = P2PClientServiceState::ONLINE});
     ASSERT_TRUE(heartbeat.has_value());
     EXPECT_EQ(heartbeat->status, P2PClientStatus::CRASHED);
     EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::ONLINE);
@@ -2180,9 +2182,11 @@ TEST_F(P2PMasterServiceTest, UnreadyClientIsHiddenFromAllRouteQueries) {
     ASSERT_EQ(ips->size(), 1);
     EXPECT_TRUE(ips->contains(warm));
 
-    ASSERT_TRUE(service->Heartbeat(
-        {.client_id = cold,
-         .service_state = P2PClientServiceState::ONLINE}).has_value());
+    ASSERT_TRUE(
+        service
+            ->Heartbeat({.client_id = cold,
+                         .service_state = P2PClientServiceState::ONLINE})
+            .has_value());
     // Filtering must not erase the stored location while it is unready.
     read = service->GetReadRoute("ready-gate");
     ASSERT_TRUE(read.has_value());
@@ -2200,7 +2204,9 @@ TEST_F(P2PMasterServiceTest, UnreadyClientIsHiddenFromAllRouteQueries) {
     ASSERT_TRUE(hb.has_value());
 
     P2PRegisterClientRequest duplicate{.client_id = cold,
-        .segments = {segment}, .ip_address = "127.0.0.1", .rpc_port = 50051};
+                                       .segments = {segment},
+                                       .ip_address = "127.0.0.1",
+                                       .rpc_port = 50051};
     ASSERT_TRUE(service->RegisterClient(duplicate).has_value());
     EXPECT_TRUE(service->GetClientManager().GetClient(cold)->IsReady());
     ASSERT_TRUE(service->UnregisterClient(cold).has_value());
@@ -2210,8 +2216,9 @@ TEST_F(P2PMasterServiceTest, UnreadyClientIsHiddenFromAllRouteQueries) {
 
 TEST_F(P2PMasterServiceTest, HeartbeatDoesNotRegisterUnknownClient) {
     auto service = CreateService();
-    auto result = service->Heartbeat({.client_id = generate_uuid(),
-        .service_state = P2PClientServiceState::ONLINE});
+    auto result =
+        service->Heartbeat({.client_id = generate_uuid(),
+                            .service_state = P2PClientServiceState::ONLINE});
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->status, P2PClientStatus::UNDEFINED);
     EXPECT_TRUE(service->GetClientManager().GetAllClients().empty());
@@ -2224,12 +2231,16 @@ TEST_F(P2PMasterServiceTest, ReadyHeartbeatsAreIdempotent) {
     RegisterP2PClient(*service, client_id, {seg}, "127.0.0.1", 50051, false);
 
     // Call twice — should succeed both times
-    EXPECT_TRUE(service->Heartbeat(
-        {.client_id = client_id,
-         .service_state = P2PClientServiceState::ONLINE}).has_value());
-    EXPECT_TRUE(service->Heartbeat(
-        {.client_id = client_id,
-         .service_state = P2PClientServiceState::ONLINE}).has_value());
+    EXPECT_TRUE(
+        service
+            ->Heartbeat({.client_id = client_id,
+                         .service_state = P2PClientServiceState::ONLINE})
+            .has_value());
+    EXPECT_TRUE(
+        service
+            ->Heartbeat({.client_id = client_id,
+                         .service_state = P2PClientServiceState::ONLINE})
+            .has_value());
 
     auto p2p_client = service->client_manager_->GetClient(client_id);
     EXPECT_TRUE(p2p_client->IsReady());

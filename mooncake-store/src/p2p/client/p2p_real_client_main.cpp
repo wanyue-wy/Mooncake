@@ -137,35 +137,31 @@ int main(int argc, char* argv[]) {
     LOG(INFO) << "Using P2P client type"
               << ", client_rpc_port=" << FLAGS_client_rpc_port;
 
-    auto config =
-        P2PClientConfigBuilder::build_p2p_real_client(
-            FLAGS_host, FLAGS_metadata_server, FLAGS_protocol,
-            FLAGS_device_names.empty()
-                ? std::nullopt
-                : std::optional<std::string>(FLAGS_device_names),
-            FLAGS_master_server_address, FLAGS_tiered_backend_config,
-            local_buffer_size, nullptr,
-            "@mooncake_client_" + std::to_string(FLAGS_port) + ".sock",
-            static_cast<uint16_t>(FLAGS_client_rpc_port),
-            static_cast<uint32_t>(FLAGS_rpc_thread_num),
-            FLAGS_lock_shard_count,
-            string_to_byte_size(FLAGS_route_cache_max_memory),
-            FLAGS_route_cache_ttl_ms, FLAGS_p2p_local_transfer_mode,
-            static_cast<size_t>(FLAGS_local_memcpy_async_worker_num),
-            static_cast<uint16_t>(FLAGS_http_port),
-            FLAGS_enable_http_server, {},  // labels
-            FLAGS_async_sender_thread_count, FLAGS_async_max_batch_size,
-            FLAGS_async_route_queue_size, FLAGS_p2p_key_lease_duration_ms,
-            FLAGS_p2p_key_lease_scan_interval_ms,
-            FLAGS_p2p_transfer_direction_mode, FLAGS_runtime_config,
-            FLAGS_enable_client_metric_collection,
-            FLAGS_metric_report_interval_seconds, FLAGS_redis_cluster_id,
-            FLAGS_redis_password, FLAGS_redis_db_index,
-            FLAGS_redis_master_view_ttl_sec,
-            FLAGS_redis_heartbeat_interval_sec, FLAGS_redis_username,
-            static_cast<uint16_t>(FLAGS_heartbeat_rpc_port),
-            static_cast<size_t>(FLAGS_te_async_poll_worker_num),
-            FLAGS_p2p_start_local_only);
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
+        FLAGS_host, FLAGS_metadata_server, FLAGS_protocol,
+        FLAGS_device_names.empty()
+            ? std::nullopt
+            : std::optional<std::string>(FLAGS_device_names),
+        FLAGS_master_server_address, FLAGS_tiered_backend_config,
+        local_buffer_size, nullptr,
+        "@mooncake_client_" + std::to_string(FLAGS_port) + ".sock",
+        static_cast<uint16_t>(FLAGS_client_rpc_port),
+        static_cast<uint32_t>(FLAGS_rpc_thread_num), FLAGS_lock_shard_count,
+        string_to_byte_size(FLAGS_route_cache_max_memory),
+        FLAGS_route_cache_ttl_ms, FLAGS_p2p_local_transfer_mode,
+        static_cast<size_t>(FLAGS_local_memcpy_async_worker_num),
+        static_cast<uint16_t>(FLAGS_http_port), FLAGS_enable_http_server,
+        {},  // labels
+        FLAGS_async_sender_thread_count, FLAGS_async_max_batch_size,
+        FLAGS_async_route_queue_size, FLAGS_p2p_key_lease_duration_ms,
+        FLAGS_p2p_key_lease_scan_interval_ms, FLAGS_p2p_transfer_direction_mode,
+        FLAGS_runtime_config, FLAGS_enable_client_metric_collection,
+        FLAGS_metric_report_interval_seconds, FLAGS_redis_cluster_id,
+        FLAGS_redis_password, FLAGS_redis_db_index,
+        FLAGS_redis_master_view_ttl_sec, FLAGS_redis_heartbeat_interval_sec,
+        FLAGS_redis_username, static_cast<uint16_t>(FLAGS_heartbeat_rpc_port),
+        static_cast<size_t>(FLAGS_te_async_poll_worker_num),
+        FLAGS_p2p_start_local_only);
 
     auto client_inst = RealClient::create();
     auto res = client_inst->setup_internal(config);

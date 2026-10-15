@@ -56,7 +56,6 @@ int allocateSlices(std::vector<Slice>& slices,
         auto& handle = replica.get_memory_descriptor().buffer_descriptor;
         void* chunk_ptr = buffer_ptr;
         slices.emplace_back(Slice{chunk_ptr, handle.size_});
-
     }
     return 0;
 }

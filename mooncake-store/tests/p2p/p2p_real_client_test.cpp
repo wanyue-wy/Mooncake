@@ -63,11 +63,11 @@ class P2PRealClientTest : public ::testing::Test {
 
     static void TearDownTestSuite() { google::ShutdownGoogleLogging(); }
 
-    void StartClients(size_t count = 2, const std::string& host = "127.0.0.1",
-                      int default_read_priority = 0,
-                      TransferDirectionMode direction =
-                          TransferDirectionMode::REVERSE,
-                      LocalTransferMode local_mode = LocalTransferMode::TE) {
+    void StartClients(
+        size_t count = 2, const std::string& host = "127.0.0.1",
+        int default_read_priority = 0,
+        TransferDirectionMode direction = TransferDirectionMode::REVERSE,
+        LocalTransferMode local_mode = LocalTransferMode::TE) {
         ASSERT_TRUE(master_.Start());
         P2PMasterClient observer(generate_uuid());
         ASSERT_EQ(observer.Connect(master_.master_address()), ErrorCode::OK);
@@ -146,10 +146,11 @@ class P2PRealClientTest : public ::testing::Test {
         constexpr size_t capacity = 1024 * 1024;
         const std::vector<std::string> keys = {"capacity_a", "capacity_b"};
         const std::vector<std::string> values = {std::string(3000, 'a'),
-                                               std::string(5100, 'b')};
+                                                 std::string(5100, 'b')};
         P2PWriteRouteConfig local;
         local.remote_weight = 0.0;
-        ASSERT_EQ(clients_[0]->put_batch(keys, {values[0], values[1]}, local), 0);
+        ASSERT_EQ(clients_[0]->put_batch(keys, {values[0], values[1]}, local),
+                  0);
         for (size_t reader = 0; reader < clients_.size(); ++reader) {
             SCOPED_TRACE(reader == 0 ? "local" : "remote");
             auto allocator = clients_[reader]->GetBufferAllocator();
@@ -158,22 +159,26 @@ class P2PRealClientTest : public ::testing::Test {
             ASSERT_TRUE(first.has_value());
             ASSERT_TRUE(second.has_value());
             std::memset(first->ptr(), 0x5a, capacity);
-            ASSERT_EQ(clients_[reader]->get_into(keys[0], first->ptr(), capacity),
-                      values[0].size());
-            EXPECT_EQ(std::memcmp(first->ptr(), values[0].data(), values[0].size()),
-                      0);
+            ASSERT_EQ(
+                clients_[reader]->get_into(keys[0], first->ptr(), capacity),
+                values[0].size());
+            EXPECT_EQ(
+                std::memcmp(first->ptr(), values[0].data(), values[0].size()),
+                0);
             ExpectSentinel(*first, values[0].size());
 
             std::memset(first->ptr(), 0x5a, capacity);
             std::memset(second->ptr(), 0x5a, capacity);
-            EXPECT_EQ(clients_[reader]->batch_get_into(
-                          keys, {first->ptr(), second->ptr()},
-                          {capacity, capacity}),
-                      (std::vector<int64_t>{3000, 5100}));
-            EXPECT_EQ(std::memcmp(first->ptr(), values[0].data(), values[0].size()),
-                      0);
-            EXPECT_EQ(std::memcmp(second->ptr(), values[1].data(), values[1].size()),
-                      0);
+            EXPECT_EQ(
+                clients_[reader]->batch_get_into(
+                    keys, {first->ptr(), second->ptr()}, {capacity, capacity}),
+                (std::vector<int64_t>{3000, 5100}));
+            EXPECT_EQ(
+                std::memcmp(first->ptr(), values[0].data(), values[0].size()),
+                0);
+            EXPECT_EQ(
+                std::memcmp(second->ptr(), values[1].data(), values[1].size()),
+                0);
             ExpectSentinel(*first, values[0].size());
             ExpectSentinel(*second, values[1].size());
 
@@ -183,14 +188,15 @@ class P2PRealClientTest : public ::testing::Test {
                       toInt(ErrorCode::INVALID_PARAMS));
             ExpectSentinel(*first);
             std::memset(second->ptr(), 0x5a, capacity);
-            EXPECT_EQ(clients_[reader]->batch_get_into(
-                          keys, {first->ptr(), second->ptr()},
-                          {values[0].size() - 1, capacity}),
-                      (std::vector<int64_t>{toInt(ErrorCode::INVALID_PARAMS),
-                                            5100}));
+            EXPECT_EQ(
+                clients_[reader]->batch_get_into(
+                    keys, {first->ptr(), second->ptr()},
+                    {values[0].size() - 1, capacity}),
+                (std::vector<int64_t>{toInt(ErrorCode::INVALID_PARAMS), 5100}));
             ExpectSentinel(*first);
-            EXPECT_EQ(std::memcmp(second->ptr(), values[1].data(), values[1].size()),
-                      0);
+            EXPECT_EQ(
+                std::memcmp(second->ptr(), values[1].data(), values[1].size()),
+                0);
             ExpectSentinel(*second, values[1].size());
         }
     }
@@ -206,7 +212,7 @@ TEST_F(P2PRealClientTest, InvalidShmRegistrationClosesFdAndLeavesNoContext) {
     auto config = DeploymentConfig();
     ASSERT_EQ(client->setup(config), 0);
     std::unique_ptr<std::FILE, decltype(&std::fclose)> file(std::tmpfile(),
-                                                         std::fclose);
+                                                            std::fclose);
     ASSERT_NE(file, nullptr);
     const int fd = fileno(file.get());
     ASSERT_GE(fd, 0);
@@ -272,7 +278,8 @@ TEST_F(P2PRealClientTest, OmittedConfigsUseRuntimeDefaultsForSingleAndBatch) {
     EXPECT_EQ(clients_[0]->isExist("default_single"), 1);
     EXPECT_EQ(clients_[0]->getSize("default_single"), value.size());
 
-    const std::vector<std::string> keys = {"default_batch_a", "default_batch_b"};
+    const std::vector<std::string> keys = {"default_batch_a",
+                                           "default_batch_b"};
     const std::vector<std::string> values = {"first", "second batch value"};
     const std::vector<std::span<const char>> spans = {values[0], values[1]};
     ASSERT_EQ(clients_[0]->put_batch(keys, spans), 0);
@@ -286,7 +293,8 @@ TEST_F(P2PRealClientTest, OmittedConfigsUseRuntimeDefaultsForSingleAndBatch) {
         ASSERT_TRUE(descriptors.contains(keys[i]));
         ASSERT_EQ(descriptors.at(keys[i]).size(), 1);
         EXPECT_EQ(descriptors.at(keys[i]).front().client_id, client_ids_[1]);
-        EXPECT_EQ(descriptors.at(keys[i]).front().object_size, values[i].size());
+        EXPECT_EQ(descriptors.at(keys[i]).front().object_size,
+                  values[i].size());
     }
     EXPECT_EQ(clients_[0]->batchIsExist(keys), (std::vector<int>{1, 1}));
 }
@@ -303,8 +311,10 @@ TEST_F(P2PRealClientTest, ExplicitConfigsOverrideRuntimeDefaults) {
     ExpectOwner("explicit_single", client_ids_[0], value.size());
     ExpectValue(clients_[1]->get_buffer("explicit_single", read), value);
 
-    const std::vector<std::string> keys = {"explicit_batch_a", "explicit_batch_b"};
-    const std::vector<std::string> values = {"explicit first", "explicit second"};
+    const std::vector<std::string> keys = {"explicit_batch_a",
+                                           "explicit_batch_b"};
+    const std::vector<std::string> values = {"explicit first",
+                                             "explicit second"};
     const std::vector<std::span<const char>> spans = {values[0], values[1]};
     ASSERT_EQ(clients_[0]->put_batch(keys, spans, local), 0);
     const auto buffers = clients_[1]->batch_get_buffer(keys, read);
@@ -316,7 +326,8 @@ TEST_F(P2PRealClientTest, ExplicitConfigsOverrideRuntimeDefaults) {
     }
 }
 
-TEST_F(P2PRealClientTest, ReadConfigsPreserveRuntimeDefaultsAndExplicitOverrides) {
+TEST_F(P2PRealClientTest,
+       ReadConfigsPreserveRuntimeDefaultsAndExplicitOverrides) {
     ASSERT_NO_FATAL_FAILURE(StartClients(2, "127.0.0.1", 101));
     P2PWriteRouteConfig local;
     local.remote_weight = 0.0;
@@ -334,8 +345,9 @@ TEST_F(P2PRealClientTest, ReadConfigsPreserveRuntimeDefaultsAndExplicitOverrides
     ExpectValue(clients_[1]->get_buffer(single_key, allowed), single_value);
 
     const std::vector<std::string> keys = {"read_config_batch_a",
-                                         "read_config_batch_b"};
-    const std::vector<std::string> values = {"filtered first", "filtered second"};
+                                           "read_config_batch_b"};
+    const std::vector<std::string> values = {"filtered first",
+                                             "filtered second"};
     const std::vector<std::span<const char>> spans = {values[0], values[1]};
     ASSERT_EQ(clients_[0]->put_batch(keys, spans, local), 0);
     const auto filtered = clients_[1]->batch_get_buffer(keys);
@@ -360,8 +372,8 @@ TEST_F(P2PRealClientTest, RegisteredBufferSingleAndBatchRoundTrips) {
     ASSERT_TRUE(destination.has_value());
     const std::string value = "registered buffer payload";
     std::memcpy(source->ptr(), value.data(), value.size());
-    ASSERT_EQ(clients_[0]->put_from("buffer_single", source->ptr(), value.size()),
-              0);
+    ASSERT_EQ(
+        clients_[0]->put_from("buffer_single", source->ptr(), value.size()), 0);
     ASSERT_EQ(clients_[0]->get_into("buffer_single", destination->ptr(),
                                     value.size()),
               value.size());
@@ -387,9 +399,10 @@ TEST_F(P2PRealClientTest, ReadIntoAcceptsCapacityAndRejectsShortBuffers) {
     CheckReadIntoCapacities();
 }
 
-TEST_F(P2PRealClientTest, ForwardReadIntoAcceptsCapacityAndRejectsShortBuffers) {
-    ASSERT_NO_FATAL_FAILURE(StartClients(2, "127.0.0.1", 0,
-                                         TransferDirectionMode::FORWARD));
+TEST_F(P2PRealClientTest,
+       ForwardReadIntoAcceptsCapacityAndRejectsShortBuffers) {
+    ASSERT_NO_FATAL_FAILURE(
+        StartClients(2, "127.0.0.1", 0, TransferDirectionMode::FORWARD));
     CheckReadIntoCapacities();
 }
 
@@ -430,10 +443,10 @@ TEST_F(P2PRealClientTest, ScatterReadPreservesUnusedDestinationBytes) {
 
         std::memset(first->ptr(), 0x5a, first->size());
         std::memset(second->ptr(), 0x5a, second->size());
-        EXPECT_EQ(clients_[reader]->batch_get_into_multi_buffers(
-                      {key}, {{first->ptr(), second->ptr()}}, {{1024, 1975}},
-                      false),
-                  (std::vector<int>{toInt(ErrorCode::INVALID_PARAMS)}));
+        EXPECT_EQ(
+            clients_[reader]->batch_get_into_multi_buffers(
+                {key}, {{first->ptr(), second->ptr()}}, {{1024, 1975}}, false),
+            (std::vector<int>{toInt(ErrorCode::INVALID_PARAMS)}));
         ExpectSentinel(*first);
         ExpectSentinel(*second);
     }
@@ -452,8 +465,8 @@ TEST_F(P2PRealClientTest, PeerReadRequiresExactTransferLength) {
     ASSERT_TRUE(peer.Connect(descriptors.front().ip_address + ":" +
                              std::to_string(descriptors.front().rpc_port)));
     ClientResources receiver;
-    ASSERT_EQ(receiver.InitTransferEngine(0, "P2PHANDSHAKE", "tcp", std::nullopt,
-                                         "127.0.0.1"),
+    ASSERT_EQ(receiver.InitTransferEngine(0, "P2PHANDSHAKE", "tcp",
+                                          std::nullopt, "127.0.0.1"),
               ErrorCode::OK);
     receiver.InitLocalBufferAllocator(2 * 1024 * 1024, "tcp", false);
     ASSERT_NE(receiver.GetBufferAllocator(), nullptr);
@@ -493,8 +506,9 @@ TEST_F(P2PRealClientTest, StaleReadRouteCannotReportUnwrittenBytes) {
     auto destination = clients_[1]->GetBufferAllocator()->allocate(4096);
     ASSERT_TRUE(destination.has_value());
     // Populate the reader's route cache before replacing the owner's object.
-    ASSERT_EQ(clients_[1]->get_into(key, destination->ptr(), destination->size()),
-              original.size());
+    ASSERT_EQ(
+        clients_[1]->get_into(key, destination->ptr(), destination->size()),
+        original.size());
     ASSERT_EQ(clients_[0]->removeLocal(key), 0);
     ASSERT_EQ(clients_[0]->put(key, replacement, local), 0);
     std::memset(destination->ptr(), 0x5a, destination->size());
@@ -518,10 +532,12 @@ TEST_F(P2PRealClientTest, StaleReadRouteCannotReportUnwrittenBytes) {
 
 TEST_F(P2PRealClientTest, IPv6LoopbackPutGet) {
     // TE reads its address-family setting once per process. CTest runs this
-    // case separately with MC_USE_IPV6=1, without IPv4 fixtures in that process.
+    // case separately with MC_USE_IPV6=1, without IPv4 fixtures in that
+    // process.
     const char* use_ipv6 = std::getenv("MC_USE_IPV6");
     if (!use_ipv6 || std::string(use_ipv6) != "1") {
-        GTEST_SKIP() << "Run this case in a separate process with MC_USE_IPV6=1";
+        GTEST_SKIP()
+            << "Run this case in a separate process with MC_USE_IPV6=1";
     }
     const int fd = socket(AF_INET6, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -532,8 +548,8 @@ TEST_F(P2PRealClientTest, IPv6LoopbackPutGet) {
     sockaddr_in6 address{};
     address.sin6_family = AF_INET6;
     address.sin6_addr = in6addr_loopback;
-    const int bind_result = bind(fd, reinterpret_cast<sockaddr*>(&address),
-                                 sizeof(address));
+    const int bind_result =
+        bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address));
     const int error = errno;
     close(fd);
     if (bind_result != 0) {

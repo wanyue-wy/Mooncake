@@ -286,8 +286,8 @@ void DataManagerV1::WaitForLeaseDrain() {
     // New-operation handlers and local callers have already drained. Only
     // completion RPCs and the lease scanner can now remove these records.
     // Protocol assumption: peers never access a buffer after lease expiry.
-    auto next_report = std::chrono::steady_clock::now() +
-                       kLeaseDrainReportInterval;
+    auto next_report =
+        std::chrono::steady_clock::now() + kLeaseDrainReportInterval;
     while (true) {
         size_t pending_writes = 0;
         size_t pinned_keys = 0;
@@ -889,7 +889,8 @@ tl::expected<ReadTaskHandle, ErrorCode> DataManagerV1::BuildDataCopierViaTe(
         const size_t length = std::min(slice.size, source_size - offset);
         if (length == 0) continue;
         dest_buffers.push_back({local_transfer_config_.te_endpoint,
-                                reinterpret_cast<uintptr_t>(slice.ptr), length});
+                                reinterpret_cast<uintptr_t>(slice.ptr),
+                                length});
         offset += length;
     }
     if (offset != source_size) {
@@ -2143,8 +2144,8 @@ DataManagerV1::WaitAllTransferBatchesCoro(
 
 // Classic TE requires is_finished=true on every task (COMPLETED/FAILED).
 // TENT additionally reports resolved tasks as CANCELED/TIMEOUT. There is no
-// cancel API here, so use the backend-specific drain check before freeBatchID or
-// returning to a caller that may release the associated buffers. A timeout
+// cancel API here, so use the backend-specific drain check before freeBatchID
+// or returning to a caller that may release the associated buffers. A timeout
 // reports stalled cleanup; it cannot establish that memory is safe to free.
 void DataManagerV1::CancelBatchTETask(Transport::BatchID batch_id,
                                       size_t num_tasks) {

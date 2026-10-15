@@ -27,9 +27,9 @@ using ReplicaID = uint64_t;
  * @brief Type of buffer allocator used in the system
  */
 enum class ReplicaType {
-    MEMORY,      // Memory replica
-    DISK,        // Disk replica
-    LOCAL_DISK,  // Local disk replica
+    MEMORY,     // Memory replica
+    DISK,       // Disk replica
+    LOCAL_DISK  // Local disk replica
 };
 
 /**
@@ -39,8 +39,7 @@ inline std::ostream& operator<<(std::ostream& os,
                                 const ReplicaType& replicaType) noexcept {
     static const std::unordered_map<ReplicaType, std::string_view>
         replica_type_strings{{ReplicaType::MEMORY, "MEMORY"},
-                             {ReplicaType::DISK, "DISK"},
-                             {ReplicaType::LOCAL_DISK, "LOCAL_DISK"}};
+                             {ReplicaType::DISK, "DISK"}};
 
     os << (replica_type_strings.count(replicaType)
                ? replica_type_strings.at(replicaType)
@@ -287,9 +286,6 @@ class Replica {
     [[nodiscard]] std::vector<std::optional<std::string>> get_segment_names()
         const;
 
-    // Only memory replicas have a segment ID.
-    [[nodiscard]] std::optional<UUID> get_segment_id() const;
-
     void mark_complete() {
         if (status_ == ReplicaStatus::PROCESSING) {
             status_ = ReplicaStatus::COMPLETE;
@@ -306,7 +302,6 @@ class Replica {
 
     uint32_t get_refcnt() const { return refcnt_.load(); }
 
-   public:
     friend std::ostream& operator<<(std::ostream& os, const Replica& replica);
 
     struct ReplicaTypeVisitor {
@@ -329,20 +324,6 @@ class Replica {
         YLT_REFL(Descriptor, id, descriptor_variant, status);
 
         // Helper functions
-        ReplicaType type() const {
-            return std::visit(
-                [](const auto& desc) -> ReplicaType {
-                    using T = std::decay_t<decltype(desc)>;
-                    if constexpr (std::is_same_v<T, MemoryDescriptor>) {
-                        return ReplicaType::MEMORY;
-                    } else if constexpr (std::is_same_v<T, DiskDescriptor>) {
-                        return ReplicaType::DISK;
-                    } else {
-                        return ReplicaType::LOCAL_DISK;
-                    }
-                },
-                descriptor_variant);
-        }
         bool is_memory_replica() noexcept {
             return std::holds_alternative<MemoryDescriptor>(descriptor_variant);
         }
@@ -414,9 +395,6 @@ class Replica {
             }
             throw std::runtime_error("Expected LocalDiskDescriptor");
         }
-
-        friend std::ostream& operator<<(std::ostream& os,
-                                        const Descriptor& desc);
     };
 
    private:
@@ -428,6 +406,41 @@ class Replica {
     ReplicaStatus status_{ReplicaStatus::UNDEFINED};
     std::atomic<uint32_t> refcnt_{0};
 };
+
+inline Replica::Descriptor Replica::get_descriptor() const {
+    Replica::Descriptor desc;
+    desc.id = id_;
+    desc.status = status_;
+
+    if (is_memory_replica()) {
+        const auto& mem_data = std::get<MemoryReplicaData>(data_);
+        MemoryDescriptor mem_desc;
+        if (mem_data.buffer) {
+            mem_desc.buffer_descriptor = mem_data.buffer->get_descriptor();
+        } else {
+            mem_desc.buffer_descriptor.size_ = 0;
+            mem_desc.buffer_descriptor.buffer_address_ = 0;
+            mem_desc.buffer_descriptor.transport_endpoint_ = "";
+            LOG(ERROR) << "Trying to get invalid memory replica descriptor";
+        }
+        desc.descriptor_variant = std::move(mem_desc);
+    } else if (is_disk_replica()) {
+        const auto& disk_data = std::get<DiskReplicaData>(data_);
+        DiskDescriptor disk_desc;
+        disk_desc.file_path = disk_data.file_path;
+        disk_desc.object_size = disk_data.object_size;
+        desc.descriptor_variant = std::move(disk_desc);
+    } else if (is_local_disk_replica()) {
+        const auto& disk_data = std::get<LocalDiskReplicaData>(data_);
+        LocalDiskDescriptor local_disk_desc;
+        local_disk_desc.client_id = disk_data.client_id;
+        local_disk_desc.object_size = disk_data.object_size;
+        local_disk_desc.transport_endpoint = disk_data.transport_endpoint;
+        desc.descriptor_variant = std::move(local_disk_desc);
+    }
+
+    return desc;
+}
 
 inline std::vector<std::optional<std::string>> Replica::get_segment_names()
     const {
@@ -444,16 +457,25 @@ inline std::vector<std::optional<std::string>> Replica::get_segment_names()
     return std::vector<std::optional<std::string>>();
 }
 
-inline std::optional<UUID> Replica::get_segment_id() const {
-    if (is_memory_replica()) {
-        const auto& mem_data = std::get<MemoryReplicaData>(data_);
-        if (mem_data.buffer) {
-            return mem_data.buffer->getSegmentId();
-        }
-    }
-    return std::nullopt;
-}
+inline std::ostream& operator<<(std::ostream& os, const Replica& replica) {
+    os << "Replica: { id: " << replica.id_ << ", status: " << replica.status_
+       << ", ";
 
-std::ostream& operator<<(std::ostream& os, const Replica& replica);
+    if (replica.is_memory_replica()) {
+        const auto& mem_data = std::get<MemoryReplicaData>(replica.data_);
+        os << "type: MEMORY, buffers: [";
+        if (mem_data.buffer) {
+            os << *mem_data.buffer;
+        }
+        os << "]";
+    } else if (replica.is_disk_replica()) {
+        const auto& disk_data = std::get<DiskReplicaData>(replica.data_);
+        os << "type: DISK, file_path: " << disk_data.file_path
+           << ", object_size: " << disk_data.object_size;
+    }
+
+    os << ", refcnt: " << replica.refcnt_.load() << " }";
+    return os;
+}
 
 }  // namespace mooncake

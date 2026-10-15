@@ -97,7 +97,8 @@ class ClientRpcService {
         metrics_;  // Optional: shared from P2PClientService
 
     std::atomic<bool> ready_{false};
-    // Normal operation RPCs: ReadRemoteData, WriteRemoteData, PreWrite and PinKey.
+    // Normal operation RPCs: ReadRemoteData, WriteRemoteData, PreWrite and
+    // PinKey.
     InflightTracker normal_op_tracker_;
     // RPCs that complete or release existing leases: WriteCommit, WriteRevoke
     // and UnPinKey. Keep accepting them while new operations are draining,

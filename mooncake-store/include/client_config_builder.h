@@ -109,8 +109,6 @@ class ClientConfigBuilder {
         static constexpr const char* kDefaultProtocol = "tcp";
         static constexpr const char* kDefaultMasterServerAddr =
             "127.0.0.1:50051";
-        static constexpr size_t kMinSegmentSize = 1024;
-        static constexpr size_t kMaxSegmentSize = 1024ULL * 1024 * 1024 * 1024;
     };
 
     static std::string get_config_str(

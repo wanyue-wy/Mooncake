@@ -166,37 +166,27 @@ TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigRemoteWeightClamped) {
     Json::Value patch;
     patch["remote_weight"] = 5.0;  // out of range -> clamped to 1.0
     p2p_store().updateWriteConfig(patch);
-    EXPECT_DOUBLE_EQ(
-        p2p_store().getDefaultWriteConfig()
-            .remote_weight,
-        1.0);
+    EXPECT_DOUBLE_EQ(p2p_store().getDefaultWriteConfig().remote_weight, 1.0);
 
     Json::Value patch2;
     patch2["remote_weight"] = -1.0;  // out of range -> clamped to 0.0
     p2p_store().updateWriteConfig(patch2);
-    EXPECT_DOUBLE_EQ(
-        p2p_store().getDefaultWriteConfig()
-            .remote_weight,
-        0.0);
+    EXPECT_DOUBLE_EQ(p2p_store().getDefaultWriteConfig().remote_weight, 0.0);
 }
 
 TEST_F(RuntimeConfigTest, UpdateP2PWriteConfigLocalWriteWaterline) {
     Json::Value patch;
     patch["local_write_waterline"] = 0.8;
     p2p_store().updateWriteConfig(patch);
-    EXPECT_DOUBLE_EQ(
-        p2p_store().getDefaultWriteConfig()
-            .local_write_waterline,
-        0.8);
+    EXPECT_DOUBLE_EQ(p2p_store().getDefaultWriteConfig().local_write_waterline,
+                     0.8);
 
     // Clamp test
     Json::Value patch2;
     patch2["local_write_waterline"] = 2.0;
     p2p_store().updateWriteConfig(patch2);
-    EXPECT_DOUBLE_EQ(
-        p2p_store().getDefaultWriteConfig()
-            .local_write_waterline,
-        1.0);
+    EXPECT_DOUBLE_EQ(p2p_store().getDefaultWriteConfig().local_write_waterline,
+                     1.0);
 }
 
 TEST_F(RuntimeConfigTest, ValidateWriteConfigRejectsContradiction) {
@@ -218,8 +208,7 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigRejectsContradiction) {
         patch["local_write_waterline"] = 1.0;
         EXPECT_FALSE(store.updateWriteConfig(patch));
     }
-    const auto cfg =
-        store.getDefaultWriteConfig();
+    const auto cfg = store.getDefaultWriteConfig();
     EXPECT_DOUBLE_EQ(cfg.remote_weight, 0.5);
     EXPECT_DOUBLE_EQ(cfg.local_write_waterline, 0.5);
 }
@@ -230,8 +219,7 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigAllowsValidCombos) {
     patch["remote_weight"] = 0.5;
     patch["local_write_waterline"] = 0.0;
     EXPECT_TRUE(p2p_store().updateWriteConfig(patch));
-    const auto cfg1 =
-        p2p_store().getDefaultWriteConfig();
+    const auto cfg1 = p2p_store().getDefaultWriteConfig();
     EXPECT_DOUBLE_EQ(cfg1.remote_weight, 0.5);
     EXPECT_DOUBLE_EQ(cfg1.local_write_waterline, 0.0);
 
@@ -240,8 +228,7 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigAllowsValidCombos) {
     patch2["remote_weight"] = 0.0;
     patch2["local_write_waterline"] = 0.8;
     EXPECT_TRUE(p2p_store().updateWriteConfig(patch2));
-    const auto cfg2 =
-        p2p_store().getDefaultWriteConfig();
+    const auto cfg2 = p2p_store().getDefaultWriteConfig();
     EXPECT_DOUBLE_EQ(cfg2.remote_weight, 0.0);
     EXPECT_DOUBLE_EQ(cfg2.local_write_waterline, 0.8);
 
@@ -251,8 +238,7 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigAllowsValidCombos) {
     patch3["remote_weight"] = 1.0;
     patch3["local_write_waterline"] = 0.0;
     EXPECT_TRUE(p2p_store().updateWriteConfig(patch3));
-    const auto cfg3 =
-        p2p_store().getDefaultWriteConfig();
+    const auto cfg3 = p2p_store().getDefaultWriteConfig();
     EXPECT_DOUBLE_EQ(cfg3.remote_weight, 1.0);
     EXPECT_DOUBLE_EQ(cfg3.local_write_waterline, 0.0);
 
@@ -262,8 +248,7 @@ TEST_F(RuntimeConfigTest, ValidateWriteConfigAllowsValidCombos) {
     patch4["remote_weight"] = 0.0;
     patch4["local_write_waterline"] = 1.0;
     EXPECT_TRUE(p2p_store().updateWriteConfig(patch4));
-    const auto cfg4 =
-        p2p_store().getDefaultWriteConfig();
+    const auto cfg4 = p2p_store().getDefaultWriteConfig();
     EXPECT_DOUBLE_EQ(cfg4.remote_weight, 0.0);
     EXPECT_DOUBLE_EQ(cfg4.local_write_waterline, 1.0);
 }

@@ -10,9 +10,8 @@
 namespace mooncake {
 namespace testing {
 
-ClientTestWrapper::ClientTestWrapper(
-    std::shared_ptr<P2PClientService> client,
-    std::shared_ptr<SimpleAllocator> allocator)
+ClientTestWrapper::ClientTestWrapper(std::shared_ptr<P2PClientService> client,
+                                     std::shared_ptr<SimpleAllocator> allocator)
     : client_(std::move(client)), allocator_(std::move(allocator)) {}
 
 ClientTestWrapper::~ClientTestWrapper() {
@@ -49,8 +48,8 @@ ClientTestWrapper::CreateClientWrapper(
     config.redis_username = redis_username;
     config.redis_password = redis_password;
     client = std::make_shared<P2PClientService>(
-        config.metadata_connstring, config.http_port,
-        config.enable_http_server, config.labels);
+        config.metadata_connstring, config.http_port, config.enable_http_server,
+        config.labels);
     auto err = client->Init(config);
     if (err != ErrorCode::OK) {
         LOG(ERROR) << "failed to init P2P client, error=" << err;
@@ -134,7 +133,8 @@ ErrorCode ClientTestWrapper::Put(const std::string& key,
     }
 
     // Perform put operation
-    auto put_result = client_->Put(key, slice_guard.slices_, P2PWriteRouteConfig{});
+    auto put_result =
+        client_->Put(key, slice_guard.slices_, P2PWriteRouteConfig{});
     return put_result.has_value() ? ErrorCode::OK : put_result.error();
 }
 

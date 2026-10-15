@@ -72,12 +72,10 @@ TEST(P2PRpcTypesTest, HeartbeatCarriesClientServiceState) {
     P2PHeartbeatRequest request;
     EXPECT_EQ(request.service_state, P2PClientServiceState::INITIALIZING);
     request.client_id = {1, 2};
-    for (auto state : {P2PClientServiceState::INITIALIZING,
-                      P2PClientServiceState::DEGRADED,
-                      P2PClientServiceState::LOCAL_ONLY,
-                      P2PClientServiceState::STOPPING,
-                      P2PClientServiceState::STOPPED,
-                      P2PClientServiceState::ONLINE}) {
+    for (auto state :
+         {P2PClientServiceState::INITIALIZING, P2PClientServiceState::DEGRADED,
+          P2PClientServiceState::LOCAL_ONLY, P2PClientServiceState::STOPPING,
+          P2PClientServiceState::STOPPED, P2PClientServiceState::ONLINE}) {
         request.service_state = state;
         auto bytes = struct_pack::serialize(request);
         auto decoded = struct_pack::deserialize<P2PHeartbeatRequest>(bytes);

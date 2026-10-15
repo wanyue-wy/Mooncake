@@ -176,17 +176,15 @@ tl::expected<ReturnType, ErrorCode> DummyClient::invoke_rpc(Args&&... args) {
         return tl::make_unexpected(ErrorCode::RPC_FAIL);
     }
 
-    if constexpr (!std::is_same_v<
-                      std::remove_reference_t<decltype(ServiceMethod)>,
-                      std::remove_reference_t<decltype(&RealClient::ping)>> &&
-                  !std::is_same_v<
-                      std::remove_reference_t<decltype(ServiceMethod)>,
-                      std::remove_reference_t<
-                          decltype(&RealClient::service_ready_internal)>> &&
-                  !std::is_same_v<
-                      std::remove_reference_t<decltype(ServiceMethod)>,
-                      std::remove_reference_t<
-                          decltype(&RealClient::unmap_shm_internal)>>) {
+    if constexpr (
+        !std::is_same_v<std::remove_reference_t<decltype(ServiceMethod)>,
+                        std::remove_reference_t<decltype(&RealClient::ping)>> &&
+        !std::is_same_v<std::remove_reference_t<decltype(ServiceMethod)>,
+                        std::remove_reference_t<
+                            decltype(&RealClient::service_ready_internal)>> &&
+        !std::is_same_v<std::remove_reference_t<decltype(ServiceMethod)>,
+                        std::remove_reference_t<
+                            decltype(&RealClient::unmap_shm_internal)>>) {
         if (!connected_) {
             LOG(ERROR) << "Dummy Client not connected";
             return tl::make_unexpected(ErrorCode::RPC_FAIL);
@@ -656,8 +654,7 @@ int64_t DummyClient::get_into(const std::string& key, void* buffer, size_t size,
 
 std::vector<int64_t> DummyClient::batch_get_into(
     const std::vector<std::string>& keys, const std::vector<void*>& buffer_ptrs,
-    const std::vector<size_t>& sizes,
-    const std::optional<ReadConfig>& config) {
+    const std::vector<size_t>& sizes, const std::optional<ReadConfig>& config) {
     std::vector<uint64_t> buffers;
     for (auto ptr : buffer_ptrs) {
         buffers.push_back(reinterpret_cast<uint64_t>(ptr));
@@ -679,8 +676,7 @@ std::vector<int> DummyClient::batch_get_into_multi_buffers(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<void*>>& all_buffer_ptrs,
     const std::vector<std::vector<size_t>>& all_sizes,
-    bool aggregate_same_segment_task,
-    const std::optional<ReadConfig>& config) {
+    bool aggregate_same_segment_task, const std::optional<ReadConfig>& config) {
     // This operation retains its existing unsupported Dummy return.
     std::vector<int> vec(keys.size(), -1);
     return vec;
@@ -693,8 +689,7 @@ std::string DummyClient::get_hostname() const {
 
 std::vector<int> DummyClient::batch_put_from(
     const std::vector<std::string>& keys, const std::vector<void*>& buffer_ptrs,
-    const std::vector<size_t>& sizes,
-    const std::optional<WriteConfig>& config,
+    const std::vector<size_t>& sizes, const std::optional<WriteConfig>& config,
     WriteOperation operation) {
     std::vector<uint64_t> buffers;
     for (auto ptr : buffer_ptrs) {
@@ -738,12 +733,10 @@ std::vector<int> DummyClient::batch_put_from_multi_buffers(
 
 std::map<std::string, std::vector<ObjectDescriptor>>
 DummyClient::batch_get_replica_desc(const std::vector<std::string>& keys) {
-    std::map<std::string, std::vector<ObjectDescriptor>> replica_list_map =
-        {};
+    std::map<std::string, std::vector<ObjectDescriptor>> replica_list_map = {};
     auto batch_result =
         invoke_rpc<&RealClient::batch_get_replica_desc,
-                   std::map<std::string, std::vector<ObjectDescriptor>>>(
-            keys);
+                   std::map<std::string, std::vector<ObjectDescriptor>>>(keys);
     if (!batch_result.has_value()) {
         LOG(ERROR) << "Batch get replica failed."
                    << "Error is: " << toString(batch_result.error());

@@ -11,8 +11,7 @@ class Client;
 
 class FileStorage {
    public:
-    FileStorage(const FileStorageConfig& config,
-                Client* client,
+    FileStorage(const FileStorageConfig& config, Client* client,
                 const std::string& local_rpc_addr);
     ~FileStorage();
 

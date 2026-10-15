@@ -70,9 +70,11 @@ class P2PMasterRpcTest : public ::testing::Test {
                                      .rpc_port = kClientPort});
         ASSERT_TRUE(registered.has_value()) << registered.error();
         EXPECT_EQ(*registered, kViewVersion);
-        ASSERT_TRUE(client_->Heartbeat(
-            {.client_id = client_id_,
-             .service_state = P2PClientServiceState::ONLINE}).has_value());
+        ASSERT_TRUE(
+            client_
+                ->Heartbeat({.client_id = client_id_,
+                             .service_state = P2PClientServiceState::ONLINE})
+                .has_value());
     }
 
     void TearDown() override {
@@ -125,8 +127,7 @@ TEST_F(P2PMasterRpcTest, BatchQueryIpPreservesPartialResultsAndItemMetrics) {
     ASSERT_TRUE(result.has_value()) << result.error();
     ASSERT_EQ(result->size(), 1u);
     ASSERT_EQ(result->count(client_id_), 1u);
-    EXPECT_EQ(result->at(client_id_),
-              (std::vector<std::string>{"127.0.0.1"}));
+    EXPECT_EQ(result->at(client_id_), (std::vector<std::string>{"127.0.0.1"}));
     EXPECT_EQ(result->count(missing), 0u);
     EXPECT_EQ(metrics.get_batch_query_ip_requests(), requests + 1);
     EXPECT_EQ(metrics.get_batch_query_ip_items(), items + 3);
@@ -279,9 +280,11 @@ TEST_F(P2PMasterRpcTest, BatchReadRoutesWaitForReadyAndPreserveOrder) {
     EXPECT_EQ(routes[0].error(), ErrorCode::REPLICA_IS_NOT_READY);
     EXPECT_EQ(routes[1].error(), ErrorCode::OBJECT_NOT_FOUND);
 
-    ASSERT_TRUE(client_->Heartbeat(
-        {.client_id = cold,
-         .service_state = P2PClientServiceState::ONLINE}).has_value());
+    ASSERT_TRUE(
+        client_
+            ->Heartbeat({.client_id = cold,
+                         .service_state = P2PClientServiceState::ONLINE})
+            .has_value());
     routes = client_->BatchGetReadRoute({"ready-barrier", "missing"}, {});
     ASSERT_EQ(routes.size(), 2);
     ASSERT_TRUE(routes[0].has_value());
@@ -290,8 +293,7 @@ TEST_F(P2PMasterRpcTest, BatchReadRoutesWaitForReadyAndPreserveOrder) {
     ASSERT_EQ(routes[0]->size(), 1);
     EXPECT_EQ(routes[0]->front().client_id, cold);
     heartbeat = client_->Heartbeat(
-        {.client_id = cold,
-         .service_state = P2PClientServiceState::ONLINE});
+        {.client_id = cold, .service_state = P2PClientServiceState::ONLINE});
     ASSERT_TRUE(heartbeat.has_value());
     EXPECT_TRUE(client_->UnregisterClient(cold).has_value());
 }
@@ -310,9 +312,9 @@ TEST_F(P2PMasterRpcTest, LifecycleRemovesRoutesAndUpdatesClientStatus) {
     EXPECT_FALSE(*exists[0]);
     EXPECT_TRUE(*exists[1]);
 
-    auto heartbeat = client_->Heartbeat(
-        {.client_id = client_id_,
-         .service_state = P2PClientServiceState::ONLINE});
+    auto heartbeat =
+        client_->Heartbeat({.client_id = client_id_,
+                            .service_state = P2PClientServiceState::ONLINE});
     ASSERT_TRUE(heartbeat.has_value()) << heartbeat.error();
     EXPECT_EQ(heartbeat->view_version, kViewVersion);
     EXPECT_EQ(heartbeat->status, P2PClientStatus::HEALTH);

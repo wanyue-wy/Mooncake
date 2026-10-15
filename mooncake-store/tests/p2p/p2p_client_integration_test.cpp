@@ -45,7 +45,6 @@ class P2PClientIntegrationTest : public ::testing::Test {
         TransferDirectionMode transfer_direction_mode =
             TransferDirectionMode::REVERSE,
         size_t te_async_poll_worker_num = 32) {
-
         auto config = P2PClientConfigBuilder::build_p2p_real_client(
             host_name, "P2PHANDSHAKE", "tcp", std::nullopt, master_address_,
             R"({"tiers": [{"type": "DRAM", "capacity": 67108864, "priority": 100}]})",
@@ -362,8 +361,7 @@ TEST_F(P2PClientIntegrationTest, NativeQueriesPreserveRoutesAndBatchOrder) {
     const std::string data = "native_route_payload";
     P2PWriteRouteConfig config;
     config.remote_weight = 0.0;
-    std::vector<Slice> slices{
-        {const_cast<char*>(data.data()), data.size()}};
+    std::vector<Slice> slices{{const_cast<char*>(data.data()), data.size()}};
     auto put = client_->Put(key, slices, config);
     ASSERT_TRUE(put.has_value()) << put.error();
 
@@ -419,7 +417,8 @@ TEST_F(P2PClientIntegrationTest, BatchQueryKeepsLocalHitsAfterUnregister) {
     ASSERT_TRUE(isolated->Put(key, slices, config).has_value());
     P2PReadRouteConfig filtered;
     filtered.priority_limit = 1000;
-    auto master_result = isolated->GetMasterClient().GetReadRoute(key, filtered);
+    auto master_result =
+        isolated->GetMasterClient().GetReadRoute(key, filtered);
     ASSERT_FALSE(master_result.has_value());
     auto healthy = isolated->BatchQuery({key}, filtered);
     ASSERT_EQ(healthy.size(), 1u);
@@ -915,8 +914,7 @@ TEST_F(P2PClientIntegrationTest, LocalPutGetWithTeTransferMode) {
 
     std::vector<Slice> put_slices = {Slice{part1.data(), part1.size()},
                                      Slice{part2.data(), part2.size()}};
-    auto put_result =
-        te_client->Put(key, put_slices, P2PWriteRouteConfig{});
+    auto put_result = te_client->Put(key, put_slices, P2PWriteRouteConfig{});
     ASSERT_TRUE(put_result.has_value())
         << "Put failed: " << static_cast<int>(put_result.error());
 
@@ -951,8 +949,7 @@ TEST_F(P2PClientIntegrationTest, LocalGetBufferHandleWithTeTransferMode) {
     ASSERT_TRUE(reg_src.has_value());
 
     std::vector<Slice> put_slices = {{payload.data(), payload.size()}};
-    auto put_result =
-        te_client->Put(key, put_slices, P2PWriteRouteConfig{});
+    auto put_result = te_client->Put(key, put_slices, P2PWriteRouteConfig{});
     ASSERT_TRUE(put_result.has_value())
         << "Put failed: " << static_cast<int>(put_result.error());
 

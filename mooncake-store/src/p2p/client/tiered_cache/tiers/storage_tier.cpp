@@ -139,7 +139,7 @@ tl::expected<void, ErrorCode> StorageTier::Init(
                                    std::to_string(tier_id_.second);
         staging_allocator_ = std::make_shared<OffsetBufferAllocator>(
             segment_name, reinterpret_cast<uintptr_t>(staging_memory_.get()),
-            staging_buffer_capacity_, segment_name, tier_id_);
+            staging_buffer_capacity_, segment_name);
 
         auto backend_res = CreateStorageBackend(tier_config);
         if (!backend_res) {

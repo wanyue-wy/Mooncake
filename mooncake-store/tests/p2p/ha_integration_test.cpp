@@ -139,7 +139,8 @@ class StartupMaster {
         return result;
     }
 
-    tl::expected<ViewVersionId, ErrorCode> UnregisterClient(const UUID& client_id) {
+    tl::expected<ViewVersionId, ErrorCode> UnregisterClient(
+        const UUID& client_id) {
         ++unregistration_calls;
         if (reject_unregistration) {
             return tl::make_unexpected(ErrorCode::RPC_FAIL);
@@ -195,12 +196,15 @@ class StartupMaster {
 // Actual discovery connectivity remains a Linux integration check.
 class FixedMasterView final : public P2PMasterView {
    public:
-    explicit FixedMasterView(std::string address) : address_(std::move(address)) {}
-    void ElectLeader(const std::string&, ViewVersionId&, EtcdLeaseId&) override {}
+    explicit FixedMasterView(std::string address)
+        : address_(std::move(address)) {}
+    void ElectLeader(const std::string&, ViewVersionId&,
+                     EtcdLeaseId&) override {}
     void KeepLeader(EtcdLeaseId) override {}
     void CancelKeepAlive(EtcdLeaseId) override {}
     int GetLeaderLeaseTTLSeconds() const override { return 0; }
-    ErrorCode GetMasterView(std::string& address, ViewVersionId& version) override {
+    ErrorCode GetMasterView(std::string& address,
+                            ViewVersionId& version) override {
         ++lookups;
         if (throw_once.exchange(false)) {
             throw std::runtime_error("discovery injection");
@@ -211,6 +215,7 @@ class FixedMasterView final : public P2PMasterView {
     }
     std::atomic<int> lookups{0};
     std::atomic<bool> throw_once{false};
+
    private:
     std::string address_;
 };
@@ -373,8 +378,8 @@ class HAIntegrationTest : public ::testing::Test {
     }
 
     static void WaitForRecovery(std::shared_ptr<P2PClientService>& client) {
-        const auto deadline = std::chrono::steady_clock::now() +
-                              std::chrono::seconds(10);
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (client->recovery_worker_->GetStatus() ==
                    MetadataRecoveryWorker::Status::RUNNING &&
                std::chrono::steady_clock::now() < deadline) {
@@ -404,8 +409,8 @@ class HAIntegrationTest : public ::testing::Test {
     }
 
     static void HandleOneHeartbeat(std::shared_ptr<P2PClientService>& client) {
-        auto response = master_.GetWrapped().Heartbeat(
-            client->build_heartbeat_request());
+        auto response =
+            master_.GetWrapped().Heartbeat(client->build_heartbeat_request());
         ASSERT_TRUE(response.has_value());
         auto event = client->HandleHeartbeatResponse(*response);
         if (event) {
@@ -417,8 +422,9 @@ class HAIntegrationTest : public ::testing::Test {
         HandleOneHeartbeat(client);
         EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::ONLINE);
         WaitForRecovery(client);
-        EXPECT_TRUE(master_.GetWrapped().Heartbeat(
-            client->build_heartbeat_request()).has_value());
+        EXPECT_TRUE(master_.GetWrapped()
+                        .Heartbeat(client->build_heartbeat_request())
+                        .has_value());
     }
 
     // ---- Suite setup / teardown ----
@@ -530,8 +536,9 @@ TEST_F(HAIntegrationTest, InitialRegistrationStartsReadyWithoutRecovery) {
     EXPECT_TRUE(client->async_route_notifier_->running_.load());
     EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::ONLINE);
     EXPECT_TRUE(client->client_rpc_service_->IsReady());
-    auto meta = master_.GetWrapped().GetMasterService().GetClientManager()
-                    .GetClient(client->GetClientID());
+    auto meta =
+        master_.GetWrapped().GetMasterService().GetClientManager().GetClient(
+            client->GetClientID());
     ASSERT_NE(meta, nullptr);
     EXPECT_TRUE(meta->IsReady());
     EXPECT_NE(meta->get_rpc_port(), 0);
@@ -551,23 +558,28 @@ TEST_F(HAIntegrationTest, MetadataCallbacksStayLocalBeforeServicePublication) {
     auto config = LifecycleConfig();
     auto client = std::make_shared<P2PClientService>(
         config.metadata_connstring, config.http_port, false, config.labels);
-    ASSERT_EQ(client->resources_.InitTransferEngine(
-                  0, "P2PHANDSHAKE", "tcp", std::nullopt, "127.0.0.1"),
+    ASSERT_EQ(client->resources_.InitTransferEngine(0, "P2PHANDSHAKE", "tcp",
+                                                    std::nullopt, "127.0.0.1"),
               ErrorCode::OK);
     client->initTeEndpoint();
     ASSERT_EQ(client->InitStorage(config), ErrorCode::OK);
     EXPECT_EQ(client->recovery_worker_, nullptr);
     EXPECT_NE(client->GetServiceState(), P2PClientServiceState::ONLINE);
     // Registration alone must not publish metadata before Service READY.
-    client->client_rpc_service_.emplace(*client->data_manager_, client->metrics_);
+    client->client_rpc_service_.emplace(*client->data_manager_,
+                                        client->metrics_);
     auto segments = client->CollectTierSegments();
     ASSERT_FALSE(segments.empty());
-    EXPECT_TRUE(client->BuildAddReplicaCallback()("before_ha", segments[0].id, 64)
-                    .has_value());
-    EXPECT_TRUE(client->BuildRemoveReplicaCallback()("before_ha", segments[0].id)
-                    .has_value());
-    EXPECT_TRUE(client->BuildSegmentSyncCallback()(segments[0], true).has_value());
-    EXPECT_TRUE(client->BuildSegmentSyncCallback()(segments[0], false).has_value());
+    EXPECT_TRUE(
+        client->BuildAddReplicaCallback()("before_ha", segments[0].id, 64)
+            .has_value());
+    EXPECT_TRUE(
+        client->BuildRemoveReplicaCallback()("before_ha", segments[0].id)
+            .has_value());
+    EXPECT_TRUE(
+        client->BuildSegmentSyncCallback()(segments[0], true).has_value());
+    EXPECT_TRUE(
+        client->BuildSegmentSyncCallback()(segments[0], false).has_value());
     client->data_manager_->RectifyReadRoute("before_ha", segments[0].id);
     client->data_manager_->RectifyReadRoute("before_ha");
     EXPECT_EQ(client->metrics_->master_client_metric.summary_metrics(),
@@ -598,7 +610,8 @@ TEST_F(HAIntegrationTest, LocalOnlyStartupNeverContactsMaster) {
     for (const auto& shard : client->async_route_notifier_->shards_) {
         EXPECT_FALSE(shard->sender_thread.joinable());
     }
-    EXPECT_EQ(client->recovery_worker_->GetStatus(), MetadataRecoveryWorker::Status::IDLE);
+    EXPECT_EQ(client->recovery_worker_->GetStatus(),
+              MetadataRecoveryWorker::Status::IDLE);
     EXPECT_FALSE(client->recovery_worker_->recovery_thread_.joinable());
     P2PWriteRouteConfig remote;
     remote.remote_weight = 1.0;
@@ -640,7 +653,9 @@ TEST_F(HAIntegrationTest, LocalOnlyRegistrationFailureRequiresManualRetry) {
         EXPECT_TRUE(client->heartbeat_thread_.joinable());
         EXPECT_EQ(endpoint.heartbeat_calls.load(), 0);
         EXPECT_FALSE(client->async_route_notifier_->running_.load());
-        auto meta = master_.GetWrapped().GetMasterService().GetClientManager()
+        auto meta = master_.GetWrapped()
+                        .GetMasterService()
+                        .GetClientManager()
                         .GetClient(client->GetClientID());
         if (meta) {
             EXPECT_FALSE(meta->IsReady());
@@ -667,10 +682,12 @@ TEST_F(HAIntegrationTest, LocalJoinRespectsDiscoveryRecoveryPolicy) {
             auto created = P2PClientService::Create(config);
             ASSERT_TRUE(created.has_value());
             auto client = *created;
-            const auto key = "local-join-" + std::to_string(client->GetClientID().first);
+            const auto key =
+                "local-join-" + std::to_string(client->GetClientID().first);
             ASSERT_TRUE(PutData(client, key, "local-value").has_value());
             if (entry != master_address_) {
-                client->master_view_ = std::make_unique<FixedMasterView>(master_address_);
+                client->master_view_ =
+                    std::make_unique<FixedMasterView>(master_address_);
                 client->master_view_entry_ = entry;
             }
             ASSERT_TRUE(client->RegisterClient().has_value());
@@ -678,7 +695,8 @@ TEST_F(HAIntegrationTest, LocalJoinRespectsDiscoveryRecoveryPolicy) {
             WaitForRecovery(client);
             SendManualHeartbeat(client);
             auto& master = master_.GetWrapped().GetMasterService();
-            auto meta = master.GetClientManager().GetClient(client->GetClientID());
+            auto meta =
+                master.GetClientManager().GetClient(client->GetClientID());
             ASSERT_NE(meta, nullptr);
             EXPECT_EQ(meta->get_rpc_port(), client->GetRpcPort());
             auto segments = meta->GetSegments();
@@ -835,25 +853,30 @@ TEST_F(HAIntegrationTest, ReadyDuringRecoveryAndLeaveCancelsWithoutReopening) {
         std::promise<void> release;
         auto released = release.get_future().share();
         client->recovery_worker_->publish_replica_ =
-            [&](std::string_view, const UUID&, size_t) -> tl::expected<void, ErrorCode> {
-                entered.set_value();
-                released.wait();
-                return {};
-            };
+            [&](std::string_view, const UUID&,
+                size_t) -> tl::expected<void, ErrorCode> {
+            entered.set_value();
+            released.wait();
+            return {};
+        };
         auto registered = client->RegisterClient();
         if (!registered) {
             release.set_value();
             FAIL() << "Registration failed: " << registered.error();
         }
         auto publication = entered.get_future();
-        if (publication.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+        if (publication.wait_for(std::chrono::seconds(5)) !=
+            std::future_status::ready) {
             release.set_value();
             FAIL() << "Recovery did not reach publication";
         }
         EXPECT_EQ(client->GetHealthStatus(), "ONLINE");
-        EXPECT_EQ(client->recovery_worker_->GetStatus(), MetadataRecoveryWorker::Status::RUNNING);
+        EXPECT_EQ(client->recovery_worker_->GetStatus(),
+                  MetadataRecoveryWorker::Status::RUNNING);
         SendManualHeartbeat(client);
-        auto meta = master_.GetWrapped().GetMasterService().GetClientManager()
+        auto meta = master_.GetWrapped()
+                        .GetMasterService()
+                        .GetClientManager()
                         .GetClient(client->GetClientID());
         EXPECT_TRUE(meta && meta->IsReady());
         auto leaving = std::async(std::launch::async, [&] {
@@ -863,13 +886,17 @@ TEST_F(HAIntegrationTest, ReadyDuringRecoveryAndLeaveCancelsWithoutReopening) {
                 EXPECT_TRUE(client->UnregisterClient().has_value());
             }
         });
-        EXPECT_EQ(leaving.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+        EXPECT_EQ(leaving.wait_for(std::chrono::milliseconds(50)),
+                  std::future_status::timeout);
         release.set_value();
         leaving.get();
-        EXPECT_EQ(client->GetServiceState(), shutdown ? P2PClientServiceState::STOPPED
-                                                     : P2PClientServiceState::LOCAL_ONLY);
-        EXPECT_EQ(client->GetHealthStatus(), shutdown ? "STOPPED" : "LOCAL_ONLY");
-        EXPECT_EQ(client->recovery_worker_->GetStatus(), MetadataRecoveryWorker::Status::CANCELLED);
+        EXPECT_EQ(client->GetServiceState(),
+                  shutdown ? P2PClientServiceState::STOPPED
+                           : P2PClientServiceState::LOCAL_ONLY);
+        EXPECT_EQ(client->GetHealthStatus(),
+                  shutdown ? "STOPPED" : "LOCAL_ONLY");
+        EXPECT_EQ(client->recovery_worker_->GetStatus(),
+                  MetadataRecoveryWorker::Status::CANCELLED);
         EXPECT_EQ(client->heartbeat_thread_.joinable(), !shutdown);
     }
 }
@@ -879,12 +906,10 @@ TEST_F(HAIntegrationTest, HeartbeatRequestReportsStoredLifecycleState) {
     ASSERT_TRUE(created.has_value());
     auto client = *created;
     StopHeartbeatForManualEvents(client);
-    for (auto state : {P2PClientServiceState::INITIALIZING,
-                       P2PClientServiceState::ONLINE,
-                       P2PClientServiceState::DEGRADED,
-                       P2PClientServiceState::LOCAL_ONLY,
-                       P2PClientServiceState::STOPPING,
-                       P2PClientServiceState::STOPPED}) {
+    for (auto state :
+         {P2PClientServiceState::INITIALIZING, P2PClientServiceState::ONLINE,
+          P2PClientServiceState::DEGRADED, P2PClientServiceState::LOCAL_ONLY,
+          P2PClientServiceState::STOPPING, P2PClientServiceState::STOPPED}) {
         // Protocol regression: component readiness must not rewrite the report.
         client->service_state_.store(state);
         EXPECT_EQ(client->build_heartbeat_request().service_state, state);
@@ -893,9 +918,9 @@ TEST_F(HAIntegrationTest, HeartbeatRequestReportsStoredLifecycleState) {
 }
 
 TEST_F(HAIntegrationTest, RegistrationKeepsItsOriginStateUntilConfirmed) {
-    for (auto origin : {P2PClientServiceState::INITIALIZING,
-                        P2PClientServiceState::LOCAL_ONLY,
-                        P2PClientServiceState::DEGRADED}) {
+    for (auto origin :
+         {P2PClientServiceState::INITIALIZING,
+          P2PClientServiceState::LOCAL_ONLY, P2PClientServiceState::DEGRADED}) {
         SCOPED_TRACE(toString(origin));
         StartupMaster endpoint(master_.GetWrapped());
         ASSERT_TRUE(endpoint.Start());
@@ -905,7 +930,8 @@ TEST_F(HAIntegrationTest, RegistrationKeepsItsOriginStateUntilConfirmed) {
         auto client = std::make_shared<P2PClientService>(
             config.metadata_connstring, config.http_port, false, config.labels);
         if (origin != P2PClientServiceState::INITIALIZING) {
-            endpoint.reject_registration = origin == P2PClientServiceState::DEGRADED;
+            endpoint.reject_registration =
+                origin == P2PClientServiceState::DEGRADED;
             ASSERT_EQ(client->Init(config), ErrorCode::OK);
             StopHeartbeatForManualEvents(client);
             endpoint.heartbeat_calls = 0;
@@ -929,7 +955,8 @@ TEST_F(HAIntegrationTest, RegistrationKeepsItsOriginStateUntilConfirmed) {
             return result ? ErrorCode::OK : result.error();
         });
         auto registration = entered->get_future();
-        if (registration.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+        if (registration.wait_for(std::chrono::seconds(5)) !=
+            std::future_status::ready) {
             release->set_value();
             FAIL() << "Registration did not reach Master";
         }
@@ -979,7 +1006,8 @@ TEST_F(HAIntegrationTest, ManualLeaveAndOnlineStopEachOwnOneUnregister) {
         endpoint.reject_unregistration = true;
         if (!stop_directly) {
             EXPECT_FALSE(client->UnregisterClient().has_value());
-            EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::LOCAL_ONLY);
+            EXPECT_EQ(client->GetServiceState(),
+                      P2PClientServiceState::LOCAL_ONLY);
             EXPECT_TRUE(client->UnregisterClient().has_value());
         }
         client->Stop();
@@ -1070,7 +1098,8 @@ TEST_F(HAIntegrationTest, StoppingRejectsLateEventsBeforeResourcesAreReleased) {
     StopHeartbeatForManualEvents(client);
     std::optional<InflightTracker::Guard> call{client->AcquireInflightGuard()};
     auto stopped = std::async(std::launch::async, [&] { client->Stop(); });
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (client->GetServiceState() != P2PClientServiceState::STOPPING &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::yield();
@@ -1109,10 +1138,12 @@ TEST_F(HAIntegrationTest, HeartbeatResponseOnlyMapsCommunicationEvents) {
     EXPECT_EQ(client->HandleHeartbeatResponse(response),
               ClientEvent::REGISTRATION_REQUIRED);
     EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::DEGRADED);
-    EXPECT_EQ(client->recovery_worker_->GetStatus(), MetadataRecoveryWorker::Status::IDLE);
+    EXPECT_EQ(client->recovery_worker_->GetStatus(),
+              MetadataRecoveryWorker::Status::IDLE);
     client->service_state_.store(P2PClientServiceState::ONLINE);
-    for (auto status : {P2PClientStatus::DISCONNECTION, P2PClientStatus::CRASHED,
-                        static_cast<P2PClientStatus>(-1)}) {
+    for (auto status :
+         {P2PClientStatus::DISCONNECTION, P2PClientStatus::CRASHED,
+          static_cast<P2PClientStatus>(-1)}) {
         response.status = status;
         EXPECT_FALSE(client->HandleHeartbeatResponse(response).has_value());
     }
@@ -1176,7 +1207,8 @@ TEST_F(HAIntegrationTest, HeartbeatRecoversAfterDiscoveryAdapterFailure) {
         ASSERT_EQ(client->StartHeartbeat(), ErrorCode::OK);
     }
     // Exercise the unchanged ten-failure threshold through the real loop.
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(25);
     while (client->GetServiceState() != P2PClientServiceState::ONLINE &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -1359,24 +1391,28 @@ TEST_F(HAIntegrationTest, ServiceStateSurvivesHeartbeatFailureAndReplyLoss) {
     ASSERT_TRUE(created.has_value());
     auto client = *created;
     StopHeartbeatForManualEvents(client);
-    auto meta = master_.GetWrapped().GetMasterService().GetClientManager()
-                    .GetClient(client->GetClientID());
+    auto meta =
+        master_.GetWrapped().GetMasterService().GetClientManager().GetClient(
+            client->GetClientID());
     ASSERT_NE(meta, nullptr);
     EXPECT_FALSE(meta->IsReady());
-    auto failed = client->GetMasterClient().Heartbeat(client->build_heartbeat_request());
+    auto failed =
+        client->GetMasterClient().Heartbeat(client->build_heartbeat_request());
     EXPECT_FALSE(failed.has_value());
     EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::ONLINE);
     EXPECT_FALSE(meta->IsReady());
 
     endpoint.forward_heartbeats = true;
     endpoint.lose_heartbeat_reply = true;
-    auto lost = client->GetMasterClient().Heartbeat(client->build_heartbeat_request());
+    auto lost =
+        client->GetMasterClient().Heartbeat(client->build_heartbeat_request());
     EXPECT_FALSE(lost.has_value());
     EXPECT_TRUE(meta->IsReady());
     EXPECT_TRUE(client->async_route_notifier_->running_.load());
     endpoint.lose_heartbeat_reply = false;
-    EXPECT_TRUE(client->GetMasterClient().Heartbeat(
-        client->build_heartbeat_request()).has_value());
+    EXPECT_TRUE(client->GetMasterClient()
+                    .Heartbeat(client->build_heartbeat_request())
+                    .has_value());
     EXPECT_TRUE(meta->IsReady());
     EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::ONLINE);
 }
@@ -1417,7 +1453,8 @@ TEST_F(HAIntegrationTest, MasterInternalErrorStillAllowsDegradedStartup) {
 
 TEST_F(HAIntegrationTest, InitialRegistrationFailureRetriesFromHeartbeat) {
     // Cover both an absent registration (UNDEFINED heartbeat) and a lost reply
-    // after the master accepted it (HEALTH while Service has not entered ONLINE).
+    // after the master accepted it (HEALTH while Service has not entered
+    // ONLINE).
     for (bool lost_reply : {false, true}) {
         SCOPED_TRACE(lost_reply);
         StartupMaster endpoint(master_.GetWrapped());
@@ -1444,7 +1481,9 @@ TEST_F(HAIntegrationTest, InitialRegistrationFailureRetriesFromHeartbeat) {
         EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::ONLINE);
         // The heartbeat worker must not start a second heartbeat thread.
         EXPECT_FALSE(client->heartbeat_thread_.joinable());
-        auto meta = master_.GetWrapped().GetMasterService().GetClientManager()
+        auto meta = master_.GetWrapped()
+                        .GetMasterService()
+                        .GetClientManager()
                         .GetClient(client->GetClientID());
         ASSERT_NE(meta, nullptr);
         EXPECT_TRUE(meta->IsReady());
@@ -1566,19 +1605,23 @@ TEST_F(HAIntegrationTest, PeerAdmissionDoesNotDependOnServiceMode) {
     auto client = *created;
     StopHeartbeatForManualEvents(client);
     client->recovery_worker_->Stop();
-    for (auto state : {P2PClientServiceState::ONLINE,
-                       P2PClientServiceState::DEGRADED, P2PClientServiceState::LOCAL_ONLY}) {
+    for (auto state :
+         {P2PClientServiceState::ONLINE, P2PClientServiceState::DEGRADED,
+          P2PClientServiceState::LOCAL_ONLY}) {
         // Background recovery is stopped so each state remains deterministic.
         client->service_state_.store(state);
         auto prewrite = client->client_rpc_service_->PreWrite(
             {"peer_admission_ha", 64, std::nullopt});
         EXPECT_TRUE(prewrite.has_value()) << toString(state);
         if (prewrite) {
-            EXPECT_TRUE(client->client_rpc_service_->WriteRevoke(
-                {"peer_admission_ha", prewrite->write_operation_id}).has_value());
+            EXPECT_TRUE(client->client_rpc_service_
+                            ->WriteRevoke({"peer_admission_ha",
+                                           prewrite->write_operation_id})
+                            .has_value());
         }
     }
-    // Restore the actual lifecycle mode after the isolated peer-admission checks.
+    // Restore the actual lifecycle mode after the isolated peer-admission
+    // checks.
     client->service_state_.store(P2PClientServiceState::ONLINE);
 }
 
@@ -1695,8 +1738,8 @@ TEST_F(HAIntegrationTest, StopWaitsForCallsBeforeSequentialDestroy) {
     ASSERT_TRUE(local_call->is_valid());
     ASSERT_TRUE(completion_call->is_valid());
     auto stopped = std::async(std::launch::async, [client] { client->Stop(); });
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::seconds(2);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (client->local_inflight_tracker_.is_running() &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::yield();
@@ -1719,8 +1762,8 @@ TEST_F(HAIntegrationTest, StopWaitsForCallsBeforeSequentialDestroy) {
         EXPECT_EQ(unregistration.error(), ErrorCode::SHUTTING_DOWN);
     }
     local_call.reset();
-    const auto peer_deadline = std::chrono::steady_clock::now() +
-                               std::chrono::seconds(2);
+    const auto peer_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (rpc.IsReady() && std::chrono::steady_clock::now() < peer_deadline) {
         std::this_thread::yield();
     }
@@ -1734,8 +1777,9 @@ TEST_F(HAIntegrationTest, StopWaitsForCallsBeforeSequentialDestroy) {
     if (!rejected) {
         EXPECT_EQ(rejected.error(), ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS);
     }
-    EXPECT_TRUE(rpc.WriteRevoke(
-        {"concurrent_close", prewrite->write_operation_id}).has_value());
+    EXPECT_TRUE(
+        rpc.WriteRevoke({"concurrent_close", prewrite->write_operation_id})
+            .has_value());
     EXPECT_EQ(stopped.wait_for(std::chrono::milliseconds(100)),
               std::future_status::timeout);
     // The outstanding completion handler still owns access to DataManager.
@@ -1761,7 +1805,8 @@ TEST_F(HAIntegrationTest, RejectsOccupiedPeerPortBeforeRegistration) {
     EXPECT_EQ(client->GetHealthStatus(), "INITIALIZING");
     EXPECT_NE(client->GetServiceState(), P2PClientServiceState::ONLINE);
     ASSERT_NE(client->recovery_worker_, nullptr);
-    EXPECT_EQ(client->recovery_worker_->GetStatus(), MetadataRecoveryWorker::Status::IDLE);
+    EXPECT_EQ(client->recovery_worker_->GetStatus(),
+              MetadataRecoveryWorker::Status::IDLE);
     EXPECT_EQ(client->GetServiceState(), P2PClientServiceState::INITIALIZING);
     ASSERT_TRUE(client->client_rpc_service_.has_value());
     EXPECT_FALSE(client->client_rpc_service_->IsReady());
@@ -1790,7 +1835,8 @@ TEST_F(HAIntegrationTest, InvalidRuntimeFailsBeforeResourceCreation) {
 TEST_F(HAIntegrationTest, InjectedEngineRemainsUsableAfterDestroy) {
     ClientResources owner;
     ASSERT_EQ(owner.InitTransferEngine(0, "P2PHANDSHAKE", "tcp", std::nullopt,
-                                       "127.0.0.1"), ErrorCode::OK);
+                                       "127.0.0.1"),
+              ErrorCode::OK);
     auto engine = owner.GetTransferEngine();
     const auto endpoint = engine->getLocalIpAndPort();
     auto config = LifecycleConfig();

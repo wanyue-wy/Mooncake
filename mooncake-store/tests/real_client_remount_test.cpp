@@ -56,7 +56,8 @@ TEST(RealClientRemountTest, PingStatusFollowsMapPresence) {
 
 // ping() reports the number of segments RealClient has mapped for the client,
 // so the dummy can detect a partial loss (present but under-mapped) and
-// re-register. mapped_shm_count is 0 when absent and tracks mapped_shms_.size().
+// re-register. mapped_shm_count is 0 when absent and tracks
+// mapped_shms_.size().
 TEST(RealClientRemountTest, PingReportsMappedShmCount) {
     RealClient rc;
     UUID id{5, 6};

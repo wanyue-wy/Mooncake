@@ -106,7 +106,6 @@ struct RpcNameTraits<&P2PMasterRpcService::BatchSyncRoutes> {
     static constexpr const char* value = "BatchSyncRoutes";
 };
 
-
 ErrorCode P2PMasterClient::Connect(const std::string& master_addr) {
     ScopedVLogTimer timer(1, "P2PMasterClient::Connect");
     timer.LogRequest("master_addr=", master_addr);

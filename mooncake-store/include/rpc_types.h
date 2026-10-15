@@ -142,5 +142,4 @@ struct TaskCompleteRequest {
 };
 YLT_REFL(TaskCompleteRequest, id, status, message);
 
-
 }  // namespace mooncake

@@ -266,7 +266,6 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
         return {};
     }
     client_service_.reset();
-    device_name_ = "";
     protocol_ = "";
     // Detach the map, then tear down each context under its own lock.
     std::unordered_map<UUID, std::shared_ptr<ShmContext>, boost::hash<UUID>>

@@ -246,7 +246,9 @@ TEST_F(P2PRegisterConcurrencyTest, RegisterFromLocalOnlyRecovers) {
 // state.
 TEST_F(P2PRegisterConcurrencyTest, DuplicateRegisterIsNoop) {
     auto client = CreateClient();
-    ASSERT_TRUE(WaitFor([&] { return (client->GetServiceState() == P2PClientServiceState::ONLINE); }));
+    ASSERT_TRUE(WaitFor([&] {
+        return (client->GetServiceState() == P2PClientServiceState::ONLINE);
+    }));
     const auto hb_before = client->heartbeat_thread_.get_id();
 
     EXPECT_EQ(HttpPost(Url(client, "/register")), 200);

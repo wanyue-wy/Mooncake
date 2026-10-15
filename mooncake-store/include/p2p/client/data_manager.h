@@ -124,9 +124,10 @@ class DataManager {
      * @brief Iterate all local replicas in batches.
      *
      * Granularity is per-replica, not per-key: a key with replicas on N tiers
-     * produces N ReplicaLocation entries. MetadataRecoveryWorker resyncs metadata
-     * per (key, tier_id) and GetLocalKeyCount sums batch sizes, so changing
-     * this to per-key would change both. Returning false stops the walk.
+     * produces N ReplicaLocation entries. MetadataRecoveryWorker resyncs
+     * metadata per (key, tier_id) and GetLocalKeyCount sums batch sizes, so
+     * changing this to per-key would change both. Returning false stops the
+     * walk.
      */
     virtual void ForEachKeyBatch(
         const std::function<bool(std::vector<ReplicaLocation>&&)>& callback)

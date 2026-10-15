@@ -15,9 +15,6 @@
 
 namespace mooncake {
 
-class Replica;
-using ReplicaList = std::unordered_map<uint32_t, Replica>;
-
 // Deployment-only placeholder: the native Client has no read options.
 struct CentralizedReadConfig {
     std::monostate placeholder{};
@@ -61,6 +58,7 @@ struct Segment {
     std::string name{};  // Logical segment name used for preferred allocation
     uintptr_t base{0};
     size_t size{0};
+    // TE p2p endpoint (ip:port) for transport-only addressing
     std::string te_endpoint{};
     std::string protocol;
     Segment() = default;

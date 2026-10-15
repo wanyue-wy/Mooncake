@@ -74,9 +74,10 @@ class MetadataRecoveryWorkerTest : public ::testing::Test {
         auto res = svc.RegisterClient(reg);
         ASSERT_TRUE(res.has_value())
             << "RegisterClient failed: " << res.error();
-        ASSERT_TRUE(svc.Heartbeat(
-            {.client_id = client_id_,
-             .service_state = P2PClientServiceState::ONLINE}).has_value());
+        ASSERT_TRUE(
+            svc.Heartbeat({.client_id = client_id_,
+                           .service_state = P2PClientServiceState::ONLINE})
+                .has_value());
 
         // Connect P2PMasterClient to in-proc master
         master_client_ = std::make_unique<P2PMasterClient>(client_id_);
@@ -115,7 +116,8 @@ class MetadataRecoveryWorkerTest : public ::testing::Test {
             [this](std::string_view key, const UUID& tier_id, size_t size) {
                 return master_client_->PublishRoute(
                     {key, size, client_id_, tier_id});
-            }, mode);
+            },
+            mode);
     }
 
     std::unique_ptr<MetadataRecoveryWorker> CreateWorkerWithNotifier(
@@ -190,7 +192,8 @@ class MetadataRecoveryWorkerTest : public ::testing::Test {
     void MountLocalTierOnMaster(const UUID& tier_id) {
         P2PSegment local_segment = MakeSegment();
         local_segment.id = tier_id;
-        local_segment.name = "local_recovery_tier_" + std::to_string(tier_id.first);
+        local_segment.name =
+            "local_recovery_tier_" + std::to_string(tier_id.first);
         auto& svc = master_.GetWrapped().GetMasterService();
         auto result = svc.MountSegment(local_segment, client_id_);
         ASSERT_TRUE(result.has_value())
@@ -198,13 +201,14 @@ class MetadataRecoveryWorkerTest : public ::testing::Test {
     }
 
     void WaitUntilCompleted(MetadataRecoveryWorker& worker) {
-        const auto deadline = std::chrono::steady_clock::now() +
-                              std::chrono::seconds(5);
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
         while (worker.GetStatus() == MetadataRecoveryWorker::Status::RUNNING &&
                std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-        EXPECT_EQ(worker.GetStatus(), MetadataRecoveryWorker::Status::COMPLETED);
+        EXPECT_EQ(worker.GetStatus(),
+                  MetadataRecoveryWorker::Status::COMPLETED);
     }
 
     bool WaitUntilReplicaVisible(
@@ -273,7 +277,8 @@ TEST_F(MetadataRecoveryWorkerTest, ReplaysLocalReplicaWithOrWithoutNotifier) {
         auto tier_id = InitLocalDataManagerAndPut(key, "recovery-value");
         ASSERT_TRUE(tier_id.has_value());
         MountLocalTierOnMaster(*tier_id);
-        auto worker = use_notifier ? CreateWorkerWithNotifier() : CreateWorker();
+        auto worker =
+            use_notifier ? CreateWorkerWithNotifier() : CreateWorker();
         EXPECT_EQ(worker->Start(), ErrorCode::OK);
         WaitUntilCompleted(*worker);
         ASSERT_TRUE(WaitUntilReplicaVisible(key));
@@ -294,13 +299,17 @@ TEST_F(MetadataRecoveryWorkerTest, RegisterOnlySkipsReplicaScan) {
         MetadataRecoveryWorker::RecoveryMode::RegisterOnly);
     EXPECT_EQ(worker->Start(), ErrorCode::OK);
     WaitUntilCompleted(*worker);
-    EXPECT_FALSE(master_.GetWrapped().GetMasterService()
-                     .GetReadRoute("register-only").has_value());
+    EXPECT_FALSE(master_.GetWrapped()
+                     .GetMasterService()
+                     .GetReadRoute("register-only")
+                     .has_value());
     EXPECT_FALSE(worker->recovery_thread_.joinable());
     EXPECT_EQ(worker->Start(), ErrorCode::OK);
     WaitUntilCompleted(*worker);
-    EXPECT_FALSE(master_.GetWrapped().GetMasterService()
-                     .GetReadRoute("register-only").has_value());
+    EXPECT_FALSE(master_.GetWrapped()
+                     .GetMasterService()
+                     .GetReadRoute("register-only")
+                     .has_value());
 }
 
 TEST_F(MetadataRecoveryWorkerTest, SynchronousBusinessFailureIsReported) {
@@ -313,7 +322,8 @@ TEST_F(MetadataRecoveryWorkerTest, SynchronousBusinessFailureIsReported) {
             return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
         });
     EXPECT_EQ(worker.Start(), ErrorCode::OK);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (worker.GetStatus() == MetadataRecoveryWorker::Status::RUNNING &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -404,11 +414,12 @@ TEST_F(MetadataRecoveryWorkerTest, CancellationWaitsForInflightPublication) {
     std::promise<void> release;
     auto released = release.get_future().share();
     MetadataRecoveryWorker worker(*data_manager_, nullptr,
-        [&](std::string_view, const UUID&, size_t) -> tl::expected<void, ErrorCode> {
-            entered.set_value();
-            released.wait();
-            return {};
-        });
+                                  [&](std::string_view, const UUID&,
+                                      size_t) -> tl::expected<void, ErrorCode> {
+                                      entered.set_value();
+                                      released.wait();
+                                      return {};
+                                  });
     EXPECT_EQ(worker.Start(), ErrorCode::OK);
     auto publication = entered.get_future();
     const auto started = publication.wait_for(std::chrono::seconds(5));
