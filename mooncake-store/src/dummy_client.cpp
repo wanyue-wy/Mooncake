@@ -377,7 +377,7 @@ int DummyClient::register_shm_via_ipc(const ShmHelper::ShmSegment* shm,
 }
 
 int DummyClient::setup(DummyClientConfig& config) {
-    if (initialized_.load()) {
+    if (is_initialized()) {
         LOG(ERROR) << "DummyClient is already initialized";
         return -1;
     }
@@ -429,23 +429,22 @@ int DummyClient::setup(DummyClientConfig& config) {
 
     ping_running_ = true;
     ping_thread_ = std::thread([this]() mutable { this->ping_thread_main(); });
-    initialized_.store(true, std::memory_order_release);
 
     return 0;
 }
 
 int DummyClient::tearDownAll() {
-    // Only one shutdown caller may join the heartbeat and unmap Real's SHM.
-    if (!initialized_.exchange(false)) {
+    // Stop and join the heartbeat before unmapping so it cannot re-register
+    // SHM.
+    if (!ping_running_.exchange(false)) {
         return 0;
     }
-    ping_running_ = false;
     if (ping_thread_.joinable()) {
         ping_thread_.join();
     }
     connected_ = false;
     deployment_mode_ = DeploymentMode::UNKNOWN;
-    // Shutdown is terminal; local mappings and FDs are reclaimed at exit.
+
     return static_cast<int>(unregister_shm());
 }
 
@@ -459,7 +458,7 @@ int64_t DummyClient::unregister_shm() {
 
 // Dummy only register buffer within the shared memory region
 int DummyClient::register_buffer(void* buffer, size_t size) {
-    if (!initialized_.load() || buffer == nullptr) {
+    if (!is_initialized() || buffer == nullptr) {
         LOG(ERROR) << "DummyClient is uninitialized or buffer is null";
         return -1;
     }
@@ -484,7 +483,7 @@ int DummyClient::register_buffer(void* buffer, size_t size) {
     }
 
     // If this shm is not registered with RealClient yet, do it now
-    if (!shm_helper_->is_registered(shm)) {
+    if (!shm->registered) {
         if (register_shm_via_ipc(shm.get(), shm->is_local) != 0) {
             LOG(ERROR) << "Failed to implicitly register new SHM via IPC";
             return -1;
@@ -496,7 +495,7 @@ int DummyClient::register_buffer(void* buffer, size_t size) {
 }
 
 int DummyClient::unregister_buffer(void* buffer) {
-    if (!initialized_.load() || buffer == nullptr) {
+    if (!is_initialized() || buffer == nullptr) {
         LOG(ERROR) << "DummyClient is uninitialized or buffer is null";
         return -1;
     }
@@ -506,7 +505,7 @@ int DummyClient::unregister_buffer(void* buffer) {
         LOG(ERROR) << "Buffer is not in any registered shared memory";
         return -1;
     }
-    if (!shm_helper_->is_registered(shm)) {
+    if (!shm->registered) {
         LOG(ERROR) << "Buffer is not registered with RealClient";
         return -1;
     }
@@ -515,20 +514,16 @@ int DummyClient::unregister_buffer(void* buffer) {
         LOG(ERROR) << "Invalid buffer address for unregistration";
         return -1;
     }
-    // Clear the registered flag BEFORE the RPC so a concurrent ping never sees
-    // registered > real-side count and re-registers the segment we are
-    // dropping; restore it if the RPC fails.
-    shm_helper_->set_registered(shm, false);
     auto ret = invoke_rpc<&RealClient::unregister_shm_buffer_internal, void>(
         reinterpret_cast<uint64_t>(buffer), client_id_);
-    if (!ret.has_value()) {
-        shm_helper_->set_registered(shm, true);
+    if (ret.has_value()) {
+        shm_helper_->set_registered(shm, false);
     }
     return to_py_ret(ret);
 }
 
 uint64_t DummyClient::alloc_from_mem_pool(size_t size) {
-    if (!initialized_.load()) {
+    if (!is_initialized()) {
         LOG(ERROR) << "Cannot allocate shared memory before DummyClient setup";
         return 0;
     }
@@ -620,7 +615,6 @@ int64_t DummyClient::getSize(const std::string& key) {
     return to_py_ret(invoke_rpc<&RealClient::getSize_internal, int64_t>(key));
 }
 
-// Read entrypoints share the selected ReadConfig type and forward it intact.
 std::shared_ptr<BufferHandle> DummyClient::get_buffer(
     const std::string& key, const std::optional<ReadConfig>& config) {
     // Dummy client does not use BufferHandle, so we return nullptr
@@ -642,44 +636,14 @@ std::tuple<uint64_t, size_t> DummyClient::get_buffer_info(
 std::vector<std::shared_ptr<BufferHandle>> DummyClient::batch_get_buffer(
     const std::vector<std::string>& keys,
     const std::optional<ReadConfig>& config) {
-    // This operation retains its existing unsupported Dummy return.
+    // TODO: implement this function
     return std::vector<std::shared_ptr<BufferHandle>>();
 }
 
 int64_t DummyClient::get_into(const std::string& key, void* buffer, size_t size,
                               const std::optional<ReadConfig>& config) {
-    // This operation retains its existing unsupported Dummy return.
+    // TODO: implement this function
     return -1;
-}
-
-std::vector<int64_t> DummyClient::batch_get_into(
-    const std::vector<std::string>& keys, const std::vector<void*>& buffer_ptrs,
-    const std::vector<size_t>& sizes, const std::optional<ReadConfig>& config) {
-    std::vector<uint64_t> buffers;
-    for (auto ptr : buffer_ptrs) {
-        buffers.push_back(reinterpret_cast<uint64_t>(ptr));
-    }
-    auto internal_results =
-        invoke_batch_rpc<&RealClient::batch_get_into_dummy_helper, int64_t>(
-            keys.size(), keys, buffers, sizes, config, client_id_);
-    std::vector<int64_t> results;
-    results.reserve(internal_results.size());
-
-    for (const auto& result : internal_results) {
-        results.push_back(to_py_ret(result));
-    }
-
-    return results;
-}
-
-std::vector<int> DummyClient::batch_get_into_multi_buffers(
-    const std::vector<std::string>& keys,
-    const std::vector<std::vector<void*>>& all_buffer_ptrs,
-    const std::vector<std::vector<size_t>>& all_sizes,
-    bool aggregate_same_segment_task, const std::optional<ReadConfig>& config) {
-    // This operation retains its existing unsupported Dummy return.
-    std::vector<int> vec(keys.size(), -1);
-    return vec;
 }
 
 std::string DummyClient::get_hostname() const {
@@ -714,6 +678,26 @@ int DummyClient::put_from(const std::string& key, void* buffer, size_t size,
     return -1;
 }
 
+std::vector<int64_t> DummyClient::batch_get_into(
+    const std::vector<std::string>& keys, const std::vector<void*>& buffer_ptrs,
+    const std::vector<size_t>& sizes, const std::optional<ReadConfig>& config) {
+    std::vector<uint64_t> buffers;
+    for (auto ptr : buffer_ptrs) {
+        buffers.push_back(reinterpret_cast<uint64_t>(ptr));
+    }
+    auto internal_results =
+        invoke_batch_rpc<&RealClient::batch_get_into_dummy_helper, int64_t>(
+            keys.size(), keys, buffers, sizes, config, client_id_);
+    std::vector<int64_t> results;
+    results.reserve(internal_results.size());
+
+    for (const auto& result : internal_results) {
+        results.push_back(to_py_ret(result));
+    }
+
+    return results;
+}
+
 int DummyClient::put_from_with_metadata(
     const std::string& key, void* buffer, void* metadata_buffer, size_t size,
     size_t metadata_size, const std::optional<WriteConfig>& config) {
@@ -726,6 +710,16 @@ std::vector<int> DummyClient::batch_put_from_multi_buffers(
     const std::vector<std::vector<void*>>& all_buffer_ptrs,
     const std::vector<std::vector<size_t>>& all_sizes,
     const std::optional<WriteConfig>& config) {
+    // TODO: implement this function
+    std::vector<int> vec(keys.size(), -1);
+    return vec;
+}
+
+std::vector<int> DummyClient::batch_get_into_multi_buffers(
+    const std::vector<std::string>& keys,
+    const std::vector<std::vector<void*>>& all_buffer_ptrs,
+    const std::vector<std::vector<size_t>>& all_sizes,
+    bool aggregate_same_segment_task, const std::optional<ReadConfig>& config) {
     // TODO: implement this function
     std::vector<int> vec(keys.size(), -1);
     return vec;
@@ -778,15 +772,6 @@ tl::expected<QueryTaskResponse, ErrorCode> DummyClient::query_task(
 }
 #endif
 
-// Re-register all of this dummy's segments with the RealClient.
-// - When: RealClient dropped us (DISCONNECTION) or lost some segments
-//   (mapped_shm_count < expected).
-// - Re-sends ALL segments (not just the missing ones): the dummy can't tell
-//   which the RealClient still holds.
-// - Idempotent: map_shm_internal skips segments whose dummy_base_addr is
-// already
-//   mapped (closes fd, returns ok), so kept segments are no-ops.
-// - Returns true only if every segment succeeded; stops at the first failure.
 bool DummyClient::reregister_all_shms() {
     bool all_registered = true;
     for (const auto& shm_ptr : shm_helper_->get_registered_snapshot()) {
