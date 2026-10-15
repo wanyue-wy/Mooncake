@@ -122,8 +122,10 @@ bool MasterProcessHandler::start() {
         // Execute the master
         std::string rpc_address_arg = "--rpc-address=" + config_.rpc_address;
         std::string rpc_port_arg = "--rpc-port=" + std::to_string(port_);
-        std::vector<std::string> args = {master_path_, "--enable-ha=true",
-                                         rpc_address_arg, rpc_port_arg,
+        std::vector<std::string> args = {master_path_,
+                                         "--enable-ha=true",
+                                         rpc_address_arg,
+                                         rpc_port_arg,
                                          "--enable_metric_reporting=false",
                                          "--metrics_port=0"};
 

@@ -64,7 +64,8 @@ class ClientHttpMetricsTest : public ::testing::Test {
         auto created = P2PClientService::Create(config);
         if (!created) return false;
         p2p_service_ = *created;
-        if (!p2p_service_->IsHttpServerEnabled() || p2p_service_->GetHttpPort() == 0) {
+        if (!p2p_service_->IsHttpServerEnabled() ||
+            p2p_service_->GetHttpPort() == 0) {
             LOG(ERROR) << "Metrics-test P2P HTTP listener did not start";
             return false;
         }
@@ -104,8 +105,6 @@ TEST_F(ClientHttpMetricsTest, ConfigBuilderMetricsSettings) {
 
     EXPECT_EQ(p2p_config_custom.http_port, 9005);
     EXPECT_FALSE(p2p_config_custom.enable_http_server);
-
-
 }
 
 // Test metrics disabled scenario

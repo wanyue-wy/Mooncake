@@ -11,9 +11,8 @@
 namespace mooncake {
 namespace testing {
 
-ClientTestWrapper::ClientTestWrapper(
-    std::shared_ptr<Client> client,
-    std::shared_ptr<SimpleAllocator> allocator)
+ClientTestWrapper::ClientTestWrapper(std::shared_ptr<Client> client,
+                                     std::shared_ptr<SimpleAllocator> allocator)
     : client_(std::move(client)), allocator_(std::move(allocator)) {}
 
 ClientTestWrapper::~ClientTestWrapper() {
@@ -43,9 +42,8 @@ ClientTestWrapper::CreateClientWrapper(
         LOG(WARNING) << "Centralized clients use native metric environment "
                         "controls, not the P2P HTTP server option";
     }
-    auto client_opt = Client::Create(hostname, metadata_connstring,
-                                    protocol, device_name,
-                                    master_server_entry);
+    auto client_opt = Client::Create(hostname, metadata_connstring, protocol,
+                                     device_name, master_server_entry);
     if (!client_opt.has_value()) {
         LOG(ERROR) << "Failed to create centralized client";
         return std::nullopt;

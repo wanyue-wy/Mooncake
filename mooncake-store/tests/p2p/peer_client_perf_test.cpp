@@ -55,9 +55,10 @@ static bool parseJsonString(const std::string& json_str, Json::Value& value,
 // response) is exercised. This is exactly what we want to measure: RPC
 // throughput and concurrency benefits.
 // Failure-path RPC overhead: this fixture does not initialize TransferEngine.
-// TODO(P2P-011): Provide successful native Client measurements with byte/content
-// checks and error counts before baseline comparison. Remove this marker once
-// that harness exists; retain this fixture as a failure-path RPC diagnostic.
+// TODO(P2P-011): Provide successful native Client measurements with
+// byte/content checks and error counts before baseline comparison. Remove this
+// marker once that harness exists; retain this fixture as a failure-path RPC
+// diagnostic.
 class PeerClientPerfTest : public ::testing::Test {
    protected:
     void SetUp() override {

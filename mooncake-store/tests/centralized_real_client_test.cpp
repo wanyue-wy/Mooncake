@@ -97,7 +97,7 @@ TEST_F(RealClientTest, InvalidShmRegistrationClosesFdAndLeavesNoContext) {
     auto config = DeploymentConfig();
     ASSERT_EQ(client->setup(config), 0);
     std::unique_ptr<std::FILE, decltype(&std::fclose)> file(std::tmpfile(),
-                                                         std::fclose);
+                                                            std::fclose);
     ASSERT_NE(file, nullptr);
     const int fd = fileno(file.get());
     ASSERT_GE(fd, 0);
@@ -752,19 +752,21 @@ TEST_F(RealClientTest, TestCopyMoveQueryTask) {
 
     // Setup client 1
     const std::string client1_addr = "localhost:17813";
-    auto setup_config = CentralizedClientConfigBuilder::build_centralized_real_client(
-        client1_addr, "P2PHANDSHAKE", FLAGS_protocol,
-        std::optional<std::string>(rdma_devices), master_address_,
-        16 * 1024 * 1024, 16 * 1024 * 1024);
+    auto setup_config =
+        CentralizedClientConfigBuilder::build_centralized_real_client(
+            client1_addr, "P2PHANDSHAKE", FLAGS_protocol,
+            std::optional<std::string>(rdma_devices), master_address_,
+            16 * 1024 * 1024, 16 * 1024 * 1024);
     ASSERT_EQ(py_client_->setup(setup_config), 0);
 
     // Setup client 2
     auto py_client2 = RealClient::create();
     const std::string client2_addr = "localhost:17814";
-    auto setup_config2 = CentralizedClientConfigBuilder::build_centralized_real_client(
-        client2_addr, "P2PHANDSHAKE", FLAGS_protocol,
-        std::optional<std::string>(rdma_devices), master_address_,
-        16 * 1024 * 1024, 16 * 1024 * 1024);
+    auto setup_config2 =
+        CentralizedClientConfigBuilder::build_centralized_real_client(
+            client2_addr, "P2PHANDSHAKE", FLAGS_protocol,
+            std::optional<std::string>(rdma_devices), master_address_,
+            16 * 1024 * 1024, 16 * 1024 * 1024);
     ASSERT_EQ(py_client2->setup(setup_config2), 0);
 
     const std::string test_data = "Hello, CopyMoveQueryTask!";

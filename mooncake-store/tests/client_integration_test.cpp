@@ -82,11 +82,10 @@ class ClientIdCaptureSink : public google::LogSink {
 
 class ClientIntegrationTest : public ::testing::Test {
    protected:
-    static std::shared_ptr<Client> CreateClient(
-        const std::string& host_name) {
-        auto client_opt = Client::Create(
-            host_name, "P2PHANDSHAKE", FLAGS_protocol, std::nullopt,
-            master_address_);
+    static std::shared_ptr<Client> CreateClient(const std::string& host_name) {
+        auto client_opt =
+            Client::Create(host_name, "P2PHANDSHAKE", FLAGS_protocol,
+                           std::nullopt, master_address_);
 
         EXPECT_TRUE(client_opt.has_value())
             << "Failed to create client with host_name: " << host_name;
@@ -274,8 +273,7 @@ class ClientIntegrationTest : public ::testing::Test {
 };
 
 // Static members initialization
-std::shared_ptr<Client> ClientIntegrationTest::test_client_ =
-    nullptr;
+std::shared_ptr<Client> ClientIntegrationTest::test_client_ = nullptr;
 std::shared_ptr<Client> ClientIntegrationTest::segment_provider_client_ =
     nullptr;
 void* ClientIntegrationTest::segment_ptr_ = nullptr;
@@ -590,8 +588,8 @@ TEST_F(ClientIntegrationTest, BatchPutGetOperations) {
     for (int i = 0; i < batch_sz; i++) {
         target_buffer =
             client_buffer_allocator_->allocate(test_data_list[i].size());
-        auto get_result = test_client_->Get(keys[i], target_buffer,
-                                            test_data_list[i].size());
+        auto get_result =
+            test_client_->Get(keys[i], target_buffer, test_data_list[i].size());
         ASSERT_TRUE(get_result.has_value())
             << "Get operation failed: " << toString(get_result.error());
         client_buffer_allocator_->deallocate(target_buffer,
@@ -1146,7 +1144,6 @@ TEST_F(ClientReplicaBufferTest, AllocateSlicesZeroSizeMemoryReplica) {
     EXPECT_EQ(slices[0].size, 0);
     EXPECT_EQ(slices[0].ptr, handle.ptr());
 }
-
 
 }  // namespace testing
 

@@ -338,8 +338,7 @@ tl::expected<QueryTaskResponse, ErrorCode> RealClient::query_task(
     const UUID& task_id) {
     std::shared_lock inflight_guard(inflight_lock_);
     if (state_ == State::CLOSING || state_ == State::CLOSED) {
-        LOG(ERROR) << "query_task failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
+        LOG(ERROR) << "query_task failed, error=" << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
     }
     auto result = client_service_->QueryTask(task_id);

@@ -20,7 +20,6 @@ RealClient::CreateService(const P2PClientConfig& config) {
     return std::move(*client);
 }
 
-
 DeploymentMode RealClient::deployment_mode() const {
     return client_service_ ? DeploymentMode::P2P : DeploymentMode::UNKNOWN;
 }
@@ -33,7 +32,8 @@ tl::expected<void, ErrorCode> RealClient::ValidateWriteOperation(
     WriteOperation operation, const std::optional<WriteConfig>& /*config*/) {
     if (operation != WriteOperation::Put &&
         operation != WriteOperation::Publish) {
-        LOG(ERROR) << "Unknown write operation: " << static_cast<int>(operation);
+        LOG(ERROR) << "Unknown write operation: "
+                   << static_cast<int>(operation);
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
     return {};
@@ -59,8 +59,7 @@ std::shared_ptr<BufferHandle> RealClient::get_buffer_internal(
         return nullptr;
     }
 
-    auto result =
-        client_service_->Get(key, client_buffer_allocator, config);
+    auto result = client_service_->Get(key, client_buffer_allocator, config);
     if (!result) {
         LOG(ERROR) << "Get failed for key: " << key
                    << " with error: " << toString(result.error());
@@ -71,9 +70,8 @@ std::shared_ptr<BufferHandle> RealClient::get_buffer_internal(
 
 // Implementation of batch_get_buffer_internal method
 std::vector<std::shared_ptr<BufferHandle>>
-RealClient::batch_get_buffer_internal(
-    const std::vector<std::string>& keys,
-    const std::optional<ReadConfig>& config) {
+RealClient::batch_get_buffer_internal(const std::vector<std::string>& keys,
+                                      const std::optional<ReadConfig>& config) {
     std::vector<std::shared_ptr<BufferHandle>> final_results(keys.size(),
                                                              nullptr);
 
@@ -111,8 +109,7 @@ tl::expected<int64_t, ErrorCode> RealClient::get_into_internal(
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
 
-    auto result =
-        client_service_->Get(key, {buffer}, {size}, config);
+    auto result = client_service_->Get(key, {buffer}, {size}, config);
     if (!result) {
         LOG(ERROR) << "Get failed, key=" << key << ", error=" << result.error();
     }
@@ -120,10 +117,10 @@ tl::expected<int64_t, ErrorCode> RealClient::get_into_internal(
 }
 
 std::vector<tl::expected<int64_t, ErrorCode>>
-RealClient::batch_get_into_internal(
-    const std::vector<std::string>& keys, const std::vector<void*>& buffers,
-    const std::vector<size_t>& sizes,
-    const std::optional<ReadConfig>& config) {
+RealClient::batch_get_into_internal(const std::vector<std::string>& keys,
+                                    const std::vector<void*>& buffers,
+                                    const std::vector<size_t>& sizes,
+                                    const std::optional<ReadConfig>& config) {
     // Validate preconditions
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
@@ -149,8 +146,8 @@ RealClient::batch_get_into_internal(
         all_buffers[i] = {buffers[i]};
         all_sizes[i] = {sizes[i]};
     }
-    auto results = client_service_->BatchGet(keys, all_buffers, all_sizes,
-                                             config);
+    auto results =
+        client_service_->BatchGet(keys, all_buffers, all_sizes, config);
     for (size_t i = 0; i < results.size(); ++i) {
         if (!results[i]) {
             LOG(ERROR) << "BatchGet failed, key=" << keys[i]
@@ -165,8 +162,7 @@ RealClient::batch_get_into_multi_buffers_internal(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<void*>>& all_buffers,
     const std::vector<std::vector<size_t>>& all_sizes,
-    bool prefer_alloc_in_same_node,
-    const std::optional<ReadConfig>& config) {
+    bool prefer_alloc_in_same_node, const std::optional<ReadConfig>& config) {
     // Validate preconditions
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
@@ -187,8 +183,7 @@ RealClient::batch_get_into_multi_buffers_internal(
     }
 
     auto results = client_service_->BatchGet(keys, all_buffers, all_sizes,
-                                             config,
-                                             prefer_alloc_in_same_node);
+                                             config, prefer_alloc_in_same_node);
     for (size_t i = 0; i < results.size(); ++i) {
         if (!results[i]) {
             LOG(ERROR) << "BatchGet failed, key=" << keys[i]
@@ -218,8 +213,7 @@ std::vector<ObjectDescriptor> RealClient::get_replica_desc(
         }
         return replica_list;
     }
-    const std::vector<ObjectDescriptor>& replica_list =
-        *query_result;
+    const std::vector<ObjectDescriptor>& replica_list = *query_result;
     if (replica_list.empty()) {
         LOG(ERROR) << "Empty replica list for key: " << key;
     }

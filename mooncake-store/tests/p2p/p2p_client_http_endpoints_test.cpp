@@ -370,19 +370,27 @@ TEST_F(P2PClientHttpEndpointsTest, LocalStartupCanJoinThroughHttp) {
         auto local = *created;
         ASSERT_TRUE(local->IsHttpServerEnabled());
         ASSERT_NE(local->GetHttpPort(), 0);
-        const auto base = "http://127.0.0.1:" + std::to_string(local->GetHttpPort());
+        const auto base =
+            "http://127.0.0.1:" + std::to_string(local->GetHttpPort());
         const auto key = "http-local-join-" + std::to_string(senders);
         EXPECT_EQ(local->GetHealthStatus(), "LOCAL_ONLY");
-        EXPECT_EQ(master_.GetWrapped().GetMasterService().GetClientManager()
-                      .GetClient(local->GetClientID()), nullptr);
-        ASSERT_EQ(HttpPost(base + "/put?key=" + key, "local-value").status, 200);
+        EXPECT_EQ(master_.GetWrapped()
+                      .GetMasterService()
+                      .GetClientManager()
+                      .GetClient(local->GetClientID()),
+                  nullptr);
+        ASSERT_EQ(HttpPost(base + "/put?key=" + key, "local-value").status,
+                  200);
         EXPECT_EQ(HttpGet(base + "/get?key=" + key).resp_body, "local-value");
         ASSERT_EQ(HttpPost(base + "/register").status, 200);
         EXPECT_EQ(local->GetHealthStatus(), "ONLINE");
-        ASSERT_TRUE(WaitForRoutableClient(local->GetMasterClient(), local->GetClientID()));
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        ASSERT_TRUE(WaitForRoutableClient(local->GetMasterClient(),
+                                          local->GetClientID()));
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
         auto remote = HttpGet(Url("/get", "key=" + key));
-        while (remote.status != 200 && std::chrono::steady_clock::now() < deadline) {
+        while (remote.status != 200 &&
+               std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             remote = HttpGet(Url("/get", "key=" + key));
         }

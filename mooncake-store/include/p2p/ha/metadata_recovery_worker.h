@@ -21,16 +21,23 @@ namespace mooncake {
 class MetadataRecoveryWorker {
    public:
     enum class RecoveryMode { FullMetadataSync, RegisterOnly };
-    enum class Status { IDLE, RUNNING, COMPLETED, CANCELLED, TIMED_OUT, FAILED };
+    enum class Status {
+        IDLE,
+        RUNNING,
+        COMPLETED,
+        CANCELLED,
+        TIMED_OUT,
+        FAILED
+    };
     using PublishReplica = std::function<tl::expected<void, ErrorCode>(
         std::string_view, const UUID&, size_t)>;
 
     // Dependencies must outlive the worker. publish_replica is the existing
     // synchronous publication path, used only when notifier is disabled.
-    MetadataRecoveryWorker(DataManager& data_manager,
-                           AsyncMetadataNotifier* notifier,
-                           PublishReplica publish_replica,
-                           RecoveryMode recovery_mode = RecoveryMode::FullMetadataSync);
+    MetadataRecoveryWorker(
+        DataManager& data_manager, AsyncMetadataNotifier* notifier,
+        PublishReplica publish_replica,
+        RecoveryMode recovery_mode = RecoveryMode::FullMetadataSync);
     ~MetadataRecoveryWorker();
 
     MetadataRecoveryWorker(const MetadataRecoveryWorker&) = delete;

@@ -101,9 +101,9 @@ bool initialize_client() {
     if (!FLAGS_device_name.empty()) {
         rdma_devices = FLAGS_device_name;
     }
-    auto client_opt = Client::Create(
-        FLAGS_local_hostname, FLAGS_metadata_connection_string, FLAGS_protocol,
-        rdma_devices, FLAGS_master_address);
+    auto client_opt =
+        Client::Create(FLAGS_local_hostname, FLAGS_metadata_connection_string,
+                       FLAGS_protocol, rdma_devices, FLAGS_master_address);
 
     if (!client_opt.has_value()) {
         LOG(ERROR) << "Failed to create client";

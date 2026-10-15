@@ -225,11 +225,11 @@ DramCacheTier::CreateAllocator() {
     switch (allocator_type_) {
         case BufferAllocatorType::OFFSET:
             allocator = std::make_shared<OffsetBufferAllocator>(
-                segment_name, base_address, capacity_, segment_name, tier_id_);
+                segment_name, base_address, capacity_, segment_name);
             break;
         case BufferAllocatorType::CACHELIB:
             allocator = std::make_shared<CachelibBufferAllocator>(
-                segment_name, base_address, capacity_, segment_name, tier_id_);
+                segment_name, base_address, capacity_, segment_name);
             break;
         default:
             LOG(ERROR) << "Unsupported allocator type for DramCacheTier";

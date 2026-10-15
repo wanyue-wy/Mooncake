@@ -59,9 +59,10 @@ class AsyncMetadataNotifierTest : public ::testing::Test {
         auto res = svc.RegisterClient(reg);
         ASSERT_TRUE(res.has_value())
             << "RegisterClient failed: " << res.error();
-        ASSERT_TRUE(svc.Heartbeat(
-            {.client_id = client_id_,
-             .service_state = P2PClientServiceState::ONLINE}).has_value());
+        ASSERT_TRUE(
+            svc.Heartbeat({.client_id = client_id_,
+                           .service_state = P2PClientServiceState::ONLINE})
+                .has_value());
 
         // Connect P2PMasterClient to in-proc master
         master_client_ = std::make_unique<P2PMasterClient>(client_id_);

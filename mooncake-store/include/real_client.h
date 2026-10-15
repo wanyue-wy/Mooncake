@@ -75,7 +75,8 @@ class ResourceTracker {
 
 class RealClient : public PyClient {
     enum class State { UNINITIALIZED, READY, CLOSING, CLOSED };
-    // Outlive worker threads that may still observe shutdown during destruction.
+    // Outlive worker threads that may still observe shutdown during
+    // destruction.
     mutable std::shared_mutex inflight_lock_;
     State state_{State::UNINITIALIZED};
 
@@ -229,10 +230,10 @@ class RealClient : public PyClient {
         const std::vector<std::vector<size_t>>& all_sizes,
         const std::optional<WriteConfig>& config = std::nullopt) override;
 
-    int put_parts(
-        const std::string& key, std::vector<std::span<const char>> values,
-        const std::optional<WriteConfig>& config = std::nullopt,
-        WriteOperation operation = WriteOperation::Put) override;
+    int put_parts(const std::string& key,
+                  std::vector<std::span<const char>> values,
+                  const std::optional<WriteConfig>& config = std::nullopt,
+                  WriteOperation operation = WriteOperation::Put) override;
 
     int put_batch(
         const std::vector<std::string>& keys,
@@ -506,7 +507,6 @@ class RealClient : public PyClient {
     tl::expected<DummyHeartbeatResponse, ErrorCode> ping(const UUID& client_id);
 
     std::string protocol_;
-    std::string device_name_;
 
     struct MappedShm {
         std::string shm_name_;

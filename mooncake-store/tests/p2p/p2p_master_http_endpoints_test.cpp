@@ -83,9 +83,11 @@ class P2PMasterHttpEndpointsTest : public ::testing::Test {
         auto reg_res = wrapped_->RegisterClient(reg_req);
         ASSERT_TRUE(reg_res.has_value())
             << "RegisterClient failed: " << reg_res.error();
-        ASSERT_TRUE(wrapped_->Heartbeat(
-            {.client_id = client_id_,
-             .service_state = P2PClientServiceState::ONLINE}).has_value());
+        ASSERT_TRUE(
+            wrapped_
+                ->Heartbeat({.client_id = client_id_,
+                             .service_state = P2PClientServiceState::ONLINE})
+                .has_value());
 
         // Tests populate keys themselves; start from an empty keyspace.
         ASSERT_EQ(wrapped_->GetMasterService().GetKeyCount(), 0u);

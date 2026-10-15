@@ -33,14 +33,15 @@ TEST(ClientConfigBuilderTest, RuntimeEnvironmentBelongsToP2P) {
             }
         }
     } restore{old ? std::optional<std::string>(old) : std::nullopt};
-    ASSERT_EQ(setenv("MC_RUNTIME_CONFIG",
-                     R"({"write":{"remote_weight":0.8}})", 1), 0);
+    ASSERT_EQ(
+        setenv("MC_RUNTIME_CONFIG", R"({"write":{"remote_weight":0.8}})", 1),
+        0);
 
     auto p2p = P2PClientConfigBuilder::build_p2p_real_client(
         "127.0.0.1:12345", "P2PHANDSHAKE", "tcp", std::nullopt,
         "127.0.0.1:50051", kTieredConfigJson);
-    EXPECT_DOUBLE_EQ(p2p.runtime_config_json["write"]["remote_weight"].asDouble(),
-                     0.8);
+    EXPECT_DOUBLE_EQ(
+        p2p.runtime_config_json["write"]["remote_weight"].asDouble(), 0.8);
 
     ASSERT_EQ(setenv("MC_RUNTIME_CONFIG", "{invalid json", 1), 0);
     EXPECT_THROW(P2PClientConfigBuilder::build_p2p_real_client(
@@ -77,9 +78,11 @@ TEST(ClientConfigBuilderTest, P2PLocalOnlyStartupIsExplicit) {
         {"tiered_backend_config", kTieredConfigJson},
         {"start_local_only", "true"},
     };
-    EXPECT_TRUE(P2PClientConfigBuilder::build_p2p_real_client(values).start_local_only);
+    EXPECT_TRUE(
+        P2PClientConfigBuilder::build_p2p_real_client(values).start_local_only);
     values["start_local_only"] = "false";
-    EXPECT_FALSE(P2PClientConfigBuilder::build_p2p_real_client(values).start_local_only);
+    EXPECT_FALSE(
+        P2PClientConfigBuilder::build_p2p_real_client(values).start_local_only);
 }
 
 TEST(ClientConfigBuilderTest, P2PDictPreservesIpcSocketPath) {

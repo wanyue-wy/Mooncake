@@ -600,7 +600,8 @@ class DataManagerV1 final : public DataManager, public DataManagerTestHook {
      * @param batches Vector of (batch_id, num_tasks, segment_endpoint) tuples
      * @return ErrorCode indicating success or failure. If any batch fails,
      *         all submitted batches are drained before returning the error so
-     *         the caller can release its buffers. Cleanup may wait indefinitely.
+     *         the caller can release its buffers. Cleanup may wait
+     * indefinitely.
      */
     tl::expected<void, ErrorCode> WaitAllTransferBatches(
         const std::vector<std::tuple<Transport::BatchID, size_t, std::string>>&

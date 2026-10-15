@@ -7,8 +7,7 @@
 #include "utils.h"
 namespace mooncake {
 
-FileStorage::FileStorage(const FileStorageConfig& config,
-                         Client* client,
+FileStorage::FileStorage(const FileStorageConfig& config, Client* client,
                          const std::string& local_rpc_addr)
     : config_(config),
       client_(client),

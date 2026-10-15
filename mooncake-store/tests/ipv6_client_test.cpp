@@ -81,9 +81,8 @@ class IPv6ClientTest : public ::testing::Test {
         auto config =
             CentralizedClientConfigBuilder::build_centralized_real_client(
                 maybeWrapIpV6(host) + ":0", "P2PHANDSHAKE", FLAGS_protocol,
-                rdma_devices.empty()
-                    ? std::nullopt
-                    : std::optional<std::string>(rdma_devices),
+                rdma_devices.empty() ? std::nullopt
+                                     : std::optional<std::string>(rdma_devices),
                 master_address_, 16 * 1024 * 1024, 0);
         const int result = storage_provider_->setup(config);
         if (result != 0) {

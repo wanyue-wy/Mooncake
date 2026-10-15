@@ -215,6 +215,7 @@ void InitMasterConf(const mooncake::DefaultConfig& default_config,
                              &master_config.processing_task_timeout_sec,
                              FLAGS_processing_task_timeout_sec);
 }
+
 void LoadConfigFromCmdline(mooncake::MasterConfig& master_config,
                            bool conf_set) {
     if (FLAGS_max_threads != 4) {  // 4 is the default value

@@ -636,10 +636,12 @@ TEST_F(ClientRpcServiceTest, DrainKeepsCompletionRpcsUntilAllTokensReturn) {
     ASSERT_TRUE(pin.has_value());
     ASSERT_TRUE(second_pin.has_value());
 
-    auto stopped = std::async(std::launch::async, [this] { rpc_service_->Stop(); });
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::seconds(2);
-    while (rpc_service_->IsReady() && std::chrono::steady_clock::now() < deadline) {
+    auto stopped =
+        std::async(std::launch::async, [this] { rpc_service_->Stop(); });
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (rpc_service_->IsReady() &&
+           std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     EXPECT_FALSE(rpc_service_->IsReady());
@@ -656,29 +658,33 @@ TEST_F(ClientRpcServiceTest, DrainKeepsCompletionRpcsUntilAllTokensReturn) {
 
     EXPECT_EQ(stopped.wait_for(std::chrono::milliseconds(100)),
               std::future_status::timeout);
-    auto wrong_revoke = rpc_service_->WriteRevoke({revoke_key, generate_uuid()});
+    auto wrong_revoke =
+        rpc_service_->WriteRevoke({revoke_key, generate_uuid()});
     EXPECT_FALSE(wrong_revoke.has_value());
-    if (!wrong_revoke) EXPECT_EQ(wrong_revoke.error(), ErrorCode::INVALID_WRITE);
+    if (!wrong_revoke)
+        EXPECT_EQ(wrong_revoke.error(), ErrorCode::INVALID_WRITE);
     auto wrong_unpin = rpc_service_->UnPinKey({pin_key, generate_uuid()});
     EXPECT_FALSE(wrong_unpin.has_value());
     if (!wrong_unpin) EXPECT_EQ(wrong_unpin.error(), ErrorCode::INVALID_READ);
-    EXPECT_TRUE(rpc_service_->WriteCommit(
-        {commit_key, commit->write_operation_id}).has_value());
-    EXPECT_TRUE(rpc_service_->WriteRevoke(
-        {revoke_key, revoke->write_operation_id}).has_value());
-    EXPECT_TRUE(rpc_service_->UnPinKey(
-        {pin_key, pin->read_operation_id}).has_value());
+    EXPECT_TRUE(
+        rpc_service_->WriteCommit({commit_key, commit->write_operation_id})
+            .has_value());
+    EXPECT_TRUE(
+        rpc_service_->WriteRevoke({revoke_key, revoke->write_operation_id})
+            .has_value());
+    EXPECT_TRUE(
+        rpc_service_->UnPinKey({pin_key, pin->read_operation_id}).has_value());
     EXPECT_EQ(stopped.wait_for(std::chrono::milliseconds(100)),
               std::future_status::timeout);
-    EXPECT_TRUE(rpc_service_->UnPinKey(
-        {pin_key, second_pin->read_operation_id}).has_value());
+    EXPECT_TRUE(rpc_service_->UnPinKey({pin_key, second_pin->read_operation_id})
+                    .has_value());
     EXPECT_EQ(stopped.wait_for(std::chrono::seconds(2)),
               std::future_status::ready);
     stopped.get();
     EXPECT_TRUE(data_manager_->Exist(commit_key));
     rpc_service_->SetReady();
-    unavailable(rpc_service_->WriteCommit(
-        {commit_key, commit->write_operation_id}));
+    unavailable(
+        rpc_service_->WriteCommit({commit_key, commit->write_operation_id}));
     unavailable(rpc_service_->UnPinKey({pin_key, pin->read_operation_id}));
     rpc_service_->Stop();
 }
@@ -694,8 +700,9 @@ TEST_F(ClientRpcServiceTest, StopRejectsNewPeerRpcs) {
     pre.target_tier_id = tier_id;
     auto admitted = rpc_service_->PreWrite(pre);
     ASSERT_TRUE(admitted.has_value());
-    ASSERT_TRUE(rpc_service_->WriteRevoke(
-        {pre.key, admitted->write_operation_id}).has_value());
+    ASSERT_TRUE(
+        rpc_service_->WriteRevoke({pre.key, admitted->write_operation_id})
+            .has_value());
 
     // No handlers or forward leases remain, so Stop can finish immediately.
     rpc_service_->Stop();

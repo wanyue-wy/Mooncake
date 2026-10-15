@@ -84,9 +84,6 @@ class QueryResult {
  */
 class Client {
    public:
-    // Callers must finish external operations before releasing the last owner.
-    // Real drains deployment calls and unregisters SHM before releasing this
-    // Client. Its native client-to-client listener is stopped by the destructor.
     ~Client();
 
     /**
@@ -445,10 +442,11 @@ class Client {
         const std::vector<Replica::Descriptor>& replica_list);
 
     // Storage ownership and convenience calls retained from d897. Their
-    // implementation follows the A00 algorithms at the end of client_service.cpp.
-    // InitStorage also starts the native client-to-client RPC server.
-    // The creation path calls InitStorage before publishing this Client.
-    // On failure discard the Client; its members own the allocated resources.
+    // implementation follows the A00 algorithms at the end of
+    // client_service.cpp. InitStorage also starts the native client-to-client
+    // RPC server. The creation path calls InitStorage before publishing this
+    // Client. On failure discard the Client; its members own the allocated
+    // resources.
     ErrorCode InitStorage(uint64_t global_segment_size,
                           uint64_t local_buffer_size, bool enable_offload,
                           uint16_t client_rpc_port = 0);
@@ -456,12 +454,12 @@ class Client {
         return resources_.GetBufferAllocator();
     }
     const std::string& GetLocalHostname() const { return local_hostname_; }
-    UUID GetClientID() const { return client_id_; }
     tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Get(
-        const std::string& key, std::shared_ptr<ClientBufferAllocator> allocator);
-    std::vector<tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>> BatchGet(
-        const std::vector<std::string>& keys,
+        const std::string& key,
         std::shared_ptr<ClientBufferAllocator> allocator);
+    std::vector<tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>>
+    BatchGet(const std::vector<std::string>& keys,
+             std::shared_ptr<ClientBufferAllocator> allocator);
     tl::expected<int64_t, ErrorCode> Get(const std::string& key, void* buffer,
                                          size_t size);
     std::vector<tl::expected<int64_t, ErrorCode>> BatchGet(
@@ -474,7 +472,7 @@ class Client {
         bool aggregate_same_segment_task = false);
     tl::expected<BatchGetOffloadObjectResponse, ErrorCode>
     BatchGetOffloadObjectFromStorage(const std::vector<std::string>& keys,
-                                   const std::vector<int64_t>& sizes);
+                                     const std::vector<int64_t>& sizes);
 
    private:
     /**
@@ -581,8 +579,10 @@ class Client {
         void operator()(void* ptr) const;
     };
     std::vector<std::unique_ptr<void, SegmentDeleter>> segment_ptrs_;
-    std::vector<std::unique_ptr<void, AscendSegmentDeleter>> ascend_segment_ptrs_;
-    std::vector<std::unique_ptr<void, HugepageSegmentDeleter>> hugepage_segment_ptrs_;
+    std::vector<std::unique_ptr<void, AscendSegmentDeleter>>
+        ascend_segment_ptrs_;
+    std::vector<std::unique_ptr<void, HugepageSegmentDeleter>>
+        hugepage_segment_ptrs_;
     // The native client-to-client RPC server is independent of file offload.
     ErrorCode StartClientRpcServer(uint16_t port);
     void StopClientRpcServer();
@@ -608,11 +608,12 @@ class ClientRequester {
     ClientRequester();
     tl::expected<BatchGetOffloadObjectResponse, ErrorCode>
     batch_get_offload_object(const std::string& client_addr,
-                            const std::vector<std::string>& keys,
-                            const std::vector<int64_t> sizes);
+                             const std::vector<std::string>& keys,
+                             const std::vector<int64_t> sizes);
 
    private:
-    std::shared_ptr<coro_io::client_pools<coro_rpc::coro_rpc_client>> client_pools_;
+    std::shared_ptr<coro_io::client_pools<coro_rpc::coro_rpc_client>>
+        client_pools_;
     template <auto ServiceMethod, typename ReturnType, typename... Args>
     [[nodiscard]] tl::expected<ReturnType, ErrorCode> invoke_rpc(
         const std::string& client_addr, Args&&... args);

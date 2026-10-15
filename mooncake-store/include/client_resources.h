@@ -25,11 +25,11 @@ class ClientResources {
     ClientResources(const ClientResources&) = delete;
     ClientResources& operator=(const ClientResources&) = delete;
 
-    ErrorCode InitTransferEngine(
-        uint16_t te_port, const std::string& metadata_connstring,
-        const std::string& protocol,
-        const std::optional<std::string>& device_names,
-        const std::string& local_ip);
+    ErrorCode InitTransferEngine(uint16_t te_port,
+                                 const std::string& metadata_connstring,
+                                 const std::string& protocol,
+                                 const std::optional<std::string>& device_names,
+                                 const std::string& local_ip);
 
     // Adopt an initialized engine before creating the local pool. Do not
     // reconfigure it or explicitly stop an engine shared with another owner.
@@ -56,7 +56,7 @@ class ClientResources {
         void* addr, bool update_metadata = true);
 
     void InitLocalBufferAllocator(size_t pool_size, const std::string& protocol,
-                                 bool use_hugepage = false);
+                                  bool use_hugepage = false);
 
     // Only the owned pool is released here. Caller-registered buffers and SHM
     // retain their existing owners and explicit registration lifecycle.

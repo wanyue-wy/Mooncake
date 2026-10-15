@@ -611,9 +611,8 @@ TEST_F(DataManagerTest, LeaseDrainWaitsForScannerToExpireLostPeerTokens) {
     auto pin = data_manager_->PinKey(read_key, GetTierId());
     ASSERT_TRUE(pin.has_value());
 
-    auto drained = std::async(std::launch::async, [this] {
-        data_manager_->WaitForLeaseDrain();
-    });
+    auto drained = std::async(std::launch::async,
+                              [this] { data_manager_->WaitForLeaseDrain(); });
     EXPECT_EQ(drained.wait_for(std::chrono::milliseconds(100)),
               std::future_status::timeout);
     EXPECT_FALSE(data_manager_->lease_scanner_stop_requested_.load());
@@ -622,14 +621,16 @@ TEST_F(DataManagerTest, LeaseDrainWaitsForScannerToExpireLostPeerTokens) {
     const auto expire = [](auto& shard, const std::string& key) {
         std::unique_lock lock(shard.mutex);
         auto& record = shard.existed_operation_key_map.at(key);
-        record.deadline = std::chrono::steady_clock::now() -
-                          std::chrono::milliseconds(1);
+        record.deadline =
+            std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
         record.list_it->second = record.deadline;
     };
     expire(data_manager_->GetPendingWriteShard(
-               data_manager_->BuildKeyCtx(write_key)), write_key);
-    expire(data_manager_->GetPinnedKeyShard(
-               data_manager_->BuildKeyCtx(read_key)), read_key);
+               data_manager_->BuildKeyCtx(write_key)),
+           write_key);
+    expire(
+        data_manager_->GetPinnedKeyShard(data_manager_->BuildKeyCtx(read_key)),
+        read_key);
     EXPECT_EQ(drained.wait_for(std::chrono::seconds(3)),
               std::future_status::ready);
     drained.get();
@@ -640,13 +641,16 @@ TEST_F(DataManagerTest, TeCleanupRetainsBuffersBeyondReportingTimeout) {
     if (std::getenv("MC_USE_TENT") || std::getenv("MC_USE_TEV1")) {
         GTEST_SKIP() << "This test controls classic TE batch descriptors";
     }
-    ASSERT_EQ(transfer_engine_->init(
-                  "P2PHANDSHAKE",
-                  "127.0.0.1:" + std::to_string(getFreeTcpPort())), 0);
+    ASSERT_EQ(
+        transfer_engine_->init("P2PHANDSHAKE",
+                               "127.0.0.1:" + std::to_string(getFreeTcpPort())),
+        0);
     const auto sync_batch = transfer_engine_->allocateBatchID(1);
     const auto coro_batch = transfer_engine_->allocateBatchID(1);
-    auto& sync_task = Transport::toBatchDesc(sync_batch).task_list.emplace_back();
-    auto& coro_task = Transport::toBatchDesc(coro_batch).task_list.emplace_back();
+    auto& sync_task =
+        Transport::toBatchDesc(sync_batch).task_list.emplace_back();
+    auto& coro_task =
+        Transport::toBatchDesc(coro_batch).task_list.emplace_back();
     sync_task.slice_count = 1;
     coro_task.slice_count = 1;
     // Simulate a stalled transport with real TE status polling, without
@@ -655,12 +659,14 @@ TEST_F(DataManagerTest, TeCleanupRetainsBuffersBeyondReportingTimeout) {
     auto coro_buffer = std::make_shared<std::vector<char>>(64);
     std::weak_ptr<std::vector<char>> sync_lifetime = sync_buffer;
     std::weak_ptr<std::vector<char>> coro_lifetime = coro_buffer;
-    auto sync_done = std::async(std::launch::async,
+    auto sync_done = std::async(
+        std::launch::async,
         [this, sync_batch, owner = std::move(sync_buffer)]() mutable {
             data_manager_->CancelBatchTETask(sync_batch, 1);
             owner.reset();
         });
-    auto coro_done = std::async(std::launch::async,
+    auto coro_done = std::async(
+        std::launch::async,
         [this, coro_batch, owner = std::move(coro_buffer)]() mutable {
             async_simple::coro::syncAwait(
                 data_manager_->CancelBatchTETaskCoro(coro_batch, 1));

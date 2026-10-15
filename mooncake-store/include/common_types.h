@@ -96,9 +96,6 @@ enum class ErrorCode : int32_t {
     // Parameter errors (Range: -600 to -699)
     INVALID_PARAMS = -600,  ///< Invalid parameters.
     ILLEGAL_CLIENT = -601,  ///< Illegal client to do the operation.
-    NON_CONTIGUOUS_BUFFER_NOT_SUPPORTED =
-        -602,  ///< Non-contiguous buffer not supported in forward transfer
-               ///< mode.
 
     // Engine operation errors (Range: -700 to -711)
     INVALID_WRITE = -700,    ///< Invalid write operation.
@@ -185,14 +182,6 @@ const std::string& toString(ErrorCode errorCode) noexcept;
 inline std::ostream& operator<<(std::ostream& os,
                                 const ErrorCode& errorCode) noexcept {
     return os << toString(errorCode);
-}
-
-// Error codes that mean "the object/replica already exists", i.e. an
-// idempotent rewrite whose failure is surfaced as success end-to-end.
-inline bool IsAlreadyExistsError(ErrorCode err) {
-    return err == ErrorCode::REPLICA_NUM_EXCEEDED ||
-           err == ErrorCode::REPLICA_ALREADY_EXISTS ||
-           err == ErrorCode::OBJECT_ALREADY_EXISTS;
 }
 
 /**

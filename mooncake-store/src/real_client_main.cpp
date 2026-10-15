@@ -73,16 +73,14 @@ int main(int argc, char* argv[]) {
     const size_t global_segment_size =
         string_to_byte_size(FLAGS_global_segment_size);
 
-    auto config =
-        CentralizedClientConfigBuilder::build_centralized_real_client(
-            FLAGS_host, FLAGS_metadata_server, FLAGS_protocol,
-            FLAGS_device_names.empty()
-                ? std::nullopt
-                : std::optional<std::string>(FLAGS_device_names),
-            FLAGS_master_server_address, global_segment_size,
-            local_buffer_size, nullptr,
-            "@mooncake_client_" + std::to_string(FLAGS_port) + ".sock",
-            FLAGS_enable_offload);
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
+        FLAGS_host, FLAGS_metadata_server, FLAGS_protocol,
+        FLAGS_device_names.empty()
+            ? std::nullopt
+            : std::optional<std::string>(FLAGS_device_names),
+        FLAGS_master_server_address, global_segment_size, local_buffer_size,
+        nullptr, "@mooncake_client_" + std::to_string(FLAGS_port) + ".sock",
+        FLAGS_enable_offload);
     config.client_rpc_port = static_cast<uint16_t>(FLAGS_client_rpc_port);
 
     auto client_inst = RealClient::create();

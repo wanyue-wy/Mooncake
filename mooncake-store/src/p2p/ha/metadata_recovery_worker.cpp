@@ -11,9 +11,10 @@
 
 namespace mooncake {
 
-MetadataRecoveryWorker::MetadataRecoveryWorker(
-    DataManager& data_manager, AsyncMetadataNotifier* notifier,
-    PublishReplica publish_replica, RecoveryMode recovery_mode)
+MetadataRecoveryWorker::MetadataRecoveryWorker(DataManager& data_manager,
+                                               AsyncMetadataNotifier* notifier,
+                                               PublishReplica publish_replica,
+                                               RecoveryMode recovery_mode)
     : data_manager_(data_manager),
       notifier_(notifier),
       publish_replica_(std::move(publish_replica)),
@@ -146,8 +147,7 @@ MetadataRecoveryWorker::Status MetadataRecoveryWorker::RecoveryPipelineMain(
                     if (!EnqueueWithRetry(e.key, e.tier_id, e.size,
                                           /*is_hot=*/false, need_abort)) {
                         was_aborted = true;
-                        LOG(WARNING)
-                            << "fail to enqueue route recovery list";
+                        LOG(WARNING) << "fail to enqueue route recovery list";
                         return false;
                     }
                     dram_count++;
@@ -203,9 +203,9 @@ MetadataRecoveryWorker::Status MetadataRecoveryWorker::RecoveryPipelineMain(
 }
 
 bool MetadataRecoveryWorker::EnqueueWithRetry(const std::string& key,
-                                         const UUID& tier_id, size_t size,
-                                         bool is_hot,
-                                         const AbortToken& need_abort) {
+                                              const UUID& tier_id, size_t size,
+                                              bool is_hot,
+                                              const AbortToken& need_abort) {
     if (!notifier_) {
         auto backoff = std::chrono::milliseconds(100);
         constexpr auto kMaxBackoff = std::chrono::milliseconds(1000);
