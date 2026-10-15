@@ -457,12 +457,14 @@ ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
     constexpr size_t kDefaultHttpPoolSize = 64ULL * 1024 * 1024;
     size_t pool_size = config.local_buffer_size > 0 ? config.local_buffer_size
                                                     : kDefaultHttpPoolSize;
-    InitLocalBufferAllocator(pool_size, config.protocol,
-                             std::getenv("MC_STORE_USE_HUGEPAGE") != nullptr &&
-                                 config.protocol != "ascend");
-    if (!resources_.GetBufferAllocator()) {
-        LOG(ERROR) << "Failed to allocate/register the P2P local buffer";
-        return ErrorCode::INVALID_PARAMS;
+    err = InitLocalBufferAllocator(
+        pool_size, config.protocol,
+        std::getenv("MC_STORE_USE_HUGEPAGE") != nullptr &&
+            config.protocol != "ascend");
+    if (err != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to allocate/register the P2P local buffer"
+                   << ", error=" << err;
+        return err;
     }
 
     // 4. Construct metadata components; activation belongs to cluster join.
@@ -903,7 +905,7 @@ ErrorCode P2PClientService::StopClusterResources(bool unregister) {
 }
 
 ErrorCode P2PClientService::EnterOnline(P2PClientServiceState rollback_state) {
-    // TODO(P2P route reconciliation): Reconcile Master's routes with local
+    // TODO: Reconcile Master's routes with local
     // replicas after metadata loss, even if the client entry survives.
     // Non-Redis rejoin already replays replicas, but pre-registration writes
     // and Redis-mode DEGRADED/LOCAL_ONLY writes remain uncovered. Also repair
@@ -1476,7 +1478,7 @@ std::vector<tl::expected<void, ErrorCode>> P2PClientService::CollectResults(
             results[i] = wait_result;
         }
         if (metrics && sizes) {
-            // TODO(metric): local write per-op latency is timed around Wait().
+            // TODO: local write per-op latency is timed around Wait().
             // This is not fully accurate: for TE mode the transfer is submitted
             // at Dispatch() and Wait() only polls, so elapsed may undercount;
             // in a serial wait loop later keys may also undercount because
@@ -2010,12 +2012,8 @@ std::vector<tl::expected<ResultT, ErrorCode>> P2PClientService::BatchGetImpl(
                     }
                     // Record per-key local read metric.
                     if (metrics_ && handles[i]->is_local) {
-                        // TODO(wanyue.wy):
-                        // Currently the latency of local read per-op is not
-                        // accurate. Before the Wait() function is executed, the
-                        // data may have already been transferred to the target
-                        // buffer. This issue will be fixed once TE supports a
-                        // completion callback.
+                        // TODO: Measure local read latency through TE
+                        // completion; data may arrive before Wait() starts.
                         ErrorCode err = results[i].has_value()
                                             ? ErrorCode::OK
                                             : results[i].error();
@@ -2402,11 +2400,7 @@ async_simple::coro::Lazy<ErrorCode> P2PClientService::RunForwardReadOnRoute(
     void* base = reinterpret_cast<void*>(req->dest_buffers[0].addr);
     const size_t total = req->dest_buffers[0].size;
 
-    // Scope `pin` so the tl::expected does not live across the TE-wait
-    // suspend point. Hold the produced Future in an optional (async_simple::
-    // Future has no default ctor) so only a Future/trivial locals cross the
-    // suspend. Works around gcc-11/12 coroutine-lowering ICE in
-    // build_special_member_call.
+    // Keep tl::expected out of the TE-wait suspension to avoid GCC 11/12 ICEs.
     std::optional<async_simple::Future<tl::expected<void, ErrorCode>>>
         transfer_fut;
     UUID read_operation_id{};
@@ -2882,13 +2876,7 @@ tl::expected<P2PRouteDescriptor, ErrorCode> P2PClientService::QueryLocalRoute(
     return route;
 }
 
-// ============================================================================
-// Remove Operations (Not Supported in P2P)
-// Attention:
-// The behavior of this type of interface has not yet been defined.
-// At present, all keys will be evicted by the client's specific strategy.
-// The external active remove call is not allowed currently
-// ============================================================================
+// Global remove operations are unsupported; clients evict local replicas.
 
 tl::expected<void, ErrorCode> P2PClientService::Remove(const ObjectKey& key,
                                                        bool force) {

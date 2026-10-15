@@ -462,8 +462,7 @@ void print_results(const std::vector<ThreadStats>& thread_stats,
                                  (get_duration_s * 1024.0 * 1024.0)
                            : 0.0;
 
-    // Report PUT and GET success rates separately. A single combined rate
-    // hid cases where one phase was healthy and the other was failing.
+    // Report PUT and GET success rates separately.
     uint64_t put_attempts = total_put_ops + total_put_failures;
     uint64_t get_attempts = total_get_ops + total_get_failures;
     double put_success_rate =

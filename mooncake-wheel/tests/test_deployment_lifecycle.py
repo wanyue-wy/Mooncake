@@ -1,12 +1,8 @@
-"""Selected-wheel deployment regressions; requires a matching live master.
+"""Test deployment lifecycle in each architecture's matching wheel environment.
 
-MOONCAKE_REAL_CLIENT_COMMAND must name the matching native daemon and its
-master/storage flags. Run this file in each architecture's own environment.
-MOONCAKE_MASTER_COMMAND starts an isolated matching master for each case,
-preventing crashed clients from influencing later cases through live leases.
-Logs are retained outside the repository. A skipped suite is not acceptance.
-MOONCAKE_DEPLOYMENT_PROTOCOL selects daemon initialization; Dummy SHM data
-checks do not prove cross-endpoint RDMA transfers.
+MOONCAKE_REAL_CLIENT_COMMAND configures the daemon; MOONCAKE_MASTER_COMMAND
+starts an isolated master per case. MOONCAKE_DEPLOYMENT_PROTOCOL selects the
+daemon transport; Dummy SHM checks do not exercise cross-endpoint RDMA.
 """
 
 import array

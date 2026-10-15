@@ -96,9 +96,7 @@ class DataManagerTest : public ::testing::Test {
         data_manager_ = std::make_unique<DataManagerV1>(
             std::move(tiered_backend_), transfer_engine_, metadata_shard_count,
             transfer_config);
-        // Keep the raw pointer accessible for tests that need direct backend
-        // access Note: The backend is now owned by DataManagerV1, but tests can
-        // still use it
+        // Borrow the DataManager-owned backend for direct test access.
         tiered_backend_raw_ptr_ = backend_raw_ptr;
     }
 
@@ -672,7 +670,7 @@ TEST_F(DataManagerTest, TeCleanupRetainsBuffersBeyondReportingTimeout) {
                 data_manager_->CancelBatchTETaskCoro(coro_batch, 1));
             owner.reset();
         });
-    // The previous cleanup returned at ten seconds even for unfinished TE.
+    // Cleanup must wait for unfinished TE transfers beyond ten seconds.
     EXPECT_EQ(sync_done.wait_for(std::chrono::seconds(11)),
               std::future_status::timeout);
     EXPECT_EQ(coro_done.wait_for(std::chrono::milliseconds(0)),
@@ -2503,10 +2501,7 @@ TEST_F(DataManagerTest, TeWaitPoolStopDrainsInflightEmptyWait) {
     ASSERT_TRUE(result.has_value());
 }
 
-// ============================================================================
-// Regression tests for three V1 defects found while freezing the behaviour
-// that the DataManager interface now documents as the contract.
-// ============================================================================
+// DataManager buffer and key lifetime contracts.
 
 namespace {
 
@@ -2605,9 +2600,7 @@ void ScribbleFreedKeyStorage(size_t key_size) {
 
 }  // namespace
 
-// Defect 1: the first-pin path had no medium check, so a replica
-// living only on the storage tier returned OK with an unusable address AND
-// left a real lease behind. It must now be rejected, with no lease created.
+// Pinning a storage-only replica must fail without creating a lease.
 TEST_F(DataManagerTest, PinKeyRejectsNonDramReplicaOnFirstPin) {
     auto fixture = MakeDramPlusStorageDataManager(
         transfer_engine_, "/tmp/mooncake_dm_phase0_pinkey");
@@ -2642,9 +2635,7 @@ TEST_F(DataManagerTest, PinKeyRejectsNonDramReplicaOnFirstPin) {
     fixture->data_manager->Stop();
 }
 
-// Defect 3: BuildRemoteBufferDesc accepted a buffer object
-// that exposes no addressable memory, producing addr == 0 descriptors. A
-// persisted StorageBuffer is exactly that case.
+// A persisted buffer without addressable memory must not yield a descriptor.
 TEST_F(DataManagerTest, BuildRemoteBufferDescRejectsUnaddressableBuffer) {
     auto fixture = MakeDramPlusStorageDataManager(
         transfer_engine_, "/tmp/mooncake_dm_phase0_desc");
@@ -2676,9 +2667,7 @@ TEST_F(DataManagerTest, BuildRemoteBufferDescRejectsUnaddressableBuffer) {
     fixture->data_manager->Stop();
 }
 
-// Defect 2: the deferred Put task captured a KeyCtx
-// holding a std::string_view into the caller's key storage. Put/Get never
-// promised that the key outlives the task, only that the slices do.
+// Deferred Put must own the key after the caller releases its storage.
 TEST_F(DataManagerTest, PutCompletesAfterCallerKeyStorageIsDestroyed) {
     // Long enough to defeat std::string SSO, so the bytes really are freed.
     const std::string key_value(64, 'k');
@@ -2705,9 +2694,7 @@ TEST_F(DataManagerTest, PutCompletesAfterCallerKeyStorageIsDestroyed) {
     EXPECT_EQ(std::string(read_buf.get(), test_data.size()), test_data);
 }
 
-// The Get side of the same defect. The stale view was only read for logging,
-// so an unsanitized build still produces correct bytes; this test pins the
-// contract and fails loudly under ASAN on the pre-fix code.
+// Deferred Get must own the key, including when logging it.
 TEST_F(DataManagerTest, GetCompletesAfterCallerKeyStorageIsDestroyed) {
     const std::string key_value(64, 'g');
     const std::string test_data = "get-outlives-key-storage";

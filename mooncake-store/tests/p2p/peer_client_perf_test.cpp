@@ -43,22 +43,9 @@ static bool parseJsonString(const std::string& json_str, Json::Value& value,
     return success;
 }
 
-// Performance benchmark fixture comparing async vs sync PeerClient RPC.
-//
-// Architecture:
-//   PeerClient --[RPC]--> coro_rpc_server --[ClientRpcService]--> DataManager
-//
-// Since TransferEngine is not fully initialized, all operations that find a
-// key will fail at the transfer stage (INTERNAL_ERROR), and operations with
-// missing keys will fail with INVALID_KEY. Either way, the full RPC
-// round-trip (serialization, network, deserialization, server-side dispatch,
-// response) is exercised. This is exactly what we want to measure: RPC
-// throughput and concurrency benefits.
-// Failure-path RPC overhead: this fixture does not initialize TransferEngine.
-// TODO(P2P-011): Provide successful native Client measurements with
-// byte/content checks and error counts before baseline comparison. Remove this
-// marker once that harness exists; retain this fixture as a failure-path RPC
-// diagnostic.
+// Compare sync/async RPC overhead on failure paths; TE is uninitialized.
+// TODO(P2P-011): Add successful native Client benchmarks with byte/content
+// checks and error counts for baseline comparison.
 class PeerClientPerfTest : public ::testing::Test {
    protected:
     void SetUp() override {

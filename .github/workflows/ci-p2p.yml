@@ -1,11 +1,6 @@
-# P2P Store counterpart of ci.yml; shared installation and test scripts remain
-# authoritative for both architectures. Common repository checks stay in ci.yml.
-# Reference: kvcache-ai/Mooncake b198a1915bce6006081281af798c4e8000400280.
-# TODO(UPG-003/UPG-004): Adopt the matching upstream shared wheel workflows
-# with their scripts/toolchain, preserving the P2P selector and artifact names.
-# TODO(MAIN-001.1): Deduplicate limit_jobs.cmake's upstream #4368.
-# P2P-010.3 still owns tiered-storage/service/HA installation coverage and
-# cross-endpoint RDMA validation; CPU CI does not establish hardware acceptance.
+# P2P Store builds and tests; common checks run in ci.yml.
+# TODO(UPG-003.1/UPG-004.1): Adopt shared wheel workflows and toolchains,
+# preserving the P2P selector and artifact names.
 name: 'Build & Test P2P (Linux)'
 
 on:
@@ -129,8 +124,7 @@ jobs:
         python ./bootstrap_server.py &
       shell: bash
 
-    # The redis_ha label belongs to this P2P chaos test. Centralized Redis
-    # tests in the target releases and reference b198a1915 do not use it.
+    # Run the redis_ha-labeled P2P chaos test separately.
     - name: Test Redis HA failover (P2P)
       run: |
         cd build
@@ -275,9 +269,8 @@ jobs:
         mooncake_http_metadata_server --port 8080 &
       shell: bash
 
-    # TODO(P2P-010.3): Adapt the applicable installed workloads in run_tests.sh.
-    # Its centralized setup/replication/SSD cases cannot run unchanged here;
-    # the lifecycle suite below does not replace their coverage.
+    # TODO(P2P-010.3): Adapt installed tier/service/HA workloads from run_tests.sh
+    # and validate the applicable TCP/RDMA paths.
     - name: Prepare P2P test configurations
       run: |
         mkdir -p "$RUNNER_TEMP/store-wheel-p2p"

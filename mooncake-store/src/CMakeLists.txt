@@ -42,8 +42,7 @@ if(USE_3FS)
   set(EXTRA_LIBS ${HF3FS_API_LIB})
 endif()
 
-# TODO(P2P-010.3): Keep production, UT and benchmark artifact checks in the
-# independent architecture matrix; source selection alone is not evidence.
+# TODO(P2P-010.3): Verify production, UT and benchmark artifacts per architecture.
 # The cache_allocator library
 include_directories(${Python3_INCLUDE_DIRS})
 add_library(mooncake_store ${MOONCAKE_STORE_SOURCES})
@@ -147,10 +146,8 @@ target_link_libraries(mooncake_client PRIVATE
 target_compile_options(mooncake_client PRIVATE -Os)
 target_link_options(mooncake_client PRIVATE -Os -s)
 
-# Architecture-specific sources extend the standard targets in place.
-# TODO: Consolidate the centralized implementation into its own directory.
-# Keep this file focused on build logic shared by both architectures, and move
-# architecture-specific logic into each architecture's own directory.
+# Architecture-specific sources extend the standard targets.
+# TODO: Move centralized sources and build logic into their own directory.
 if(MOONCAKE_STORE_CLIENT_ARCH STREQUAL "p2p")
     add_subdirectory(p2p)
 else()

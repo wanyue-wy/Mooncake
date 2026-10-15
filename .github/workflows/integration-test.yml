@@ -1,7 +1,6 @@
 name: 'Integration test (Linux)'
 
-# TODO: SGLang's embedded API is not adapted to P2P yet,
-# so test-sglang-integration currently excludes P2P.
+# TODO: Adapt SGLang's embedded API and integration tests to P2P.
 on:
   push:
     branches: [ "main" ]

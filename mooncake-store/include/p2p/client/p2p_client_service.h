@@ -104,7 +104,6 @@ class P2PClientService final {
 
     /**
      * @brief Batch put data for multiple keys.
-     * currently.
      * @param keys The list of object keys.
      * @param batched_slices The list of data slices for each key.
      * @param config Explicit routing config, or a runtime snapshot if omitted.
@@ -221,12 +220,12 @@ class P2PClientService final {
 
     std::string GetHealthStatus() const;
 
-    // These accessors were previously inherited; the service owns the state.
+    // Access service-owned client state.
     uint16_t GetHttpPort() const { return http_port_; }
     uint16_t GetRpcPort() const { return client_rpc_port_; }
     bool IsHttpServerEnabled() const { return http_server_ != nullptr; }
 
-    // Retained for the shared deployment backend's buffers and defaults.
+    // Buffers and defaults used by the shared deployment backend.
     std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const {
         return resources_.GetBufferAllocator();
     }
@@ -681,10 +680,7 @@ class P2PClientService final {
     uint16_t client_rpc_port_ = 0;
 
     std::unique_ptr<coro_rpc::coro_rpc_server> client_rpc_server_;
-    // Held by pointer, not by value: DataManager is now an abstract
-    // interface, so the concrete implementation is picked at construction
-    // time. A null pointer means "not created yet / already released",
-    // exactly like the old std::optional::has_value().
+    // Own the data-plane implementation; Destroy() releases it.
     std::unique_ptr<DataManager> data_manager_;
     std::optional<ClientRpcService> client_rpc_service_;
 

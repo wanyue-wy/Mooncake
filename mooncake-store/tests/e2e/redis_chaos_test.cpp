@@ -475,12 +475,8 @@ class RedisChaosTest : public ::testing::Test {
     }
 
     void WaitForLeaderServiceReady() {
-        // The leader master only starts serving RPCs after the election lease
-        // elapses, and a fixed TTL+1s sleep is too tight on slow CI runners:
-        // clients that start before the RPC server is up fall back to
-        // DEGRADED mode and write locally without notifying the master, so no
-        // ADD_REPLICA OpLog entry is produced. Poll the leader's RPC port so
-        // the test controls the deployment order deterministically.
+        // Wait for leader RPC readiness so writes publish replicas to the
+        // master.
         auto deadline =
             std::chrono::steady_clock::now() +
             std::chrono::seconds(FLAGS_redis_master_view_ttl_sec * 4);
@@ -495,7 +491,7 @@ class RedisChaosTest : public ::testing::Test {
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
-        // Fallback to the original heuristic if the probe cannot complete.
+        // Fall back to a TTL-based wait if the probe times out.
         std::this_thread::sleep_for(
             std::chrono::seconds(FLAGS_redis_master_view_ttl_sec + 1));
     }

@@ -15,10 +15,8 @@ enum class LocalTransferMode {
 };
 
 struct P2PClientConfig : RealClientConfigBase {
-    // Port of the master's dedicated heartbeat RPC server. When > 0,
-    // heartbeats are sent to <master host>:heartbeat_rpc_port instead of the
-    // main RPC port, so they are not head-of-line-blocked by heavy metadata
-    // RPCs. Must match the master's --heartbeat_rpc_port. 0 = legacy behavior.
+    // Dedicated master heartbeat port; must match --heartbeat_rpc_port.
+    // Zero sends heartbeats to the main RPC port.
     uint16_t heartbeat_rpc_port = 0;
 
     // Port for HTTP server.
