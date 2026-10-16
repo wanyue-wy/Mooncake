@@ -8,7 +8,7 @@
 
 #include <ylt/util/tl/expected.hpp>
 
-#include "types.h"
+#include "common_types.h"
 
 namespace mooncake {
 
@@ -25,22 +25,21 @@ class ClientResources {
     ClientResources(const ClientResources&) = delete;
     ClientResources& operator=(const ClientResources&) = delete;
 
-    ErrorCode InitTransferEngine(uint16_t te_port,
-                                 const std::string& metadata_connstring,
-                                 const std::string& protocol,
-                                 const std::optional<std::string>& device_names,
-                                 const std::string& local_ip);
+    ErrorCode InitTransferEngine(
+        const std::string& local_hostname,
+        const std::string& metadata_connstring, const std::string& protocol,
+        const std::optional<std::string>& device_names);
 
     // Adopt an initialized engine before creating the local pool. Do not
     // reconfigure it or explicitly stop an engine shared with another owner.
-    void UseTransferEngine(const std::shared_ptr<TransferEngine>& engine) {
-        transfer_engine_ = engine;
-    }
+    void InitTransferEngine(const std::string& local_hostname,
+                            const std::shared_ptr<TransferEngine>& engine);
 
     std::shared_ptr<TransferEngine> GetTransferEngine() const {
         return transfer_engine_;
     }
-    uint16_t GetTransferEnginePort() const { return te_port_; }
+    const std::string& GetLocalIp() const { return local_ip_; }
+    std::string GetLocalEndpoint() const;
     std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const {
         return local_buffer_allocator_;
     }
@@ -55,23 +54,28 @@ class ClientResources {
     tl::expected<void, ErrorCode> unregisterLocalMemory(
         void* addr, bool update_metadata = true);
 
-    void InitLocalBufferAllocator(size_t pool_size, const std::string& protocol,
-                                  bool use_hugepage = false);
+    ErrorCode InitLocalBufferAllocator(size_t pool_size,
+                                       const std::string& protocol,
+                                       bool use_hugepage = false);
 
     // Only the owned pool is released here. Caller-registered buffers and SHM
     // retain their existing owners and explicit registration lifecycle.
     ErrorCode ReleaseLocalBuffer(bool update_metadata);
 
    private:
+    // Extract the network address; port 0 requests automatic selection.
+    void ParseLocalHostname(const std::string& local_hostname);
+
     ErrorCode InnerInitTransferEngine(
         bool auto_discover, const std::string& protocol,
         const std::optional<std::string>& device_names,
-        const std::string& metadata_connstring, const std::string& local_ip);
+        const std::string& metadata_connstring,
+        const std::string& local_hostname);
 
-    // Preserve teardown order: pool, port reservation, then the TE reference.
     std::shared_ptr<TransferEngine> transfer_engine_;
     std::unique_ptr<AutoPortBinder> port_binder_;
     std::shared_ptr<ClientBufferAllocator> local_buffer_allocator_;
+    std::string local_ip_;
     uint16_t te_port_ = 0;
     bool use_tent_ = false;
 };

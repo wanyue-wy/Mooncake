@@ -558,8 +558,8 @@ TEST_F(HAIntegrationTest, MetadataCallbacksStayLocalBeforeServicePublication) {
     auto config = LifecycleConfig();
     auto client = std::make_shared<P2PClientService>(
         config.metadata_connstring, config.http_port, false, config.labels);
-    ASSERT_EQ(client->resources_.InitTransferEngine(0, "P2PHANDSHAKE", "tcp",
-                                                    std::nullopt, "127.0.0.1"),
+    ASSERT_EQ(client->resources_.InitTransferEngine("127.0.0.1", "P2PHANDSHAKE",
+                                                    "tcp", std::nullopt),
               ErrorCode::OK);
     client->initTeEndpoint();
     ASSERT_EQ(client->InitStorage(config), ErrorCode::OK);
@@ -1834,8 +1834,8 @@ TEST_F(HAIntegrationTest, InvalidRuntimeFailsBeforeResourceCreation) {
 
 TEST_F(HAIntegrationTest, InjectedEngineRemainsUsableAfterDestroy) {
     ClientResources owner;
-    ASSERT_EQ(owner.InitTransferEngine(0, "P2PHANDSHAKE", "tcp", std::nullopt,
-                                       "127.0.0.1"),
+    ASSERT_EQ(owner.InitTransferEngine("127.0.0.1", "P2PHANDSHAKE", "tcp",
+                                       std::nullopt),
               ErrorCode::OK);
     auto engine = owner.GetTransferEngine();
     const auto endpoint = engine->getLocalIpAndPort();

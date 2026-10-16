@@ -347,18 +347,10 @@ void P2PClientService::initTeEndpoint() {
     }
 }
 
-ErrorCode P2PClientService::InitTransferEngine(
-    uint16_t te_port, const std::string& metadata_connstring,
-    const std::string& protocol,
-    const std::optional<std::string>& device_names) {
-    return resources_.InitTransferEngine(te_port, metadata_connstring_,
-                                         protocol, device_names, local_ip_);
-}
-
-void P2PClientService::InitLocalBufferAllocator(size_t pool_size,
-                                                const std::string& protocol,
-                                                bool use_hugepage) {
-    resources_.InitLocalBufferAllocator(pool_size, protocol, use_hugepage);
+ErrorCode P2PClientService::InitLocalBufferAllocator(
+    size_t pool_size, const std::string& protocol, bool use_hugepage) {
+    return resources_.InitLocalBufferAllocator(pool_size, protocol,
+                                               use_hugepage);
 }
 
 tl::expected<void, ErrorCode> P2PClientService::RegisterLocalMemory(
@@ -416,8 +408,6 @@ ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
     master_server_entry_ = config.master_server_entry;
     SetMasterDiscoveryConfig(config);
 
-    local_ip_ = config.local_ip;
-
     // Validate runtime settings before starting any background service.
     if (!runtime_config_store_->loadFromJson(config.runtime_config_json)) {
         LOG(ERROR) << "runtime config validation failed during startup, "
@@ -428,14 +418,16 @@ ErrorCode P2PClientService::Init(const P2PClientConfig& config) {
     // 1. Initialize transfer engine (local operation, no master dependency)
     ErrorCode err;
     if (config.transfer_engine == nullptr) {
-        err = InitTransferEngine(config.te_port, metadata_connstring_,
-                                 config.protocol, config.rdma_devices);
+        err = resources_.InitTransferEngine(
+            config.local_hostname, metadata_connstring_, config.protocol,
+            config.rdma_devices);
         if (err != ErrorCode::OK) {
             LOG(ERROR) << "Failed to initialize transfer engine";
             return err;
         }
     } else {
-        resources_.UseTransferEngine(config.transfer_engine);
+        resources_.InitTransferEngine(config.local_hostname,
+                                      config.transfer_engine);
         LOG(INFO) << "Use existing transfer engine instance. Skip its "
                      "initialization.";
     }
@@ -813,7 +805,7 @@ tl::expected<ViewVersionId, ErrorCode> P2PClientService::InnerRegisterClient() {
     P2PRegisterClientRequest req;
     req.client_id = client_id_;
     req.segments = CollectTierSegments();
-    req.ip_address = local_ip_;
+    req.ip_address = resources_.GetLocalIp();
     req.rpc_port = client_rpc_port_;
     auto result = master_client_.RegisterClient(req);
     if (!result) {
@@ -2870,7 +2862,7 @@ tl::expected<P2PRouteDescriptor, ErrorCode> P2PClientService::QueryLocalRoute(
     P2PRouteDescriptor route;
     route.client_id = client_id_;
     route.segment_id = local->first;
-    route.ip_address = local_ip_;
+    route.ip_address = resources_.GetLocalIp();
     route.rpc_port = client_rpc_port_;
     route.object_size = local->second;
     return route;

@@ -187,25 +187,10 @@ ErrorCode Client::InitTransferEngine(
     const std::string& local_hostname, const std::string& metadata_connstring,
     const std::string& protocol,
     const std::optional<std::string>& device_names) {
-    // Retain d897's automatic-port input while keeping the native Create API.
-    std::string local_ip;
-    uint16_t port = 0;
-    auto ipv6 = extractIPv6HostAndPort(local_hostname);
-    if (ipv6.matched) {
-        local_ip = ipv6.host;
-        if (!ipv6.port.empty()) port = getPortFromString(ipv6.port, 0);
-    } else {
-        const auto colon = local_hostname.rfind(':');
-        local_ip = local_hostname.substr(0, colon);
-        if (colon != std::string::npos) {
-            port = getPortFromString(local_hostname.substr(colon + 1), 0);
-        }
-    }
     auto error = resources_.InitTransferEngine(
-        port, metadata_connstring, protocol, device_names, local_ip);
+        local_hostname, metadata_connstring, protocol, device_names);
     if (error == ErrorCode::OK) {
-        local_hostname_ =
-            local_ip + ":" + std::to_string(resources_.GetTransferEnginePort());
+        local_hostname_ = resources_.GetLocalEndpoint();
     }
     return error;
 }
@@ -301,7 +286,7 @@ std::optional<std::shared_ptr<Client>> Client::Create(
             return std::nullopt;
         }
     } else {
-        client->resources_.UseTransferEngine(transfer_engine);
+        client->resources_.InitTransferEngine(local_hostname, transfer_engine);
         LOG(INFO) << "Use existing transfer engine instance. Skip its "
                      "initialization.";
     }
@@ -1828,12 +1813,12 @@ ErrorCode Client::InitStorage(uint64_t global_segment_size,
     const bool should_use_hugepage =
         (std::getenv("MC_STORE_USE_HUGEPAGE") != nullptr) &&
         protocol_ != "ascend";
-    resources_.InitLocalBufferAllocator(local_buffer_size, protocol_,
-                                        should_use_hugepage);
-
-    if (local_buffer_size > 0 && !resources_.GetBufferAllocator()) {
-        LOG(ERROR) << "Failed to register local buffer memory";
-        return ErrorCode::INVALID_PARAMS;
+    auto buffer_error = resources_.InitLocalBufferAllocator(
+        local_buffer_size, protocol_, should_use_hugepage);
+    if (buffer_error != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to register local buffer memory: "
+                   << buffer_error;
+        return buffer_error;
     }
 
     // If global_segment_size is 0, skip mount segment;

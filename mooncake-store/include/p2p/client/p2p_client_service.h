@@ -233,10 +233,7 @@ class P2PClientService final {
     RuntimeConfigStore& getRuntimeConfigStore() {
         return *runtime_config_store_;
     }
-    std::string local_endpoint() const {
-        return local_ip_ + ":" +
-               std::to_string(resources_.GetTransferEnginePort());
-    }
+    std::string local_endpoint() const { return resources_.GetLocalEndpoint(); }
     UUID GetClientID() const { return client_id_; }
 
    private:
@@ -602,12 +599,9 @@ class P2PClientService final {
 
    private:
     // Keep the former base entrypoints; common resource bodies are delegated.
-    ErrorCode InitTransferEngine(
-        uint16_t te_port, const std::string& metadata_connstring,
-        const std::string& protocol,
-        const std::optional<std::string>& device_names);
-    void InitLocalBufferAllocator(size_t pool_size, const std::string& protocol,
-                                  bool use_hugepage = false);
+    ErrorCode InitLocalBufferAllocator(size_t pool_size,
+                                       const std::string& protocol,
+                                       bool use_hugepage = false);
     void initTeEndpoint();
     const std::string& get_te_endpoint() const { return te_endpoint_; }
 
@@ -650,7 +644,6 @@ class P2PClientService final {
 
    private:
     const UUID client_id_;
-    std::string local_ip_;
     std::unique_ptr<RuntimeConfigStore> runtime_config_store_;
     std::string te_endpoint_;
     const std::string metadata_connstring_;
