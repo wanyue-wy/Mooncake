@@ -18,13 +18,10 @@ RealClient::CreateService(const CentralizedClientConfig& config) {
                       "dedicated heartbeat port";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
-    const auto host = config.local_ip.find(':') == std::string::npos
-                          ? config.local_ip
-                          : "[" + config.local_ip + "]";
     auto client = Client::Create(
-        host + ":" + std::to_string(config.te_port), config.metadata_connstring,
-        config.protocol, config.rdma_devices, config.master_server_entry,
-        config.transfer_engine, config.labels);
+        config.local_hostname, config.metadata_connstring, config.protocol,
+        config.rdma_devices, config.master_server_entry, config.transfer_engine,
+        config.labels);
     if (!client) {
         LOG(ERROR) << "Failed to create native client";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);

@@ -5,12 +5,34 @@
 #include <fstream>
 #include <filesystem>
 #include <unordered_map>
+#include <utility>
 
 #include "centralized_client_config_builder.h"
 #include "client_service.h"
 
 namespace mooncake {
 namespace {
+
+TEST(ClientConfigBuilderTest, PreservesAscendAddressForTransferEngine) {
+    const std::pair<const char*, const char*> addresses[] = {
+        {"127.0.0.1:12345:npu_2", "127.0.0.1"},
+        {"localhost:12345:npu_2", "localhost"},
+        {"[::1]:12345:npu_2", "::1"},
+    };
+    for (const auto& [input, host] : addresses) {
+        SCOPED_TRACE(input);
+        const auto config =
+            CentralizedClientConfigBuilder::build_centralized_real_client(
+                input, "P2PHANDSHAKE", "ascend");
+        EXPECT_EQ(config.local_hostname, input);
+        int device = -1;
+        const auto [te_host, te_port] =
+            parseHostNameWithPortAscend(config.local_hostname, &device);
+        EXPECT_EQ(te_host, host);
+        EXPECT_EQ(te_port, 12345);
+        EXPECT_EQ(device, 2);
+    }
+}
 
 TEST(ClientConfigBuilderTest, CentralizedClientRejectsRedisMasterDiscovery) {
     EXPECT_FALSE(Client::Create("127.0.0.1:18000", "P2PHANDSHAKE", "tcp",
@@ -72,7 +94,7 @@ TEST(ClientConfigBuilderTest, CentralizedClientRpcPortIsIndependentOfOffload) {
     };
     auto parsed =
         CentralizedClientConfigBuilder::build_centralized_real_client(config);
-    EXPECT_EQ(parsed.te_port, 12345);
+    EXPECT_EQ(parsed.local_hostname, "127.0.0.1:12345");
     EXPECT_FALSE(parsed.enable_offload);
     EXPECT_EQ(parsed.client_rpc_port, 12346);
     config["enable_offload"] = "true";

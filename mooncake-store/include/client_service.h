@@ -88,7 +88,7 @@ class Client {
 
     /**
      * @brief Creates and initializes a new Client instance
-     * @param local_hostname Local host address (IP:Port)
+     * @param local_hostname Original TE server name
      * @param metadata_connstring Connection string for metadata service
      * @param protocol Transfer protocol ("rdma" or "tcp")
      * @param device_names Comma-separated RDMA device names.

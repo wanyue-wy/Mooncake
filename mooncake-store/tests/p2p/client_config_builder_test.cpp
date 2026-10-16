@@ -5,6 +5,7 @@
 #include <fstream>
 #include <filesystem>
 #include <unordered_map>
+#include <utility>
 
 #include "p2p/client/p2p_client_config_builder.h"
 
@@ -69,6 +70,29 @@ TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesDefaults) {
     EXPECT_EQ(config.transfer_direction_mode, TransferDirectionMode::REVERSE);
     EXPECT_EQ(config.redis_master_view_ttl_sec, 4);
     EXPECT_EQ(config.redis_heartbeat_interval_sec, 1);
+}
+
+TEST(ClientConfigBuilderTest, PreservesAscendAddressForTransferEngine) {
+    const std::pair<const char*, const char*> addresses[] = {
+        {"127.0.0.1:12345:npu_2", "127.0.0.1"},
+        {"localhost:12345:npu_2", "localhost"},
+        {"[::1]:12345:npu_2", "::1"},
+    };
+    for (const auto& [input, host] : addresses) {
+        SCOPED_TRACE(input);
+        const auto config = P2PClientConfigBuilder::build_p2p_real_client(
+            {{"local_hostname", input},
+             {"metadata_server", "P2PHANDSHAKE"},
+             {"protocol", "ascend"},
+             {"tiered_backend_config", kTieredConfigJson}});
+        EXPECT_EQ(config.local_hostname, input);
+        int device = -1;
+        const auto [te_host, te_port] =
+            parseHostNameWithPortAscend(config.local_hostname, &device);
+        EXPECT_EQ(te_host, host);
+        EXPECT_EQ(te_port, 12345);
+        EXPECT_EQ(device, 2);
+    }
 }
 
 TEST(ClientConfigBuilderTest, P2PLocalOnlyStartupIsExplicit) {

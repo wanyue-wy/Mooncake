@@ -344,7 +344,7 @@ TEST_F(P2PClientIntegrationTest, MissingTransferEngineFailsBeforePublication) {
     EXPECT_EQ(pending.GetHealthStatus(), "INITIALIZING");
     EXPECT_EQ(pending.GetRpcPort(), 0);
     P2PClientConfig config;
-    config.local_ip = "localhost";
+    config.local_hostname = "localhost";
     config.protocol = "rpc_only";
     EXPECT_EQ(pending.Init(config), ErrorCode::INVALID_PARAMS);
     EXPECT_EQ(pending.GetRpcPort(), 0);

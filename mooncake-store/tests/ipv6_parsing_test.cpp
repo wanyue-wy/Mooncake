@@ -1,5 +1,5 @@
 /**
- * Architecture-independent IPv6 address parsing tests for Mooncake Store.
+ * Architecture-independent address parsing tests for Mooncake Store.
  */
 
 #include <gflags/gflags.h>
@@ -7,11 +7,13 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "common.h"
+#include "client_resources.h"
 
 namespace mooncake {
 namespace testing {
@@ -29,6 +31,60 @@ class IPv6ParsingTest : public ::testing::Test {
 
     static void TearDownTestSuite() { google::ShutdownGoogleLogging(); }
 };
+
+TEST_F(IPv6ParsingTest, ResourceAddressInitialization) {
+    const struct {
+        const char* input;
+        const char* host;
+        uint16_t port;
+    } cases[] = {
+        {"127.0.0.1", "127.0.0.1", 0},
+        {"127.0.0.1:0", "127.0.0.1", 0},
+        {"127.0.0.1:1", "127.0.0.1", 1},
+        {"127.0.0.1:65535", "127.0.0.1", 65535},
+        {"localhost", "localhost", 0},
+        {"localhost:0", "localhost", 0},
+        {"example.com:12345", "example.com", 12345},
+        {"localhost:00123", "localhost", 123},
+        {"::1", "::1", 0},
+        {"[::1]", "::1", 0},
+        {"[::1]:0", "::1", 0},
+        {"[2001:db8::1]:12345", "2001:db8::1", 12345},
+        {"2001:db8::1234", "2001:db8::1234", 0},
+        {"::ffff:192.0.2.1", "::ffff:192.0.2.1", 0},
+        {"fe80::1%eth0", "fe80::1%eth0", 0},
+        {"[fe80::1%eth0]:12345", "fe80::1%eth0", 12345},
+        {"fe80::1%eth0:12345", "fe80::1%eth0", 12345},
+        {"fe80::1%eth0:0", "fe80::1%eth0", 0},
+        {"127.0.0.1:12345:npu_2", "127.0.0.1", 12345},
+        {"localhost:65535:npu_0", "localhost", 65535},
+        {"[::1]:12345:npu_3", "::1", 12345},
+        {"127.0.0.1:0:npu_2", "127.0.0.1", 0},
+        // Preserve the existing invalid-port fallback; do not add validation.
+        {"localhost:", "localhost", 0},
+        {"localhost:abc", "localhost", 0},
+        {"localhost:-1", "localhost", 0},
+        {"localhost:65536", "localhost", 0},
+        {"localhost:123abc", "localhost", 0},
+        {"[::1]:abc", "::1", 0},
+        {"localhost:abc:npu_2", "localhost", 0},
+        {"", "", 0},
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.input);
+        ClientResources resources;
+        // Initialize address state without creating transports or listeners.
+        ASSERT_EQ(resources.InitTransferEngine(entry.input, "P2PHANDSHAKE",
+                                               "rpc_only", std::nullopt),
+                  ErrorCode::OK);
+        EXPECT_EQ(resources.GetTransferEngine(), nullptr);
+        EXPECT_EQ(resources.GetLocalIp(), entry.host);
+        const auto [host, port] =
+            parseHostNameWithPort(resources.GetLocalEndpoint());
+        EXPECT_EQ(host, entry.host);
+        EXPECT_EQ(port, entry.port);
+    }
+}
 
 // Test isValidIpV6 function with various IPv6 address formats
 TEST_F(IPv6ParsingTest, IsValidIpV6) {

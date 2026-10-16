@@ -9,6 +9,7 @@
 #include <cstring>
 #include <exception>
 #include <thread>
+#include <utility>
 
 #include "client_buffer.hpp"
 #include "config.h"
@@ -80,9 +81,7 @@ static std::vector<std::string> get_auto_discover_filters() {
 ClientResources::ClientResources() = default;
 
 ClientResources::~ClientResources() {
-    // Normal shutdown releases the pool earlier through the owning service.
-    // Keep constructor/initialization failure cleanup local to these resources.
-    auto error = ReleaseLocalBuffer(false);
+    auto error = ReleaseLocalBuffer(true);
     if (error != ErrorCode::OK) {
         LOG(ERROR)
             << "Failed to release local buffer during resource destruction: "
@@ -110,11 +109,44 @@ tl::expected<void, ErrorCode> ClientResources::CheckRegisterMemoryParams(
     return {};
 }
 
+void ClientResources::ParseLocalHostname(const std::string& local_hostname) {
+    te_port_ = 0;
+    const auto ipv6 = extractIPv6HostAndPort(local_hostname);
+    if (ipv6.matched) {
+        local_ip_ = ipv6.host;
+        if (!ipv6.port.empty()) {
+            // E.g. "[::1]:12345:npu_2": read the port, preserve the device.
+            te_port_ =
+                getPortFromString(ipv6.port.substr(0, ipv6.port.find(':')), 0);
+        }
+    } else {
+        const auto colon = local_hostname.find(':');
+        local_ip_ = local_hostname.substr(0, colon);
+        if (colon != std::string::npos) {
+            // E.g. "127.0.0.1:12345:npu_2" or "localhost:12345:npu_2".
+            const auto port_end = local_hostname.find(':', colon + 1);
+            te_port_ = getPortFromString(
+                local_hostname.substr(colon + 1, port_end - colon - 1), 0);
+        }
+    }
+}
+
+void ClientResources::InitTransferEngine(
+    const std::string& local_hostname,
+    const std::shared_ptr<TransferEngine>& engine) {
+    ParseLocalHostname(local_hostname);
+    transfer_engine_ = engine;
+}
+
+std::string ClientResources::GetLocalEndpoint() const {
+    return maybeWrapIpV6(local_ip_) + ":" + std::to_string(te_port_);
+}
+
 ErrorCode ClientResources::InitTransferEngine(
-    uint16_t te_port, const std::string& metadata_connstring,
-    const std::string& protocol, const std::optional<std::string>& device_names,
-    const std::string& local_ip) {
-    te_port_ = te_port;
+    const std::string& local_hostname, const std::string& metadata_connstring,
+    const std::string& protocol,
+    const std::optional<std::string>& device_names) {
+    ParseLocalHostname(local_hostname);
     // this only performs RPC calls
     if (protocol == "rpc_only") {
         LOG(INFO) << "Use rpc only. Skip initializing transfer engine.";
@@ -191,8 +223,25 @@ ErrorCode ClientResources::InitTransferEngine(
             te_port_ = static_cast<uint16_t>(new_port);
         }
 
+        auto local_server_name = local_hostname;
+        if (is_auto_port) {
+            const auto host_size =
+                local_ip_.size() + (local_hostname.starts_with('[') ? 2 : 0);
+            if (local_hostname.size() == host_size) {
+                // E.g. port 12345: "localhost" -> "localhost:12345",
+                // "::1" or "[::1]" -> "[::1]:12345".
+                local_server_name = GetLocalEndpoint();
+            } else {
+                // E.g. port 12345: "localhost:0" -> "localhost:12345",
+                // "[::1]:0:npu_2" -> "[::1]:12345:npu_2".
+                const auto port_end = local_hostname.find(':', host_size + 1);
+                local_server_name.replace(host_size + 1,
+                                          port_end - host_size - 1,
+                                          std::to_string(te_port_));
+            }
+        }
         err = InnerInitTransferEngine(auto_discover, protocol, device_names,
-                                      metadata_connstring, local_ip);
+                                      metadata_connstring, local_server_name);
         if (err == ErrorCode::OK) {
             // TENT mode: Skip manual transport installation - TENT handles this
             // internally
@@ -229,7 +278,7 @@ ErrorCode ClientResources::InitTransferEngine(
 ErrorCode ClientResources::InnerInitTransferEngine(
     bool auto_discover, const std::string& protocol,
     const std::optional<std::string>& device_names,
-    const std::string& metadata_connstring, const std::string& local_ip) {
+    const std::string& metadata_connstring, const std::string& local_hostname) {
     transfer_engine_ = std::make_shared<TransferEngine>();
     if (!use_tent_) {
         transfer_engine_->setAutoDiscover(auto_discover);
@@ -241,10 +290,7 @@ ErrorCode ClientResources::InnerInitTransferEngine(
         transfer_engine_->setWhitelistFilters(std::move(filters));
     }
 
-    const std::string local_endpoint =
-        local_ip + ":" + std::to_string(te_port_);
-    int rc = transfer_engine_->init(metadata_connstring, local_endpoint,
-                                    local_ip, te_port_);
+    int rc = transfer_engine_->init(metadata_connstring, local_hostname);
     if (rc != 0) {
         LOG(ERROR) << "Failed to initialize transfer engine, rc=" << rc;
         return ErrorCode::INTERNAL_ERROR;
@@ -380,15 +426,21 @@ tl::expected<void, ErrorCode> ClientResources::unregisterLocalMemory(
     return {};
 }
 
-void ClientResources::InitLocalBufferAllocator(size_t pool_size,
-                                               const std::string& protocol,
-                                               bool use_hugepage) {
+ErrorCode ClientResources::InitLocalBufferAllocator(size_t pool_size,
+                                                    const std::string& protocol,
+                                                    bool use_hugepage) {
     if (pool_size == 0) {
-        LOG(INFO) << "Buffer allocator pool size is 0, skip initialization";
-        return;
+        LOG(INFO) << "Local buffer size is 0, skip registering local memory";
+        return ErrorCode::OK;
     }
-    local_buffer_allocator_ =
-        ClientBufferAllocator::create(pool_size, protocol, use_hugepage);
+    try {
+        local_buffer_allocator_ =
+            ClientBufferAllocator::create(pool_size, protocol, use_hugepage);
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Failed to allocate local buffer, size=" << pool_size
+                   << ", protocol=" << protocol << ": " << e.what();
+        return ErrorCode::INTERNAL_ERROR;
+    }
     if (local_buffer_allocator_) {
         auto result = RegisterLocalMemory(local_buffer_allocator_->getBase(),
                                           local_buffer_allocator_->size(), "*",
@@ -397,11 +449,14 @@ void ClientResources::InitLocalBufferAllocator(size_t pool_size,
             LOG(ERROR) << "Failed to register buffer allocator memory: "
                        << toString(result.error());
             local_buffer_allocator_.reset();
-        } else {
-            LOG(INFO) << "Buffer allocator initialized: " << pool_size
-                      << " bytes";
+            return result.error();
         }
+        LOG(INFO) << "Buffer allocator initialized: " << pool_size << " bytes";
+        return ErrorCode::OK;
     }
+    LOG(ERROR) << "Failed to create local buffer allocator, size=" << pool_size
+               << ", protocol=" << protocol;
+    return ErrorCode::INTERNAL_ERROR;
 }
 
 ErrorCode ClientResources::ReleaseLocalBuffer(bool update_metadata) {

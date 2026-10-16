@@ -465,10 +465,11 @@ TEST_F(P2PRealClientTest, PeerReadRequiresExactTransferLength) {
     ASSERT_TRUE(peer.Connect(descriptors.front().ip_address + ":" +
                              std::to_string(descriptors.front().rpc_port)));
     ClientResources receiver;
-    ASSERT_EQ(receiver.InitTransferEngine(0, "P2PHANDSHAKE", "tcp",
-                                          std::nullopt, "127.0.0.1"),
+    ASSERT_EQ(receiver.InitTransferEngine("127.0.0.1", "P2PHANDSHAKE", "tcp",
+                                          std::nullopt),
               ErrorCode::OK);
-    receiver.InitLocalBufferAllocator(2 * 1024 * 1024, "tcp", false);
+    ASSERT_EQ(receiver.InitLocalBufferAllocator(2 * 1024 * 1024, "tcp", false),
+              ErrorCode::OK);
     ASSERT_NE(receiver.GetBufferAllocator(), nullptr);
     auto destination = receiver.GetBufferAllocator()->allocate(1024 * 1024);
     ASSERT_TRUE(destination.has_value());
