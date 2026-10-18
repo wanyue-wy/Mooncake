@@ -5,13 +5,7 @@
 namespace mooncake {
 
 tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
-RealClient::CreateService(const P2PClientConfig&) {
-    LOG(ERROR) << "Requested setup does not match this centralized build";
-    return tl::unexpected(ErrorCode::INVALID_PARAMS);
-}
-
-tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
-RealClient::CreateService(const CentralizedClientConfig& config) {
+RealClient::CreateService(const ClientConfig &config) {
     if (config.heartbeat_rpc_port != 0 ||
         config.master_server_entry.rfind("redis://", 0) == 0) {
         LOG(ERROR) << "Centralized setup does not support Redis discovery or a "
@@ -34,6 +28,22 @@ RealClient::CreateService(const CentralizedClientConfig& config) {
         return tl::unexpected(error);
     }
     return std::move(*client);
+}
+
+tl::expected<void, ErrorCode> RealClient::initAll_internal(
+    const std::string &protocol, const std::string &device_name,
+    size_t mount_segment_size) {
+    if (client_service_) {
+        LOG(ERROR) << "Client is already initialized";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
+    }
+    uint64_t buffer_allocator_size = 1024 * 1024 * 1024;
+    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
+        "localhost:12345", "127.0.0.1:2379", protocol,
+        device_name.empty() ? std::nullopt
+                            : std::optional<std::string>(device_name),
+        "127.0.0.1:50051", mount_segment_size, buffer_allocator_size);
+    return setup_internal(config);
 }
 
 DeploymentMode RealClient::deployment_mode() const {

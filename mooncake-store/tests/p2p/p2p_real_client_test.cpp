@@ -269,6 +269,16 @@ TEST_F(P2PRealClientTest, SetupAndIdempotentClose) {
     EXPECT_LT(client->put("after_close", value), 0);
 }
 
+TEST_F(P2PRealClientTest, LegacyInitAllReportsNotImplemented) {
+    RealClient client;
+    auto readiness = client.service_ready_internal();
+    ASSERT_FALSE(readiness);
+    EXPECT_EQ(readiness.error(), ErrorCode::INVALID_PARAMS);
+    EXPECT_EQ(client.initAll("tcp", "", 16 * 1024 * 1024),
+              toInt(ErrorCode::NOT_IMPLEMENTED));
+    EXPECT_FALSE(client.is_initialized());
+}
+
 TEST_F(P2PRealClientTest, OmittedConfigsUseRuntimeDefaultsForSingleAndBatch) {
     ASSERT_NO_FATAL_FAILURE(StartClients());
     const std::string value("single\0payload", 14);

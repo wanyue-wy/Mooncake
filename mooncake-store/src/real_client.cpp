@@ -17,8 +17,11 @@
 #include <exception>
 #include <vector>
 
-#include "centralized_client_config_builder.h"
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
 #include "p2p/client/p2p_client_config_builder.h"
+#else
+#include "centralized_client_config_builder.h"
+#endif
 #include "real_client.h"
 #include "client_buffer.hpp"
 #include "mutex.h"
@@ -176,21 +179,12 @@ std::shared_ptr<ClientBufferAllocator> RealClient::GetBufferAllocator() const {
     return client_service_->GetBufferAllocator();
 }
 
-template <typename ConfigT>
-int RealClient::setup(ConfigT &config) {
+int RealClient::setup(const ClientConfig &config) {
     return to_py_ret(setup_internal(config));
 }
 
-// Explicit template instantiations
-template tl::expected<void, ErrorCode> RealClient::setup_internal(
-    CentralizedClientConfig &);
-template tl::expected<void, ErrorCode> RealClient::setup_internal(
-    P2PClientConfig &);
-template int RealClient::setup(CentralizedClientConfig &);
-template int RealClient::setup(P2PClientConfig &);
-
-template <typename ConfigT>
-tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT &config) {
+tl::expected<void, ErrorCode> RealClient::setup_internal(
+    const ClientConfig &config) {
     std::unique_lock setup_lock(inflight_lock_);
     if (state_ != State::UNINITIALIZED) {
         LOG(ERROR) << "Cannot setup a closed or initialized RealClient";
@@ -222,22 +216,6 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT &config) {
         LOG(ERROR) << "Deployment startup cleanup failed: " << cleanup.error();
     }
     return tl::unexpected(startup_result);
-}
-
-tl::expected<void, ErrorCode> RealClient::initAll_internal(
-    const std::string &protocol, const std::string &device_name,
-    size_t mount_segment_size) {
-    if (client_service_) {
-        LOG(ERROR) << "Client is already initialized";
-        return tl::unexpected(ErrorCode::INVALID_PARAMS);
-    }
-    uint64_t buffer_allocator_size = 1024 * 1024 * 1024;
-    auto config = CentralizedClientConfigBuilder::build_centralized_real_client(
-        "localhost:12345", "127.0.0.1:2379", protocol,
-        device_name.empty() ? std::nullopt
-                            : std::optional<std::string>(device_name),
-        "127.0.0.1:50051", mount_segment_size, buffer_allocator_size);
-    return setup_internal(config);
 }
 
 int RealClient::initAll(const std::string &protocol_,

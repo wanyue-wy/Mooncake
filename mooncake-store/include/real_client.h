@@ -29,8 +29,10 @@ struct P2PClientConfig;
 
 #if defined(MOONCAKE_STORE_CLIENT_P2P)
 using ClientServiceImpl = P2PClientService;
+using ClientConfig = P2PClientConfig;
 #else
 using ClientServiceImpl = Client;
+using ClientConfig = CentralizedClientConfig;
 #endif
 
 class RealClient;
@@ -87,8 +89,7 @@ class RealClient : public PyClient {
     // Factory to create shared instances and auto-register to ResourceTracker
     static std::shared_ptr<RealClient> create();
 
-    template <typename ConfigT>
-    int setup(ConfigT &config);
+    int setup(const ClientConfig &config);
 
     int initAll(const std::string &protocol, const std::string &device_name,
                 size_t mount_segment_size = 1024 * 1024 * 16) override;
@@ -400,8 +401,8 @@ class RealClient : public PyClient {
         return deployment_mode();
     }
 
-    template <typename ConfigT>
-    tl::expected<void, ErrorCode> setup_internal(ConfigT &config);
+    tl::expected<void, ErrorCode> setup_internal(
+        const ClientConfig &config);
 
     tl::expected<void, ErrorCode> initAll_internal(
         const std::string &protocol, const std::string &device_name,
@@ -571,9 +572,7 @@ class RealClient : public PyClient {
     // The alias names the native class itself, not a forwarding wrapper.
     std::shared_ptr<ClientServiceImpl> client_service_;
     static tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
-    CreateService(const CentralizedClientConfig &config);
-    static tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
-    CreateService(const P2PClientConfig &config);
+    CreateService(const ClientConfig &config);
 };
 
 }  // namespace mooncake

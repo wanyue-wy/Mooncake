@@ -5,19 +5,20 @@
 namespace mooncake {
 
 tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
-RealClient::CreateService(const CentralizedClientConfig&) {
-    LOG(ERROR) << "Requested setup does not match this P2P build";
-    return tl::unexpected(ErrorCode::INVALID_PARAMS);
-}
-
-tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
-RealClient::CreateService(const P2PClientConfig& config) {
+RealClient::CreateService(const ClientConfig &config) {
     auto client = P2PClientService::Create(config);
     if (!client) {
         LOG(ERROR) << "Failed to create native client";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
     return std::move(*client);
+}
+
+tl::expected<void, ErrorCode> RealClient::initAll_internal(
+    const std::string & /*protocol*/, const std::string & /*device_name*/,
+    size_t /*mount_segment_size*/) {
+    LOG(ERROR) << "initAll is not supported by the P2P build; use setup";
+    return tl::unexpected(ErrorCode::NOT_IMPLEMENTED);
 }
 
 DeploymentMode RealClient::deployment_mode() const {
