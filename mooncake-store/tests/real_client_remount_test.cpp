@@ -8,20 +8,21 @@
 #include <memory>
 #include <thread>
 
-#include "real_client.h"
+#include "real_client_test_helper.h"
 
 namespace mooncake {
 
 namespace {
 
 void AddClient(RealClient& rc, const UUID& id) {
-    SharedMutexLocker lock(&rc.dummy_client_mutex_);
-    rc.shm_contexts_[id] = std::make_shared<RealClient::ShmContext>();
+    SharedMutexLocker lock(&RealClientTestHelper::ShmMutex(rc));
+    RealClientTestHelper::ShmContexts(rc)[id] =
+        std::make_shared<RealClientTestHelper::ShmContext>();
 }
 
 void RemoveClient(RealClient& rc, const UUID& id) {
-    SharedMutexLocker lock(&rc.dummy_client_mutex_);
-    rc.shm_contexts_.erase(id);
+    SharedMutexLocker lock(&RealClientTestHelper::ShmMutex(rc));
+    RealClientTestHelper::ShmContexts(rc).erase(id);
 }
 
 }  // namespace
@@ -68,11 +69,11 @@ TEST(RealClientRemountTest, PingReportsMappedShmCount) {
     // Two mapped segments -> count 2 (buffers left null; ping only reads size,
     // and rc's teardown skips unmapping when client_service_ is unset).
     {
-        SharedMutexLocker lock(&rc.dummy_client_mutex_);
-        auto& ctx = rc.shm_contexts_[id];
+        SharedMutexLocker lock(&RealClientTestHelper::ShmMutex(rc));
+        auto& ctx = RealClientTestHelper::ShmContexts(rc)[id];
         SharedMutexLocker ctx_lock(&ctx->mutex_);
-        ctx->mapped_shms_.push_back(RealClient::MappedShm{});
-        ctx->mapped_shms_.push_back(RealClient::MappedShm{});
+        ctx->mapped_shms_.push_back(RealClientTestHelper::MappedShm{});
+        ctx->mapped_shms_.push_back(RealClientTestHelper::MappedShm{});
     }
     auto mapped = rc.ping(id);
     EXPECT_EQ(mapped.value().status, DummyClientStatus::HEALTH);
@@ -101,7 +102,8 @@ TEST(RealClientRemountTest, PingNotBlockedByConcurrentReader) {
     std::atomic<bool> locked{false};
     std::atomic<bool> release{false};
     std::thread reader([&] {
-        SharedMutexLocker lock(&rc.dummy_client_mutex_, shared_lock);
+        SharedMutexLocker lock(
+            &RealClientTestHelper::ShmMutex(rc), shared_lock);
         locked.store(true);
         while (!release.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));

@@ -64,6 +64,8 @@ class ResourceTracker {
     // Exit handler function
     static void exitHandler();
 
+    void startSignalThread();
+
     Mutex mutex_;
     std::vector<std::weak_ptr<PyClient>> instances_ GUARDED_BY(mutex_);
 
@@ -71,18 +73,11 @@ class ResourceTracker {
     std::atomic<bool> cleaned_{false};
 
     // Dedicated signal handling thread
-    void startSignalThread();
     std::once_flag signal_once_{};
     std::jthread signal_thread_{};  // joins on destruction
 };
 
 class RealClient : public PyClient {
-    enum class State { UNINITIALIZED, READY, CLOSING, CLOSED };
-    // Outlive worker threads that may still observe shutdown during
-    // destruction.
-    mutable std::shared_mutex inflight_lock_;
-    State state_{State::UNINITIALIZED};
-
    public:
     RealClient();
     ~RealClient();
@@ -375,20 +370,12 @@ class RealClient : public PyClient {
         const std::optional<WriteConfig> &config, const UUID &client_id,
         WriteOperation operation = WriteOperation::Put);
 
-    // Share mem management for dummy client
-    // Modified: map_shm_internal now takes fd instead of just name
-    tl::expected<void, ErrorCode> map_shm_internal(int fd,
-                                                   uint64_t shm_base_addr,
-                                                   size_t shm_size,
-                                                   bool is_local_buffer,
-                                                   const UUID &client_id);
-
     tl::expected<void, ErrorCode> unmap_shm_internal(const UUID &client_id);
 
     tl::expected<void, ErrorCode> unregister_shm_buffer_internal(
         uint64_t dummy_base_addr, const UUID &client_id);
 
-    // Internal versions that return tl::expected
+    // Native-result entry points used by the daemon and Dummy RPC.
     tl::expected<DeploymentMode, ErrorCode> service_ready_internal() {
         std::shared_lock inflight_guard(inflight_lock_);
         if (state_ == State::CLOSING || state_ == State::CLOSED) {
@@ -406,6 +393,67 @@ class RealClient : public PyClient {
 
     tl::expected<void, ErrorCode> setup_internal(
         const ClientConfig &config);
+
+    tl::expected<void, ErrorCode> remove_internal(const std::string &key,
+                                                  bool force = false);
+
+    tl::expected<long, ErrorCode> removeByRegex_internal(const std::string &str,
+                                                         bool force = false);
+
+    tl::expected<int64_t, ErrorCode> removeAll_internal(bool force = false);
+
+    tl::expected<int64_t, ErrorCode> removeAllLocal_internal();
+
+    tl::expected<void, ErrorCode> removeLocal_internal(const std::string &key);
+
+    tl::expected<bool, ErrorCode> isExist_internal(const std::string &key);
+
+    std::vector<tl::expected<bool, ErrorCode>> batchIsExist_internal(
+        const std::vector<std::string> &keys);
+
+    tl::expected<int64_t, ErrorCode> getSize_internal(const std::string &key);
+
+    std::map<std::string, std::vector<ObjectDescriptor>>
+    batch_get_replica_desc(const std::vector<std::string> &keys);
+    std::vector<ObjectDescriptor> get_replica_desc(const std::string &key);
+
+    tl::expected<DummyHeartbeatResponse, ErrorCode> ping(const UUID &client_id);
+
+   private:
+    friend struct RealClientTestHelper;
+
+    enum class State { UNINITIALIZED, READY, CLOSING, CLOSED };
+
+    struct MappedShm {
+        std::string shm_name_;
+        // Offset = real_base - dummy_base
+        uintptr_t shm_addr_offset_ = 0;
+        void *shm_buffer_ = nullptr;
+        size_t shm_size_ = 0;
+        uintptr_t dummy_base_addr_ = 0;
+    };
+
+    struct ShmContext {
+        mutable SharedMutex mutex_;
+        std::vector<MappedShm> mapped_shms_ GUARDED_BY(mutex_);
+        std::shared_ptr<ClientBufferAllocator> client_buffer_allocator_
+            GUARDED_BY(mutex_) = nullptr;
+    };
+
+    // boost lockfree queue requires trivial assignment operator
+    struct PodUUID {
+        uint64_t first_;
+        uint64_t second_;
+    };
+
+    // Internal implementations returning native results.
+    // Share mem management for dummy client
+    // Modified: map_shm_internal now takes fd instead of just name
+    tl::expected<void, ErrorCode> map_shm_internal(int fd,
+                                                   uint64_t shm_base_addr,
+                                                   size_t shm_size,
+                                                   bool is_local_buffer,
+                                                   const UUID &client_id);
 
     tl::expected<void, ErrorCode> initAll_internal(
         const std::string &protocol, const std::string &device_name,
@@ -472,26 +520,7 @@ class RealClient : public PyClient {
         std::shared_ptr<ClientBufferAllocator> client_buffer_allocator =
             nullptr);
 
-    tl::expected<void, ErrorCode> remove_internal(const std::string &key,
-                                                  bool force = false);
-
-    tl::expected<long, ErrorCode> removeByRegex_internal(const std::string &str,
-                                                         bool force = false);
-
-    tl::expected<int64_t, ErrorCode> removeAll_internal(bool force = false);
-
-    tl::expected<int64_t, ErrorCode> removeAllLocal_internal();
-
-    tl::expected<void, ErrorCode> removeLocal_internal(const std::string &key);
-
     tl::expected<void, ErrorCode> tearDownAll_internal();
-
-    tl::expected<bool, ErrorCode> isExist_internal(const std::string &key);
-
-    std::vector<tl::expected<bool, ErrorCode>> batchIsExist_internal(
-        const std::vector<std::string> &keys);
-
-    tl::expected<int64_t, ErrorCode> getSize_internal(const std::string &key);
 
     std::shared_ptr<BufferHandle> get_buffer_internal(
         const std::string &key,
@@ -503,51 +532,47 @@ class RealClient : public PyClient {
         const std::vector<std::string> &keys,
         const std::optional<ReadConfig> &config = std::nullopt);
 
-    std::map<std::string, std::vector<ObjectDescriptor>>
-    batch_get_replica_desc(const std::vector<std::string> &keys);
-    std::vector<ObjectDescriptor> get_replica_desc(const std::string &key);
+    std::shared_ptr<ShmContext> find_shm_context(const UUID &client_id);
 
-    tl::expected<DummyHeartbeatResponse, ErrorCode> ping(const UUID &client_id);
+    void dummy_client_monitor_func();
+    ErrorCode start_dummy_client_monitor();
+    ErrorCode stop_dummy_client_monitor();
+
+    ErrorCode start_ipc_server();
+    ErrorCode stop_ipc_server();
+    void ipc_server_func();
+
+    static tl::expected<void, ErrorCode> ValidateWriteOperation(
+        WriteOperation operation, const std::optional<WriteConfig> &config);
+
+    // Preserve the six legacy write-entry restrictions without constraining
+    // native Put/BatchPut or the multi-buffer write entry.
+    static tl::expected<void, ErrorCode> ValidateWriteEntryConfig(
+        const std::optional<WriteConfig> &config);
+
+    static tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
+    CreateService(const ClientConfig &config);
+
+    void register_dummy_rpc_handlers();
+
+    // Outlive worker threads that may still observe shutdown during
+    // destruction.
+    mutable std::shared_mutex inflight_lock_;
+    State state_{State::UNINITIALIZED};
 
     std::string protocol_;
-
-    struct MappedShm {
-        std::string shm_name_;
-        // Offset = real_base - dummy_base
-        uintptr_t shm_addr_offset_ = 0;
-        void *shm_buffer_ = nullptr;
-        size_t shm_size_ = 0;
-        uintptr_t dummy_base_addr_ = 0;
-    };
-
-    struct ShmContext {
-        mutable SharedMutex mutex_;
-        std::vector<MappedShm> mapped_shms_ GUARDED_BY(mutex_);
-        std::shared_ptr<ClientBufferAllocator> client_buffer_allocator_
-            GUARDED_BY(mutex_) = nullptr;
-    };
 
     mutable SharedMutex dummy_client_mutex_;
     std::unordered_map<UUID, std::shared_ptr<ShmContext>, boost::hash<UUID>>
         shm_contexts_ GUARDED_BY(dummy_client_mutex_);
 
-    std::shared_ptr<ShmContext> find_shm_context(const UUID &client_id);
-
     // Dummy Client manage related members
-    void dummy_client_monitor_func();
-    ErrorCode start_dummy_client_monitor();
-    ErrorCode stop_dummy_client_monitor();
     std::thread dummy_client_monitor_thread_;
     std::atomic<bool> dummy_client_monitor_running_{false};
     std::condition_variable dummy_client_monitor_cv_;
     std::mutex dummy_client_monitor_cv_mutex_;
     static constexpr uint64_t kDummyClientMonitorSleepMs_ =
         1000;  // 1000 ms sleep between client monitor checks
-    // boost lockfree queue requires trivial assignment operator
-    struct PodUUID {
-        uint64_t first_;
-        uint64_t second_;
-    };
     static constexpr size_t kDummyClientPingQueueSize_ =
         128 * 1024;  // Size of the client ping queue
     boost::lockfree::queue<PodUUID> dummy_client_ping_queue_{
@@ -559,26 +584,11 @@ class RealClient : public PyClient {
     std::string ipc_socket_path_;
     std::jthread ipc_thread_;
     std::atomic<bool> ipc_running_{false};
-    ErrorCode start_ipc_server();
-    ErrorCode stop_ipc_server();
-    void ipc_server_func();
-
-   private:
-    static tl::expected<void, ErrorCode> ValidateWriteOperation(
-        WriteOperation operation, const std::optional<WriteConfig> &config);
-
-    // Preserve the six legacy write-entry restrictions without constraining
-    // native Put/BatchPut or the multi-buffer write entry.
-    static tl::expected<void, ErrorCode> ValidateWriteEntryConfig(
-        const std::optional<WriteConfig> &config);
 
     // The alias names the native class itself, not a forwarding wrapper.
     std::shared_ptr<ClientServiceImpl> client_service_;
-    static tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
-    CreateService(const ClientConfig &config);
 
     std::unique_ptr<coro_rpc::coro_rpc_server> dummy_rpc_server_;
-    void register_dummy_rpc_handlers();
 };
 
 }  // namespace mooncake

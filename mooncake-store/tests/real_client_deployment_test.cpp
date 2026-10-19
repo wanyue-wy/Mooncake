@@ -16,7 +16,7 @@
 #include <string>
 #include <thread>
 
-#include "real_client.h"
+#include "real_client_test_helper.h"
 #if defined(MOONCAKE_STORE_CLIENT_P2P)
 #include "p2p/client/p2p_client_config_builder.h"
 #include "p2p/test_p2p_server_helpers.h"
@@ -145,7 +145,8 @@ void CheckIpcRecovery(Config config, const WriteConfig& write_config) {
         ASSERT_NO_FATAL_FAILURE(SendRegistration(
             peer.fd, file.fd(), request, sizeof(request) / 2, response));
         EXPECT_NE(response, 0);
-        EXPECT_EQ(owner.client->find_shm_context(id), nullptr);
+        EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id),
+                  nullptr);
     }
     {
         Socket peer(ConnectIpc(config.ipc_socket_path));
@@ -156,7 +157,8 @@ void CheckIpcRecovery(Config config, const WriteConfig& write_config) {
         ASSERT_NO_FATAL_FAILURE(SendRegistration(peer.fd, file.fd(), invalid,
                                                  sizeof(invalid), response));
         EXPECT_NE(response, 0);
-        EXPECT_EQ(owner.client->find_shm_context(id), nullptr);
+        EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id),
+                  nullptr);
     }
     Socket peer(ConnectIpc(config.ipc_socket_path));
     ASSERT_GE(peer.fd, 0);
@@ -182,7 +184,7 @@ void CheckIpcRecovery(Config config, const WriteConfig& write_config) {
     EXPECT_EQ(std::string(static_cast<char*>(file.data) + 128, second.size()),
               second);
     ASSERT_TRUE(owner.client->unmap_shm_internal(id));
-    EXPECT_EQ(owner.client->find_shm_context(id), nullptr);
+    EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), nullptr);
 }
 
 template <typename Config>
@@ -194,11 +196,11 @@ void CheckUnmapWaitsForContext(Config config, const WriteConfig& write_config) {
     const auto id = generate_uuid();
     const int fd = dup(file.fd());
     ASSERT_GE(fd, 0);
-    ASSERT_TRUE(owner.client->map_shm_internal(fd, 0x100000, SharedFile::kSize,
-                                               false, id));
+    ASSERT_TRUE(RealClientTestHelper::MapShm(
+        *owner.client, fd, 0x100000, SharedFile::kSize, false, id));
     const std::string value = "read while SHM is being unmapped";
     ASSERT_EQ(owner.client->put("unmap_key", value, write_config), 0);
-    auto context = owner.client->find_shm_context(id);
+    auto context = RealClientTestHelper::FindShmContext(*owner.client, id);
     ASSERT_NE(context, nullptr);
     std::unique_lock<SharedMutex> held(context->mutex_);
     std::promise<void> started;
@@ -215,11 +217,11 @@ void CheckUnmapWaitsForContext(Config config, const WriteConfig& write_config) {
     // Detachment proves unmap has reached the context lock, which is held here.
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (owner.client->find_shm_context(id) &&
+    while (RealClientTestHelper::FindShmContext(*owner.client, id) &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    EXPECT_EQ(owner.client->find_shm_context(id), nullptr);
+    EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), nullptr);
     EXPECT_EQ(unmap.wait_for(std::chrono::milliseconds(0)),
               std::future_status::timeout);
     held.unlock();
@@ -237,7 +239,7 @@ void CheckUnmapWaitsForContext(Config config, const WriteConfig& write_config) {
         EXPECT_EQ(std::string(static_cast<char*>(file.data), SharedFile::kSize),
                   std::string(SharedFile::kSize, 0x5a));
     }
-    EXPECT_EQ(owner.client->find_shm_context(id), nullptr);
+    EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), nullptr);
 }
 
 }  // namespace

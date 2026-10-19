@@ -20,7 +20,7 @@
 #include "p2p/client/p2p_client_config_builder.h"
 #include "p2p/client/peer_client.h"
 #include "config.h"
-#include "real_client.h"
+#include "../real_client_test_helper.h"
 #include "test_p2p_server_helpers.h"
 
 namespace mooncake {
@@ -224,7 +224,8 @@ TEST_F(P2PRealClientTest, InvalidShmRegistrationClosesFdAndLeavesNoContext) {
     {
         ScopedMaxMrSize limit(1);
         auto result =
-            client->map_shm_internal(passed_fd, 0x100000, 4096, false, {1, 2});
+            RealClientTestHelper::MapShm(*client, passed_fd, 0x100000, 4096,
+                                         false, {1, 2});
         EXPECT_FALSE(result);
     }
     struct stat after{};
@@ -233,7 +234,7 @@ TEST_F(P2PRealClientTest, InvalidShmRegistrationClosesFdAndLeavesNoContext) {
                                       after.st_ino == original.st_ino;
     EXPECT_FALSE(duplicate_still_open);
     if (duplicate_still_open) close(passed_fd);
-    EXPECT_EQ(client->find_shm_context({1, 2}), nullptr);
+    EXPECT_EQ(RealClientTestHelper::FindShmContext(*client, {1, 2}), nullptr);
     EXPECT_EQ(client->tearDownAll(), 0);
 }
 
