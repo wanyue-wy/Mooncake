@@ -5,6 +5,7 @@
 #include <span>
 #include <vector>
 #include <string>
+#include <ylt/util/tl/expected.hpp>
 
 #include "offset_allocator/offset_allocator.hpp"
 #include "common_types.h"
@@ -32,8 +33,8 @@ class ClientBufferAllocator
         size_t size, const std::string& protocol = "",
         bool use_hugepage = false);
 
-    // Create for shared memory
-    static std::shared_ptr<ClientBufferAllocator> create(
+    // Create for caller-owned memory; report allocation failures as errors.
+    static tl::expected<std::shared_ptr<ClientBufferAllocator>, ErrorCode> create(
         void* addr, size_t size, const std::string& protocol = "");
 
     ~ClientBufferAllocator();

@@ -204,25 +204,24 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(ConfigT &config) {
     client_service_ = std::move(*client);
     protocol_ = config.protocol;
     ipc_socket_path_ = config.ipc_socket_path;
-    int startup_result = 0;
+    auto startup_result = ErrorCode::OK;
     if (!ipc_socket_path_.empty()) {
         startup_result = start_ipc_server();
     }
-    if (startup_result != 0) {
-        LOG(ERROR) << "Failed to start deployment workers";
-        setup_lock.unlock();
-        auto cleanup = tearDownAll_internal();
-        if (!cleanup) {
-            LOG(ERROR) << "Deployment startup cleanup failed: "
-                       << cleanup.error();
-        }
-        return tl::unexpected(ErrorCode::INTERNAL_ERROR);
+    if (startup_result != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to start IPC server: " << startup_result;
+    } else if ((startup_result = start_dummy_client_monitor()) != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to start Dummy monitor: " << startup_result;
     } else {
-        LOG(INFO) << "Starting IPC server at " << ipc_socket_path_;
-        startup_result = start_dummy_client_monitor();
+        state_ = State::READY;
+        return {};
     }
-    state_ = State::READY;
-    return {};
+    setup_lock.unlock();
+    auto cleanup = tearDownAll_internal();
+    if (!cleanup) {
+        LOG(ERROR) << "Deployment startup cleanup failed: " << cleanup.error();
+    }
+    return tl::unexpected(startup_result);
 }
 
 tl::expected<void, ErrorCode> RealClient::initAll_internal(
@@ -257,8 +256,13 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
         }
         state_ = State::CLOSING;
     }
-    stop_ipc_server();
-    stop_dummy_client_monitor();
+    auto ipc_result = stop_ipc_server();
+    auto monitor_result = stop_dummy_client_monitor();
+    if (ipc_result != ErrorCode::OK || monitor_result != ErrorCode::OK) {
+        LOG(ERROR) << "Failed to stop deployment workers: IPC=" << ipc_result
+                   << ", Dummy monitor=" << monitor_result;
+        return tl::unexpected(ErrorCode::INTERNAL_ERROR);
+    }
 
     if (!client_service_) {
         std::unique_lock lock(inflight_lock_);
@@ -765,17 +769,17 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
     // lock.
     std::shared_ptr<ClientBufferAllocator> new_allocator;
     if (is_local_buffer) {
-        try {
-            new_allocator = ClientBufferAllocator::create(shm_buffer, shm_size,
-                                                          this->protocol_);
-        } catch (const std::exception &e) {
-            LOG(ERROR) << "Failed to create SHM allocator: " << e.what();
+        auto allocator =
+            ClientBufferAllocator::create(shm_buffer, shm_size, this->protocol_);
+        if (!allocator) {
+            LOG(ERROR) << "Failed to create SHM allocator: " << allocator.error();
             if (munmap(shm_buffer, shm_size) != 0) {
                 LOG(ERROR) << "Failed to unmap SHM after allocation failure: "
                            << strerror(errno);
             }
-            return tl::unexpected(ErrorCode::INTERNAL_ERROR);
+            return tl::unexpected(allocator.error());
         }
+        new_allocator = std::move(*allocator);
     }
 
     auto registration = client_service_->RegisterLocalMemory(
@@ -1618,7 +1622,7 @@ void RealClient::dummy_client_monitor_func() {
     }
 }
 
-int RealClient::start_dummy_client_monitor() {
+ErrorCode RealClient::start_dummy_client_monitor() {
     // Start client monitor thread in all modes so TTL/heartbeat works
     dummy_client_monitor_running_ = true;
     try {
@@ -1627,19 +1631,26 @@ int RealClient::start_dummy_client_monitor() {
     } catch (const std::exception &e) {
         dummy_client_monitor_running_ = false;
         LOG(ERROR) << "Failed to start Dummy monitor: " << e.what();
-        throw;
+        return ErrorCode::INTERNAL_ERROR;
     }
     LOG(INFO) << "start dummy_client_monitor_thread";
-    return 0;
+    return ErrorCode::OK;
 }
 
-int RealClient::start_ipc_server() {
+ErrorCode RealClient::start_ipc_server() {
     ipc_running_ = true;
-    ipc_thread_ = std::jthread(&RealClient::ipc_server_func, this);
-    return 0;
+    try {
+        ipc_thread_ = std::jthread(&RealClient::ipc_server_func, this);
+    } catch (const std::exception &e) {
+        ipc_running_ = false;
+        LOG(ERROR) << "Failed to start IPC worker: " << e.what();
+        return ErrorCode::INTERNAL_ERROR;
+    }
+    LOG(INFO) << "Starting IPC server at " << ipc_socket_path_;
+    return ErrorCode::OK;
 }
 
-int RealClient::stop_ipc_server() {
+ErrorCode RealClient::stop_ipc_server() {
     ipc_running_ = false;
     // Connect to self to unblock accept if blocked, or unlink
     if (!ipc_socket_path_.empty()) {
@@ -1658,19 +1669,24 @@ int RealClient::stop_ipc_server() {
     }
     // jthread will join on destruction or we can explicitly join if needed
     // But recvmsg/accept might block. The logic above attempts to unblock.
-    return 0;
+    return ErrorCode::OK;
 }
 
-int RealClient::stop_dummy_client_monitor() {
+ErrorCode RealClient::stop_dummy_client_monitor() {
     {
         std::lock_guard<std::mutex> lock(dummy_client_monitor_cv_mutex_);
         dummy_client_monitor_running_ = false;
     }
     dummy_client_monitor_cv_.notify_all();
     if (dummy_client_monitor_thread_.joinable()) {
-        dummy_client_monitor_thread_.join();
+        try {
+            dummy_client_monitor_thread_.join();
+        } catch (const std::exception &e) {
+            LOG(ERROR) << "Failed to join Dummy monitor: " << e.what();
+            return ErrorCode::INTERNAL_ERROR;
+        }
     }
-    return 0;
+    return ErrorCode::OK;
 }
 
 static int recv_fd(int socket, void *data, size_t data_len) {

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <exception>
 #include <vector>
 #include <sys/mman.h>  // For shm_open, mmap, munmap
 #include <sys/stat.h>  // For S_IRUSR, S_IWUSR
@@ -18,10 +19,16 @@ std::shared_ptr<ClientBufferAllocator> ClientBufferAllocator::create(
         new ClientBufferAllocator(size, protocol, use_hugepage));
 }
 
-std::shared_ptr<ClientBufferAllocator> ClientBufferAllocator::create(
-    void* addr, size_t size, const std::string& protocol) {
-    return std::shared_ptr<ClientBufferAllocator>(
-        new ClientBufferAllocator(addr, size, protocol));
+tl::expected<std::shared_ptr<ClientBufferAllocator>, ErrorCode>
+ClientBufferAllocator::create(void* addr, size_t size,
+                             const std::string& protocol) {
+    try {
+        return std::shared_ptr<ClientBufferAllocator>(
+            new ClientBufferAllocator(addr, size, protocol));
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Failed to create external buffer allocator: " << e.what();
+        return tl::unexpected(ErrorCode::INTERNAL_ERROR);
+    }
 }
 
 ClientBufferAllocator::ClientBufferAllocator(size_t size,

@@ -531,8 +531,8 @@ class RealClient : public PyClient {
 
     // Dummy Client manage related members
     void dummy_client_monitor_func();
-    int start_dummy_client_monitor();
-    int stop_dummy_client_monitor();
+    ErrorCode start_dummy_client_monitor();
+    ErrorCode stop_dummy_client_monitor();
     std::thread dummy_client_monitor_thread_;
     std::atomic<bool> dummy_client_monitor_running_{false};
     std::condition_variable dummy_client_monitor_cv_;
@@ -555,8 +555,8 @@ class RealClient : public PyClient {
     std::string ipc_socket_path_;
     std::jthread ipc_thread_;
     std::atomic<bool> ipc_running_{false};
-    int start_ipc_server();
-    int stop_ipc_server();
+    ErrorCode start_ipc_server();
+    ErrorCode stop_ipc_server();
     void ipc_server_func();
 
    private:
