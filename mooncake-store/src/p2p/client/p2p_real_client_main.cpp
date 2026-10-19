@@ -1,7 +1,5 @@
 #include "version.h"
 #include <gflags/gflags.h>
-#include <csignal>
-#include <ylt/coro_rpc/coro_rpc_server.hpp>
 
 #include "p2p/client/p2p_client_config_builder.h"
 #include "real_client.h"
@@ -88,37 +86,6 @@ DEFINE_uint64(metric_report_interval_seconds, 60,
               "Interval (seconds) for periodic client metric reporting. "
               "0 disables periodic reporting (metrics are still collected).");
 
-namespace mooncake {
-void RegisterClientRpcService(coro_rpc::coro_rpc_server& server,
-                              RealClient& real_client) {
-    server.register_handler<&RealClient::put_dummy_helper>(&real_client);
-    server.register_handler<&RealClient::put_batch_dummy_helper>(&real_client);
-    server.register_handler<&RealClient::put_parts_dummy_helper>(&real_client);
-    server.register_handler<&RealClient::remove_internal>(&real_client);
-    server.register_handler<&RealClient::removeByRegex_internal>(&real_client);
-    server.register_handler<&RealClient::removeAll_internal>(&real_client);
-    server.register_handler<&RealClient::removeAllLocal_internal>(&real_client);
-    server.register_handler<&RealClient::removeLocal_internal>(&real_client);
-    server.register_handler<&RealClient::isExist_internal>(&real_client);
-    server.register_handler<&RealClient::batchIsExist_internal>(&real_client);
-    server.register_handler<&RealClient::getSize_internal>(&real_client);
-    server.register_handler<&RealClient::get_replica_desc>(&real_client);
-    server.register_handler<&RealClient::batch_get_replica_desc>(&real_client);
-    server.register_handler<&RealClient::get_buffer_info_dummy_helper>(
-        &real_client);
-    server.register_handler<&RealClient::batch_put_from_dummy_helper>(
-        &real_client);
-    server.register_handler<&RealClient::batch_get_into_dummy_helper>(
-        &real_client);
-    server.register_handler<&RealClient::map_shm_internal>(&real_client);
-    server.register_handler<&RealClient::unmap_shm_internal>(&real_client);
-    server.register_handler<&RealClient::unregister_shm_buffer_internal>(
-        &real_client);
-    server.register_handler<&RealClient::service_ready_internal>(&real_client);
-    server.register_handler<&RealClient::ping>(&real_client);
-}
-}  // namespace mooncake
-
 int main(int argc, char* argv[]) {
     gflags::SetVersionString(mooncake::GetMooncakeStoreBuildInfo());
     gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -170,10 +137,6 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    coro_rpc::coro_rpc_server server(FLAGS_threads, FLAGS_port, "127.0.0.1");
-    RegisterClientRpcService(server, *client_inst);
-
     LOG(INFO) << "Starting real client service on 127.0.0.1:" << FLAGS_port;
-
-    return server.start();
+    return client_inst->run_dummy_rpc_server(FLAGS_threads, FLAGS_port);
 }

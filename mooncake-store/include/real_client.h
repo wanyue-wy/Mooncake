@@ -11,6 +11,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <shared_mutex>
+#include <ylt/coro_rpc/coro_rpc_server.hpp>
 
 #include "pyclient.h"
 #if defined(MOONCAKE_STORE_CLIENT_P2P)
@@ -90,6 +91,8 @@ class RealClient : public PyClient {
     static std::shared_ptr<RealClient> create();
 
     int setup(const ClientConfig &config);
+
+    int run_dummy_rpc_server(size_t thread_count, uint16_t port);
 
     int initAll(const std::string &protocol, const std::string &device_name,
                 size_t mount_segment_size = 1024 * 1024 * 16) override;
@@ -573,6 +576,9 @@ class RealClient : public PyClient {
     std::shared_ptr<ClientServiceImpl> client_service_;
     static tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
     CreateService(const ClientConfig &config);
+
+    std::unique_ptr<coro_rpc::coro_rpc_server> dummy_rpc_server_;
+    void register_dummy_rpc_handlers();
 };
 
 }  // namespace mooncake

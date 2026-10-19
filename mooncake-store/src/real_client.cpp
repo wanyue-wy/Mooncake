@@ -218,6 +218,16 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(
     return tl::unexpected(startup_result);
 }
 
+int RealClient::run_dummy_rpc_server(size_t thread_count, uint16_t port) {
+    dummy_rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(
+        thread_count, port, "127.0.0.1");
+    register_dummy_rpc_handlers();
+    auto result = dummy_rpc_server_->start();
+    // Match the previous listener's local scope in main.
+    dummy_rpc_server_.reset();
+    return result;
+}
+
 int RealClient::initAll(const std::string &protocol_,
                         const std::string &device_name,
                         size_t mount_segment_size) {

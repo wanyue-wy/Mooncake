@@ -4,6 +4,38 @@
 
 namespace mooncake {
 
+void RealClient::register_dummy_rpc_handlers() {
+    auto &server = *dummy_rpc_server_;
+    server.register_handler<&RealClient::put_dummy_helper>(this);
+    server.register_handler<&RealClient::put_batch_dummy_helper>(this);
+    server.register_handler<&RealClient::put_parts_dummy_helper>(this);
+    server.register_handler<&RealClient::remove_internal>(this);
+    server.register_handler<&RealClient::removeByRegex_internal>(this);
+    server.register_handler<&RealClient::removeAll_internal>(this);
+    server.register_handler<&RealClient::removeAllLocal_internal>(this);
+    server.register_handler<&RealClient::removeLocal_internal>(this);
+    server.register_handler<&RealClient::isExist_internal>(this);
+    server.register_handler<&RealClient::batchIsExist_internal>(this);
+    server.register_handler<&RealClient::getSize_internal>(this);
+    server.register_handler<&RealClient::get_replica_desc>(this);
+    server.register_handler<&RealClient::batch_get_replica_desc>(this);
+    server.register_handler<&RealClient::get_buffer_info_dummy_helper>(
+        this);
+    server.register_handler<&RealClient::batch_put_from_dummy_helper>(
+        this);
+    server.register_handler<&RealClient::batch_get_into_dummy_helper>(
+        this);
+    server.register_handler<&RealClient::map_shm_internal>(this);
+    server.register_handler<&RealClient::unmap_shm_internal>(this);
+    server.register_handler<&RealClient::unregister_shm_buffer_internal>(
+        this);
+    server.register_handler<&RealClient::service_ready_internal>(this);
+    server.register_handler<&RealClient::ping>(this);
+    server.register_handler<&RealClient::create_copy_task>(this);
+    server.register_handler<&RealClient::create_move_task>(this);
+    server.register_handler<&RealClient::query_task>(this);
+}
+
 tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
 RealClient::CreateService(const ClientConfig &config) {
     if (config.heartbeat_rpc_port != 0 ||
