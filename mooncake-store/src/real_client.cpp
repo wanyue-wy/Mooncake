@@ -1,5 +1,6 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/mman.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -1603,10 +1604,8 @@ void RealClient::dummy_client_monitor_func() {
             unmap_shm_internal(client_id);
         }
 
-        std::unique_lock<std::mutex> lock(dummy_client_monitor_cv_mutex_);
-        dummy_client_monitor_cv_.wait_for(
-            lock, std::chrono::milliseconds(kDummyClientMonitorSleepMs_),
-            [this] { return !dummy_client_monitor_running_.load(); });
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(kDummyClientMonitorSleepMs_));
     }
 }
 
@@ -1640,32 +1639,44 @@ ErrorCode RealClient::start_ipc_server() {
 
 ErrorCode RealClient::stop_ipc_server() {
     ipc_running_ = false;
-    // Connect to self to unblock accept if blocked, or unlink
-    if (!ipc_socket_path_.empty()) {
-        // Create a dummy socket and connect
-        int sock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (sock >= 0) {
-            struct sockaddr_un addr;
-            memset(&addr, 0, sizeof(addr));
-            addr.sun_family = AF_UNIX;
-            strncpy(&addr.sun_path[1], ipc_socket_path_.c_str(),
-                    sizeof(addr.sun_path) - 2);
-            connect(sock, (struct sockaddr *)&addr,
-                    sizeof(sa_family_t) + strlen(&addr.sun_path[1]) + 1);
-            close(sock);
+    if (ipc_thread_.joinable()) {
+        // Connect to self to unblock accept, as in the original IPC server.
+        if (!ipc_socket_path_.empty()) {
+            int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+            if (sock >= 0) {
+                struct sockaddr_un addr;
+                memset(&addr, 0, sizeof(addr));
+                addr.sun_family = AF_UNIX;
+                strncpy(&addr.sun_path[1], ipc_socket_path_.c_str(),
+                        sizeof(addr.sun_path) - 2);
+                if (connect(sock, (struct sockaddr *)&addr,
+                            sizeof(sa_family_t) + strlen(&addr.sun_path[1]) +
+                                1) != 0) {
+                    LOG(ERROR) << "Failed to wake IPC listener: "
+                               << strerror(errno);
+                }
+                if (close(sock) != 0) {
+                    LOG(ERROR) << "Failed to close IPC wakeup socket: "
+                               << strerror(errno);
+                }
+            } else {
+                LOG(ERROR) << "Failed to create IPC wakeup socket: "
+                           << strerror(errno);
+            }
+        }
+        // Finish registrations before releasing SHM and the native object.
+        try {
+            ipc_thread_.join();
+        } catch (const std::exception &e) {
+            LOG(ERROR) << "Failed to join IPC worker: " << e.what();
+            return ErrorCode::INTERNAL_ERROR;
         }
     }
-    // jthread will join on destruction or we can explicitly join if needed
-    // But recvmsg/accept might block. The logic above attempts to unblock.
     return ErrorCode::OK;
 }
 
 ErrorCode RealClient::stop_dummy_client_monitor() {
-    {
-        std::lock_guard<std::mutex> lock(dummy_client_monitor_cv_mutex_);
-        dummy_client_monitor_running_ = false;
-    }
-    dummy_client_monitor_cv_.notify_all();
+    dummy_client_monitor_running_ = false;
     if (dummy_client_monitor_thread_.joinable()) {
         try {
             dummy_client_monitor_thread_.join();
@@ -1754,8 +1765,24 @@ void RealClient::ipc_server_func() {
         }
 
         if (!ipc_running_) {
-            close(client_sock);
+            if (close(client_sock) != 0) {
+                LOG(ERROR) << "Failed to close IPC connection: "
+                           << strerror(errno);
+            }
             break;
+        }
+
+        // Bound an incomplete request so close can join this worker.
+        const timeval receive_timeout{5, 0};
+        if (setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
+                       sizeof(receive_timeout)) != 0) {
+            LOG(ERROR) << "Failed to set IPC receive timeout: "
+                       << strerror(errno);
+            if (close(client_sock) != 0) {
+                LOG(ERROR) << "Failed to close IPC connection: "
+                           << strerror(errno);
+            }
+            continue;
         }
 
         ShmRegisterRequest req{};
@@ -1780,10 +1807,14 @@ void RealClient::ipc_server_func() {
             static_cast<ssize_t>(sizeof(status))) {
             LOG(ERROR) << "Failed to send response to client";
         }
-        close(client_sock);
+        if (close(client_sock) != 0) {
+            LOG(ERROR) << "Failed to close IPC connection: " << strerror(errno);
+        }
     }
 
-    close(server_sock);
+    if (close(server_sock) != 0) {
+        LOG(ERROR) << "Failed to close IPC listener: " << strerror(errno);
+    }
     LOG(INFO) << "IPC server stopped";
 }
 

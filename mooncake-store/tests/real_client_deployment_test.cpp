@@ -66,7 +66,7 @@ struct ClientOwner {
     std::shared_ptr<RealClient> client = RealClient::create();
     ~ClientOwner() {
         EXPECT_EQ(client->tearDownAll(), 0);
-        client.reset();  // Destruction must also join the IPC worker.
+        client.reset();
     }
 };
 
@@ -305,5 +305,53 @@ TEST_F(RealClientDeploymentTest, IpcRecoveryAndClose) {
 TEST_F(RealClientDeploymentTest, UnmapWaitsForContext) {
     CheckUnmapWaitsForContext(DeploymentConfig(), LocalWriteConfig());
 }
+
+
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+namespace {
+
+void CheckIpcStop(P2PClientConfig config, bool connect_peer,
+                  bool partial_request) {
+    const auto id = generate_uuid();
+    config.ipc_socket_path = "ipc_stop_" + std::to_string(getpid()) + "_" +
+                             std::to_string(id.first);
+    ClientOwner owner;
+    ASSERT_EQ(owner.client->setup(config), 0);
+    Socket peer(connect_peer ? ConnectIpc(config.ipc_socket_path) : -1);
+    if (connect_peer) ASSERT_GE(peer.fd, 0);
+    if (partial_request) {
+        // No SCM_RIGHTS: ancillary data can make MSG_WAITALL return early.
+        const char prefix = 'x';
+        ASSERT_EQ(send(peer.fd, &prefix, sizeof(prefix), MSG_NOSIGNAL), 1);
+    }
+    auto closed = std::async(std::launch::async, [&] {
+        return owner.client->tearDownAll();
+    });
+    const auto status = closed.wait_for(std::chrono::seconds(5));
+    EXPECT_EQ(status, std::future_status::ready);
+    if (status != std::future_status::ready && peer.fd >= 0) {
+        // Let a broken implementation finish so the test can report failure.
+        EXPECT_EQ(shutdown(peer.fd, SHUT_RDWR), 0);
+    }
+    EXPECT_EQ(closed.get(), 0);
+    EXPECT_FALSE(RealClientTestHelper::IpcThreadJoinable(*owner.client));
+    EXPECT_FALSE(owner.client->is_initialized());
+    EXPECT_EQ(owner.client->tearDownAll(), 0);
+}
+
+}  // namespace
+
+TEST_F(RealClientDeploymentTest, P2PIpcStopWithoutConnections) {
+    CheckIpcStop(DeploymentConfig(), false, false);
+}
+
+TEST_F(RealClientDeploymentTest, P2PIpcStopWithEmptyRequest) {
+    CheckIpcStop(DeploymentConfig(), true, false);
+}
+
+TEST_F(RealClientDeploymentTest, P2PIpcStopWithPartialRequest) {
+    CheckIpcStop(DeploymentConfig(), true, true);
+}
+#endif
 
 }  // namespace mooncake::testing

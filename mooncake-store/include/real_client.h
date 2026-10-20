@@ -8,7 +8,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <condition_variable>
 #include <mutex>
 #include <shared_mutex>
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
@@ -569,8 +568,6 @@ class RealClient : public PyClient {
     // Dummy Client manage related members
     std::thread dummy_client_monitor_thread_;
     std::atomic<bool> dummy_client_monitor_running_{false};
-    std::condition_variable dummy_client_monitor_cv_;
-    std::mutex dummy_client_monitor_cv_mutex_;
     static constexpr uint64_t kDummyClientMonitorSleepMs_ =
         1000;  // 1000 ms sleep between client monitor checks
     static constexpr size_t kDummyClientPingQueueSize_ =
