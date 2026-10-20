@@ -51,7 +51,7 @@ tl::expected<void, ErrorCode> RealClient::initAll_internal(
 }
 
 DeploymentMode RealClient::deployment_mode() const {
-    return client_service_ ? DeploymentMode::P2P : DeploymentMode::UNKNOWN;
+    return DeploymentMode::P2P;
 }
 
 std::string RealClient::get_hostname() const {
@@ -225,8 +225,8 @@ RealClient::batch_get_into_multi_buffers_internal(
 
 std::vector<ObjectDescriptor> RealClient::get_replica_desc(
     const std::string& key) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "get_replica_desc failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return {};
@@ -252,8 +252,8 @@ std::vector<ObjectDescriptor> RealClient::get_replica_desc(
 
 std::map<std::string, std::vector<ObjectDescriptor>>
 RealClient::batch_get_replica_desc(const std::vector<std::string>& keys) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "batch_get_replica_desc failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return {};
@@ -279,8 +279,8 @@ RealClient::batch_get_replica_desc(const std::vector<std::string>& keys) {
 }
 
 tl::expected<int64_t, ErrorCode> RealClient::removeAllLocal_internal() {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "removeAllLocal_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -298,8 +298,8 @@ tl::expected<int64_t, ErrorCode> RealClient::removeAllLocal_internal() {
 
 tl::expected<void, ErrorCode> RealClient::removeLocal_internal(
     const std::string& key) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "removeLocal_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -317,8 +317,8 @@ tl::expected<void, ErrorCode> RealClient::removeLocal_internal(
 
 tl::expected<int64_t, ErrorCode> RealClient::getSize_internal(
     const std::string& key) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "getSize_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);

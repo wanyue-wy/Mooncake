@@ -37,6 +37,15 @@ struct RealClientTestHelper {
     static auto& DummyRpcServer(RealClient& client) {
         return client.dummy_rpc_server_;
     }
+
+    static auto& LifecycleMutex(RealClient& client) {
+        return client.lifecycle_mutex_;
+    }
+
+    static void CloseAdmission(RealClient& client) {
+        client.state_.store(RealClient::State::CLOSING,
+                            std::memory_order_release);
+    }
 };
 
 }  // namespace mooncake

@@ -1,11 +1,13 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -13,6 +15,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 
@@ -105,9 +108,9 @@ inline int ConnectIpc(const std::string& path) {
     return -1;
 }
 
-inline void SendRegistration(int socket_fd, int memory_fd,
-                             const ShmRegisterRequest& request,
-                             size_t request_size, int& response) {
+inline void SendRegistrationRequest(int socket_fd, int memory_fd,
+                                    const ShmRegisterRequest& request,
+                                    size_t request_size) {
     iovec payload{const_cast<ShmRegisterRequest*>(&request), request_size};
     alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))]{};
     msghdr message{};
@@ -121,6 +124,13 @@ inline void SendRegistration(int socket_fd, int memory_fd,
     header->cmsg_len = CMSG_LEN(sizeof(int));
     std::memcpy(CMSG_DATA(header), &memory_fd, sizeof(memory_fd));
     ASSERT_EQ(sendmsg(socket_fd, &message, MSG_NOSIGNAL), request_size);
+}
+
+inline void SendRegistration(int socket_fd, int memory_fd,
+                             const ShmRegisterRequest& request,
+                             size_t request_size, int& response) {
+    ASSERT_NO_FATAL_FAILURE(
+        SendRegistrationRequest(socket_fd, memory_fd, request, request_size));
     // EOF makes a short request deterministic without extending the protocol.
     ASSERT_EQ(shutdown(socket_fd, SHUT_WR), 0);
     ASSERT_EQ(recv(socket_fd, &response, sizeof(response), MSG_WAITALL),
@@ -306,10 +316,108 @@ TEST_F(RealClientDeploymentTest, UnmapWaitsForContext) {
     CheckUnmapWaitsForContext(DeploymentConfig(), LocalWriteConfig());
 }
 
-
+TEST_F(RealClientDeploymentTest, DeploymentModeIsIndependentOfReadiness) {
 #if defined(MOONCAKE_STORE_CLIENT_P2P)
+    constexpr auto expected_mode = DeploymentMode::P2P;
+#else
+    constexpr auto expected_mode = DeploymentMode::CENTRALIZATION;
+#endif
+    ClientOwner owner;
+    EXPECT_EQ(owner.client->deployment_mode(), expected_mode);
+    EXPECT_FALSE(owner.client->is_initialized());
+    auto readiness = owner.client->service_ready_internal();
+    ASSERT_FALSE(readiness);
+    EXPECT_EQ(readiness.error(), ErrorCode::INTERNAL_ERROR);
+
+    ASSERT_EQ(owner.client->setup(DeploymentConfig()), 0);
+    EXPECT_EQ(owner.client->deployment_mode(), expected_mode);
+    EXPECT_TRUE(owner.client->is_initialized());
+    readiness = owner.client->service_ready_internal();
+    ASSERT_TRUE(readiness);
+    EXPECT_EQ(readiness.value(), expected_mode);
+
+    EXPECT_EQ(owner.client->tearDownAll(), 0);
+    EXPECT_EQ(owner.client->deployment_mode(), expected_mode);
+    EXPECT_FALSE(owner.client->is_initialized());
+    readiness = owner.client->service_ready_internal();
+    ASSERT_FALSE(readiness);
+    EXPECT_EQ(readiness.error(), ErrorCode::SHUTTING_DOWN);
+}
+
+TEST_F(RealClientDeploymentTest, DummyRequestsDoNotWaitForLifecycleWriter) {
+    SharedFile file;
+    ASSERT_NO_FATAL_FAILURE(file.Init());
+    ClientOwner owner;
+    ASSERT_EQ(owner.client->setup(DeploymentConfig()), 0);
+    const auto id = generate_uuid();
+    const int fd = dup(file.fd());
+    ASSERT_GE(fd, 0);
+    ASSERT_TRUE(RealClientTestHelper::MapShm(
+        *owner.client, fd, 0x100000, SharedFile::kSize, false, id));
+    auto context = RealClientTestHelper::FindShmContext(*owner.client, id);
+    ASSERT_NE(context, nullptr);
+    const int rejected_fd = dup(file.fd());
+    ASSERT_GE(rejected_fd, 0);
+
+    std::unique_lock writer(
+        RealClientTestHelper::LifecycleMutex(*owner.client));
+    auto ping_while_locked = std::async(std::launch::async, [&] {
+        return owner.client->ping(id);
+    });
+    const auto ping_status = ping_while_locked.wait_for(std::chrono::seconds(5));
+    EXPECT_EQ(ping_status, std::future_status::ready);
+    if (ping_status != std::future_status::ready) writer.unlock();
+    EXPECT_TRUE(ping_while_locked.get());
+    if (!writer.owns_lock()) writer.lock();
+    RealClientTestHelper::CloseAdmission(*owner.client);
+    auto requests = std::async(std::launch::async, [&] {
+        EXPECT_NE(owner.client->deployment_mode(), DeploymentMode::UNKNOWN);
+        EXPECT_FALSE(owner.client->is_initialized());
+        auto readiness = owner.client->service_ready_internal();
+        EXPECT_FALSE(readiness);
+        if (!readiness) {
+            EXPECT_EQ(readiness.error(), ErrorCode::SHUTTING_DOWN);
+        }
+        auto reads = owner.client->batch_get_into_dummy_helper(
+            {"blocked"}, {0x100000}, {SharedFile::kSize}, std::nullopt, id);
+        EXPECT_EQ(reads.size(), 1);
+        if (reads.size() == 1) {
+            EXPECT_FALSE(reads.front());
+            if (!reads.front()) {
+                EXPECT_EQ(reads.front().error(),
+                          ErrorCode::SHUTTING_DOWN);
+            }
+        }
+        auto unmap = owner.client->unmap_shm_internal(id);
+        EXPECT_FALSE(unmap);
+        if (!unmap) {
+            EXPECT_EQ(unmap.error(), ErrorCode::SHUTTING_DOWN);
+        }
+        auto map = RealClientTestHelper::MapShm(
+            *owner.client, rejected_fd, 0x100000, SharedFile::kSize, false, id);
+        EXPECT_FALSE(map);
+        if (!map) {
+            EXPECT_EQ(map.error(), ErrorCode::SHUTTING_DOWN);
+        }
+        EXPECT_EQ(fcntl(rejected_fd, F_GETFD), -1);
+        EXPECT_EQ(errno, EBADF);
+    });
+    EXPECT_EQ(requests.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    // A broken blocking implementation must still be able to finish the test.
+    writer.unlock();
+    requests.get();
+    EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), context);
+    EXPECT_EQ(owner.client->tearDownAll(), 0);
+    EXPECT_TRUE(context->mapped_shms_.empty());
+    auto ping = owner.client->ping(id);
+    ASSERT_FALSE(ping);
+    EXPECT_EQ(ping.error(), ErrorCode::SHUTTING_DOWN);
+}
+
 namespace {
 
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
 void CheckIpcStop(P2PClientConfig config, bool connect_peer,
                   bool partial_request) {
     const auto id = generate_uuid();
@@ -339,7 +447,160 @@ void CheckIpcStop(P2PClientConfig config, bool connect_peer,
     EXPECT_EQ(owner.client->tearDownAll(), 0);
 }
 
+#endif
+
+class PausedDummyRead {
+   public:
+    PausedDummyRead(RealClient& client, UUID id, bool after_native)
+        : client_(client), id_(id), after_native_(after_native),
+          released_(release.get_future()) {}
+
+    int64_t Read() {
+        if (!after_native_) Pause();
+        auto result = client_.batch_get_into_dummy_helper(
+            {"drain_key"}, {0x100000}, {SharedFile::kSize}, std::nullopt, id_);
+        if (after_native_) Pause();
+        const auto value =
+            result.front() ? *result.front() : toInt(result.front().error());
+        finished.set_value(value);
+        return value;
+    }
+
+    std::promise<void> reached;
+    std::promise<void> release;
+    std::promise<int64_t> finished;
+
+   private:
+    void Pause() {
+        reached.set_value();
+        released_.wait();
+    }
+    RealClient& client_;
+    UUID id_;
+    bool after_native_;
+    std::future<void> released_;
+};
+
+void CheckDummyRpcDrain(ClientConfig config, const WriteConfig& write_config,
+                        bool after_native) {
+    SharedFile file;
+    ASSERT_NO_FATAL_FAILURE(file.Init());
+    ClientOwner owner;
+    ASSERT_EQ(owner.client->setup(config), 0);
+    const auto id = generate_uuid();
+    const int fd = dup(file.fd());
+    ASSERT_GE(fd, 0);
+    ASSERT_TRUE(RealClientTestHelper::MapShm(
+        *owner.client, fd, 0x100000, SharedFile::kSize, false, id));
+    const std::string value = "drain the complete Dummy handler";
+    ASSERT_EQ(owner.client->put("drain_key", value, write_config), 0);
+    auto context = RealClientTestHelper::FindShmContext(*owner.client, id);
+    // Retain the native object: close must call Stop(), not rely on destruction.
+    ASSERT_NE(context, nullptr);
+    auto native = RealClientTestHelper::NativeClient(*owner.client);
+    PausedDummyRead handler(*owner.client, id, after_native);
+    auto reached = handler.reached.get_future();
+    auto finished = handler.finished.get_future();
+    RealClientTestHelper::DummyRpcServer(*owner.client) =
+        std::make_unique<coro_rpc::coro_rpc_server>(2, 0, "127.0.0.1");
+    auto& server = *RealClientTestHelper::DummyRpcServer(*owner.client);
+    server.register_handler<&PausedDummyRead::Read>(&handler);
+    auto exited = server.async_start();
+    ASSERT_FALSE(exited.hasResult());
+    auto response = std::async(std::launch::async, [&] {
+        coro_rpc::coro_rpc_client peer;
+        auto connected = async_simple::coro::syncAwait(
+            peer.connect("127.0.0.1", std::to_string(server.port())));
+        EXPECT_FALSE(connected);
+        return async_simple::coro::syncAwait(peer.call<&PausedDummyRead::Read>());
+    });
+    const auto entered = reached.wait_for(std::chrono::seconds(5));
+    if (entered != std::future_status::ready) {
+        handler.release.set_value();
+        owner.client->tearDownAll();
+        response.get();
+        FAIL() << "Dummy handler did not reach its pause point";
+    }
+    auto closed = std::async(std::launch::async, [&] {
+        return owner.client->tearDownAll();
+    });
+    EXPECT_EQ(closed.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    // Acceptor shutdown happens after native Stop has completed.
+    const auto stop_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!exited.hasResult() &&
+           std::chrono::steady_clock::now() < stop_deadline) {
+        std::this_thread::yield();
+    }
+    EXPECT_TRUE(exited.hasResult());
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+    EXPECT_EQ(native->GetHealthStatus(), "STOPPED");
+    if (native->GetHealthStatus() == "STOPPED") {
+        EXPECT_EQ(native->GetBufferAllocator(), nullptr);
+    }
+#else
+    EXPECT_NE(native->GetBufferAllocator(), nullptr);
+#endif
+    auto late = native->IsExist("late");
+    EXPECT_FALSE(late);
+    if (!late) EXPECT_EQ(late.error(), ErrorCode::SHUTTING_DOWN);
+    // Dummy SHM must survive native Stop until the complete handler exits.
+    EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), context);
+    {
+        SharedMutexLocker lock(&context->mutex_, shared_lock);
+        EXPECT_FALSE(context->mapped_shms_.empty());
+    }
+    handler.release.set_value();
+    // stop() may close the response connection; server-side completion matters.
+    response.get();
+    EXPECT_EQ(closed.get(), 0);
+    if (after_native) {
+        EXPECT_EQ(finished.get(), static_cast<int64_t>(value.size()));
+        EXPECT_EQ(std::string(static_cast<char*>(file.data), value.size()), value);
+    } else {
+        EXPECT_EQ(finished.get(), toInt(ErrorCode::SHUTTING_DOWN));
+        EXPECT_EQ(std::string(static_cast<char*>(file.data), SharedFile::kSize),
+                  std::string(SharedFile::kSize, 0x5a));
+    }
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+    EXPECT_EQ(native->GetHealthStatus(), "STOPPED");
+    EXPECT_EQ(native->GetBufferAllocator(), nullptr);
+#endif
+    EXPECT_TRUE(context->mapped_shms_.empty());
+    EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), nullptr);
+    EXPECT_EQ(owner.client->tearDownAll(), 0);
+}
+
 }  // namespace
+
+TEST_F(RealClientDeploymentTest, DummyRpcStopWaitsBeforeNativeEntry) {
+    CheckDummyRpcDrain(DeploymentConfig(), LocalWriteConfig(), false);
+}
+
+TEST_F(RealClientDeploymentTest, DummyRpcStopWaitsAfterNativeReturn) {
+    CheckDummyRpcDrain(DeploymentConfig(), LocalWriteConfig(), true);
+}
+
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+TEST_F(RealClientDeploymentTest, P2PReadinessDoesNotWaitForLifecycleWriter) {
+    ClientOwner owner;
+    ASSERT_EQ(owner.client->setup(DeploymentConfig()), 0);
+    std::unique_lock writer(
+        RealClientTestHelper::LifecycleMutex(*owner.client));
+    auto readiness = std::async(std::launch::async, [&] {
+        EXPECT_TRUE(owner.client->is_initialized());
+        return owner.client->service_ready_internal();
+    });
+    EXPECT_EQ(readiness.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    // Release the writer even on failure so a blocking reader can finish.
+    writer.unlock();
+    auto result = readiness.get();
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result.value(), DeploymentMode::P2P);
+    EXPECT_TRUE(owner.client->service_ready_internal());
+}
 
 TEST_F(RealClientDeploymentTest, P2PIpcStopWithoutConnections) {
     CheckIpcStop(DeploymentConfig(), false, false);
@@ -351,6 +612,145 @@ TEST_F(RealClientDeploymentTest, P2PIpcStopWithEmptyRequest) {
 
 TEST_F(RealClientDeploymentTest, P2PIpcStopWithPartialRequest) {
     CheckIpcStop(DeploymentConfig(), true, true);
+}
+
+TEST_F(RealClientDeploymentTest, P2PCloseWaitsForRegisteredShmPublication) {
+    SharedFile file;
+    ASSERT_NO_FATAL_FAILURE(file.Init());
+    ClientResources transport;
+    ASSERT_EQ(transport.InitTransferEngine("127.0.0.1", "P2PHANDSHAKE", "tcp",
+                                           std::nullopt),
+              ErrorCode::OK);
+    auto config = DeploymentConfig();
+    config.transfer_engine = transport.GetTransferEngine();
+    config.local_hostname = transport.GetLocalEndpoint();
+    const auto id = generate_uuid();
+    config.ipc_socket_path = "ipc_publish_" + std::to_string(getpid()) + "_" +
+                             std::to_string(id.first);
+    ClientOwner owner;
+    ASSERT_EQ(owner.client->setup(config), 0);
+    auto native = RealClientTestHelper::NativeClient(*owner.client);
+    auto metadata = config.transfer_engine->getMetadata();
+    ASSERT_NE(metadata, nullptr);
+    auto before = metadata->getSegmentDescByID(LOCAL_SEGMENT_ID);
+    ASSERT_NE(before, nullptr);
+    Socket peer(ConnectIpc(config.ipc_socket_path));
+    ASSERT_GE(peer.fd, 0);
+
+    // Shared access lets the initial context lookup finish but blocks insertion
+    // after mmap and TE registration. No production test hook is required.
+    std::shared_lock<SharedMutex> pause_publish(
+        RealClientTestHelper::ShmMutex(*owner.client));
+    ShmRegisterRequest request{id.first, id.second, 0x100000, SharedFile::kSize,
+                               false};
+    ASSERT_NO_FATAL_FAILURE(
+        SendRegistrationRequest(peer.fd, file.fd(), request, sizeof(request)));
+    uint64_t registered_addr = 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (registered_addr == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        // TCP registration publishes an immutable descriptor snapshot.
+        auto current = metadata->getSegmentDescByID(LOCAL_SEGMENT_ID);
+        if (current) {
+            for (const auto& buffer : current->buffers) {
+                if (buffer.length == SharedFile::kSize &&
+                    std::none_of(before->buffers.begin(), before->buffers.end(),
+                                 [&](const auto& old) {
+                                     return old.addr == buffer.addr;
+                                 })) {
+                    registered_addr = buffer.addr;
+                    break;
+                }
+            }
+        }
+        if (registered_addr == 0) std::this_thread::yield();
+    }
+    if (registered_addr == 0) {
+        pause_publish.unlock();
+        EXPECT_EQ(owner.client->tearDownAll(), 0);
+        FAIL() << "IPC registration did not become visible in TE metadata";
+    }
+    EXPECT_TRUE(RealClientTestHelper::ShmContexts(*owner.client).empty());
+    auto closed = std::async(std::launch::async, [&] {
+        return owner.client->tearDownAll();
+    });
+    EXPECT_EQ(closed.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    const auto stop_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (native->GetHealthStatus() != "STOPPED" &&
+           std::chrono::steady_clock::now() < stop_deadline) {
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(native->GetHealthStatus(), "STOPPED");
+    if (native->GetHealthStatus() == "STOPPED") {
+        EXPECT_EQ(native->GetBufferAllocator(), nullptr);
+    }
+    pause_publish.unlock();
+    EXPECT_EQ(closed.get(), 0);
+    EXPECT_FALSE(RealClientTestHelper::IpcThreadJoinable(*owner.client));
+    EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), nullptr);
+    EXPECT_EQ(native->GetHealthStatus(), "STOPPED");
+    auto after = metadata->getSegmentDescByID(LOCAL_SEGMENT_ID);
+    ASSERT_NE(after, nullptr);
+    EXPECT_TRUE(std::none_of(after->buffers.begin(), after->buffers.end(),
+                             [&](const auto& buffer) {
+                                 return buffer.addr == registered_addr;
+                             }));
+}
+
+TEST_F(RealClientDeploymentTest, P2PRpcWaitReturnsAfterShmCleanup) {
+    SharedFile file;
+    ASSERT_NO_FATAL_FAILURE(file.Init());
+    ClientOwner owner;
+    ASSERT_TRUE(owner.client->setup_internal(
+        DeploymentConfig(), /*start_dummy_rpc=*/true, 2, 0));
+    ASSERT_NE(RealClientTestHelper::DummyRpcServer(*owner.client), nullptr);
+    EXPECT_NE(RealClientTestHelper::DummyRpcServer(*owner.client)->port(), 0);
+    const auto id = generate_uuid();
+    const int fd = dup(file.fd());
+    ASSERT_GE(fd, 0);
+    ASSERT_TRUE(RealClientTestHelper::MapShm(
+        *owner.client, fd, 0x100000, SharedFile::kSize, false, id));
+    auto context = RealClientTestHelper::FindShmContext(*owner.client, id);
+    ASSERT_NE(context, nullptr);
+    std::unique_lock<SharedMutex> held(context->mutex_);
+    auto serving = std::async(std::launch::async, [&] {
+        return owner.client->wait_dummy_rpc_server();
+    });
+    auto closed = std::async(std::launch::async, [&] {
+        return owner.client->tearDownAll();
+    });
+    const auto close_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    // The listener is already stopped when close detaches this context.
+    while (RealClientTestHelper::FindShmContext(*owner.client, id) &&
+           std::chrono::steady_clock::now() < close_deadline) {
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), nullptr);
+    EXPECT_EQ(serving.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    held.unlock();
+    EXPECT_EQ(closed.get(), 0);
+    EXPECT_EQ(serving.get(), 0);
+    EXPECT_TRUE(context->mapped_shms_.empty());
+}
+
+TEST_F(RealClientDeploymentTest, P2PRpcBindFailureClosesClient) {
+    coro_rpc::coro_rpc_server occupied(1, 0, "127.0.0.1");
+    auto exited = occupied.async_start();
+    ASSERT_FALSE(exited.hasResult());
+    ClientOwner owner;
+    EXPECT_EQ(RealClientTestHelper::DummyRpcServer(*owner.client), nullptr);
+    auto result = owner.client->setup_internal(
+        DeploymentConfig(), /*start_dummy_rpc=*/true, 1, occupied.port());
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error(), ErrorCode::RPC_FAIL);
+    EXPECT_FALSE(owner.client->is_initialized());
+    EXPECT_EQ(RealClientTestHelper::NativeClient(*owner.client), nullptr);
+    EXPECT_EQ(owner.client->tearDownAll(), 0);
 }
 #endif
 

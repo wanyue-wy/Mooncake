@@ -172,6 +172,18 @@ std::shared_ptr<RealClient> RealClient::create() {
     return sp;
 }
 
+tl::expected<DeploymentMode, ErrorCode> RealClient::service_ready_internal() {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state != State::READY) {
+        const auto error = state == State::CLOSING || state == State::CLOSED
+                               ? ErrorCode::SHUTTING_DOWN
+                               : ErrorCode::INTERNAL_ERROR;
+        LOG(ERROR) << "Real client is not ready, error=" << error;
+        return tl::unexpected(error);
+    }
+    return deployment_mode();
+}
+
 std::shared_ptr<ClientBufferAllocator> RealClient::GetBufferAllocator() const {
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
@@ -185,33 +197,43 @@ int RealClient::setup(const ClientConfig &config) {
 }
 
 tl::expected<void, ErrorCode> RealClient::setup_internal(
-    const ClientConfig &config) {
-    std::unique_lock setup_lock(inflight_lock_);
-    if (state_ != State::UNINITIALIZED) {
-        LOG(ERROR) << "Cannot setup a closed or initialized RealClient";
-        return tl::unexpected(ErrorCode::INVALID_PARAMS);
-    }
-    auto client = CreateService(config);
-    if (!client) {
-        LOG(ERROR) << "Failed to create native client: " << client.error();
-        return tl::unexpected(client.error());
-    }
-    client_service_ = std::move(*client);
-    protocol_ = config.protocol;
-    ipc_socket_path_ = config.ipc_socket_path;
+    const ClientConfig &config, bool start_dummy_rpc, size_t rpc_thread_count,
+    uint16_t rpc_port) {
     auto startup_result = ErrorCode::OK;
-    if (!ipc_socket_path_.empty()) {
-        startup_result = start_ipc_server();
+    {
+        std::lock_guard lock(lifecycle_mutex_);
+        if (state_.load(std::memory_order_acquire) != State::UNINITIALIZED) {
+            LOG(ERROR) << "Cannot setup a closed or initialized RealClient";
+            return tl::unexpected(ErrorCode::INVALID_PARAMS);
+        }
+        auto client = CreateService(config);
+        if (!client) {
+            LOG(ERROR) << "Failed to create native client: " << client.error();
+            return tl::unexpected(client.error());
+        }
+        client_service_ = std::move(*client);
+        protocol_ = config.protocol;
+        ipc_socket_path_ = config.ipc_socket_path;
+        if (!ipc_socket_path_.empty()) {
+            startup_result = start_ipc_server();
+        }
+        if (startup_result != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to start IPC server: " << startup_result;
+        } else if ((startup_result = start_dummy_client_monitor()) !=
+                   ErrorCode::OK) {
+            LOG(ERROR) << "Failed to start Dummy monitor: " << startup_result;
+        } else if (start_dummy_rpc &&
+                   (startup_result = start_dummy_rpc_server(
+                        rpc_thread_count, rpc_port)) != ErrorCode::OK) {
+            LOG(ERROR) << "Failed to start Dummy RPC server: " << startup_result;
+        } else {
+            state_.store(State::READY, std::memory_order_release);
+            return {};
+        }
     }
-    if (startup_result != ErrorCode::OK) {
-        LOG(ERROR) << "Failed to start IPC server: " << startup_result;
-    } else if ((startup_result = start_dummy_client_monitor()) != ErrorCode::OK) {
-        LOG(ERROR) << "Failed to start Dummy monitor: " << startup_result;
-    } else {
-        state_ = State::READY;
-        return {};
-    }
-    setup_lock.unlock();
+
+    // failed path
+    state_.store(State::CLOSING, std::memory_order_release);
     auto cleanup = tearDownAll_internal();
     if (!cleanup) {
         LOG(ERROR) << "Deployment startup cleanup failed: " << cleanup.error();
@@ -219,13 +241,48 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(
     return tl::unexpected(startup_result);
 }
 
-int RealClient::run_dummy_rpc_server(size_t thread_count, uint16_t port) {
-    dummy_rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(
-        thread_count, port, "127.0.0.1");
-    register_dummy_rpc_handlers();
-    auto result = dummy_rpc_server_->start();
-    // Match the previous listener's local scope in main.
-    dummy_rpc_server_.reset();
+ErrorCode RealClient::start_dummy_rpc_server(size_t thread_count,
+                                            uint16_t port) {
+    try {
+        dummy_rpc_server_ = std::make_unique<coro_rpc::coro_rpc_server>(
+            thread_count, port, "127.0.0.1");
+        register_dummy_rpc_handlers();
+        // async_start() binds and listens before returning the exit future.
+        dummy_rpc_exit_ = dummy_rpc_server_->async_start();
+    } catch (const std::exception &e) {
+        LOG(ERROR) << "Failed to start Dummy RPC server: " << e.what();
+        return ErrorCode::INTERNAL_ERROR;
+    }
+    if (dummy_rpc_exit_.hasResult()) {
+        LOG(ERROR) << "Dummy RPC server failed to start on port " << port
+                   << ": " << dummy_rpc_exit_.result().value().message();
+        return ErrorCode::RPC_FAIL;
+    }
+    LOG(INFO) << "Dummy RPC server is listening at 127.0.0.1:"
+              << dummy_rpc_server_->port();
+    return ErrorCode::OK;
+}
+
+// Must call this exactly once after successful setup with Dummy RPC
+// enabled. Concurrent or repeated waits are not supported.
+int RealClient::wait_dummy_rpc_server() {
+    if (!dummy_rpc_exit_.valid()) {
+        LOG(ERROR) << "Cannot wait for Dummy RPC server: no exit future";
+        return toInt(ErrorCode::INVALID_PARAMS);
+    }
+
+    auto error = std::move(dummy_rpc_exit_).get();
+    int result = 0;
+    if (state_.load(std::memory_order_acquire) == State::READY) {
+        LOG(ERROR) << "Dummy RPC server exited unexpectedly: "
+                   << error.message();
+        result = toInt(ErrorCode::INTERNAL_ERROR);
+    }
+    auto cleanup = tearDownAll_internal();
+    if (!cleanup) {
+        LOG(ERROR) << "Failed to close real client: " << cleanup.error();
+        return toInt(cleanup.error());
+    }
     return result;
 }
 
@@ -237,16 +294,24 @@ int RealClient::initAll(const std::string &protocol_,
 }
 
 tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
-    {
-        // The exclusive lock drains admitted calls before closing admission.
-        std::unique_lock lock(inflight_lock_);
-        if (state_ == State::CLOSING || state_ == State::CLOSED) {
-            return {};
-        }
-        state_ = State::CLOSING;
+    std::lock_guard lifecycle_lock(lifecycle_mutex_);
+    if (state_.load(std::memory_order_acquire) == State::CLOSED) {
+        return {};
     }
-    auto ipc_result = stop_ipc_server();
+    state_.store(State::CLOSING, std::memory_order_release);
+
+    // Keep Dummy connections and SHM alive while native calls drain.
+    if (client_service_) {
+        client_service_->Stop();
+    }
+    if (dummy_rpc_server_) {
+        dummy_rpc_server_->stop();
+    }
+
+    // Handlers have finished. Stop SHM reclamation and registration before
+    // releasing mappings or their native owner.
     auto monitor_result = stop_dummy_client_monitor();
+    auto ipc_result = stop_ipc_server();
     if (ipc_result != ErrorCode::OK || monitor_result != ErrorCode::OK) {
         LOG(ERROR) << "Failed to stop deployment workers: IPC=" << ipc_result
                    << ", Dummy monitor=" << monitor_result;
@@ -254,10 +319,10 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
     }
 
     if (!client_service_) {
-        std::unique_lock lock(inflight_lock_);
-        state_ = State::CLOSED;
+        state_.store(State::CLOSED, std::memory_order_release);
         return {};
     }
+
     client_service_.reset();
     protocol_ = "";
     // Detach the map, then tear down each context under its own lock.
@@ -284,10 +349,7 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
         }
         context.mapped_shms_.clear();
     }
-    {
-        std::unique_lock lock(inflight_lock_);
-        state_ = State::CLOSED;
-    }
+    state_.store(State::CLOSED, std::memory_order_release);
     return {};
 }
 
@@ -341,8 +403,8 @@ tl::expected<void, ErrorCode> RealClient::put_internal(
 tl::expected<void, ErrorCode> RealClient::put_dummy_helper(
     const std::string &key, std::span<const char> value,
     const std::optional<WriteConfig> &config, const UUID &client_id) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "put_dummy_helper failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -437,8 +499,8 @@ tl::expected<void, ErrorCode> RealClient::put_batch_dummy_helper(
     const std::vector<std::string> &keys,
     const std::vector<std::span<const char>> &values,
     const std::optional<WriteConfig> &config, const UUID &client_id) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "put_batch_dummy_helper failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -532,8 +594,8 @@ tl::expected<void, ErrorCode> RealClient::put_parts_dummy_helper(
     const std::string &key, std::vector<std::span<const char>> values,
     const std::optional<WriteConfig> &config, const UUID &client_id,
     WriteOperation operation) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "put_parts_dummy_helper failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -559,8 +621,8 @@ int RealClient::put_parts(const std::string &key,
 
 tl::expected<void, ErrorCode> RealClient::remove_internal(
     const std::string &key, bool force) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "remove_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -584,8 +646,8 @@ int RealClient::remove(const std::string &key, bool force) {
 
 tl::expected<long, ErrorCode> RealClient::removeByRegex_internal(
     const std::string &str, bool force) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "removeByRegex_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -607,8 +669,8 @@ long RealClient::removeByRegex(const std::string &str, bool force) {
 }
 
 tl::expected<int64_t, ErrorCode> RealClient::removeAll_internal(bool force) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "removeAll_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -639,8 +701,8 @@ int RealClient::removeLocal(const std::string &key) {
 
 tl::expected<bool, ErrorCode> RealClient::isExist_internal(
     const std::string &key) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "isExist_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -691,12 +753,13 @@ int64_t RealClient::getSize(const std::string &key) {
 tl::expected<void, ErrorCode> RealClient::map_shm_internal(
     int fd, uint64_t dummy_base_addr, size_t shm_size, bool is_local_buffer,
     const UUID &client_id) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "map_shm_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
-        if (fd >= 0) {
-            close(fd);
+        if (fd >= 0 && close(fd) != 0) {
+            LOG(ERROR) << "Failed to close rejected SHM descriptor: "
+                       << strerror(errno);
         }
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -820,8 +883,8 @@ tl::expected<void, ErrorCode> RealClient::map_shm_internal(
 
 tl::expected<void, ErrorCode> RealClient::unmap_shm_internal(
     const UUID &client_id) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "unmap_shm_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -882,8 +945,8 @@ tl::expected<void, ErrorCode> RealClient::unmap_shm_internal(
 
 tl::expected<void, ErrorCode> RealClient::unregister_shm_buffer_internal(
     uint64_t dummy_base_addr, const UUID &client_id) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "unregister_shm_buffer_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -977,8 +1040,8 @@ tl::expected<std::tuple<uint64_t, size_t>, ErrorCode>
 RealClient::get_buffer_info_dummy_helper(
     const std::string &key, const std::optional<ReadConfig> &config,
     const UUID &client_id) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "get_buffer_info_dummy_helper failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
@@ -1088,8 +1151,8 @@ RealClient::batch_put_from_dummy_helper(
     const std::vector<uint64_t> &dummy_buffers,
     const std::vector<size_t> &sizes, const std::optional<WriteConfig> &config,
     const UUID &client_id, WriteOperation operation) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "batch_put_from_dummy_helper failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return std::vector<tl::expected<void, ErrorCode>>(
@@ -1297,8 +1360,8 @@ RealClient::batch_get_into_dummy_helper(
     const std::vector<uint64_t> &dummy_buffers,
     const std::vector<size_t> &sizes, const std::optional<ReadConfig> &config,
     const UUID &client_id) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "batch_get_into_dummy_helper failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return std::vector<tl::expected<int64_t, ErrorCode>>(
@@ -1367,8 +1430,8 @@ RealClient::batch_get_into_dummy_helper(
 
 std::vector<tl::expected<bool, ErrorCode>> RealClient::batchIsExist_internal(
     const std::vector<std::string> &keys) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "batchIsExist_internal failed, error="
                    << ErrorCode::SHUTTING_DOWN;
         return std::vector<tl::expected<bool, ErrorCode>>(
@@ -1536,8 +1599,8 @@ std::vector<int> RealClient::batch_get_into_multi_buffers(
 
 tl::expected<DummyHeartbeatResponse, ErrorCode> RealClient::ping(
     const UUID &client_id) {
-    std::shared_lock inflight_guard(inflight_lock_);
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
+    const auto state = state_.load(std::memory_order_acquire);
+    if (state == State::CLOSING || state == State::CLOSED) {
         LOG(ERROR) << "ping failed, error=" << ErrorCode::SHUTTING_DOWN;
         return tl::unexpected(ErrorCode::SHUTTING_DOWN);
     }
@@ -1625,15 +1688,48 @@ ErrorCode RealClient::start_dummy_client_monitor() {
 }
 
 ErrorCode RealClient::start_ipc_server() {
+    int server_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server_sock < 0) {
+        LOG(ERROR) << "Failed to create IPC socket: " << strerror(errno);
+        return ErrorCode::INTERNAL_ERROR;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    // Using abstract namespace, so we don't need to unlink.
+    strncpy(&addr.sun_path[1], ipc_socket_path_.c_str(),
+            sizeof(addr.sun_path) - 2);
+
+    if (bind(server_sock, (struct sockaddr *)&addr,
+             sizeof(sa_family_t) + strlen(&addr.sun_path[1]) + 1) < 0) {
+        LOG(ERROR) << "Failed to bind IPC socket: " << strerror(errno);
+        if (close(server_sock) != 0) {
+            LOG(ERROR) << "Failed to close IPC listener: " << strerror(errno);
+        }
+        return ErrorCode::INTERNAL_ERROR;
+    }
+    if (listen(server_sock, 5) < 0) {
+        LOG(ERROR) << "Failed to listen on IPC socket: " << strerror(errno);
+        if (close(server_sock) != 0) {
+            LOG(ERROR) << "Failed to close IPC listener: " << strerror(errno);
+        }
+        return ErrorCode::INTERNAL_ERROR;
+    }
+
     ipc_running_ = true;
     try {
-        ipc_thread_ = std::jthread(&RealClient::ipc_server_func, this);
+        ipc_thread_ =
+            std::jthread(&RealClient::ipc_server_func, this, server_sock);
     } catch (const std::exception &e) {
         ipc_running_ = false;
         LOG(ERROR) << "Failed to start IPC worker: " << e.what();
+        if (close(server_sock) != 0) {
+            LOG(ERROR) << "Failed to close IPC listener: " << strerror(errno);
+        }
         return ErrorCode::INTERNAL_ERROR;
     }
-    LOG(INFO) << "Starting IPC server at " << ipc_socket_path_;
+    LOG(INFO) << "IPC server is listening at " << ipc_socket_path_;
     return ErrorCode::OK;
 }
 
@@ -1726,35 +1822,7 @@ static int recv_fd(int socket, void *data, size_t data_len) {
     return -1;
 }
 
-void RealClient::ipc_server_func() {
-    int server_sock = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (server_sock < 0) {
-        LOG(ERROR) << "Failed to create IPC socket";
-        return;
-    }
-
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    // Using abstract namespace, so we don't need to unlink
-    strncpy(&addr.sun_path[1], ipc_socket_path_.c_str(),
-            sizeof(addr.sun_path) - 2);
-
-    if (bind(server_sock, (struct sockaddr *)&addr,
-             sizeof(sa_family_t) + strlen(&addr.sun_path[1]) + 1) < 0) {
-        LOG(ERROR) << "Failed to bind IPC socket: " << strerror(errno);
-        close(server_sock);
-        return;
-    }
-
-    if (listen(server_sock, 5) < 0) {
-        LOG(ERROR) << "Failed to listen on IPC socket: " << strerror(errno);
-        close(server_sock);
-        return;
-    }
-
-    LOG(INFO) << "IPC server is listening";
-
+void RealClient::ipc_server_func(int server_sock) {
     while (ipc_running_) {
         int client_sock = accept(server_sock, nullptr, nullptr);
         if (client_sock < 0) {

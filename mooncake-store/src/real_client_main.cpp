@@ -48,13 +48,12 @@ int main(int argc, char* argv[]) {
     config.client_rpc_port = static_cast<uint16_t>(FLAGS_client_rpc_port);
 
     auto client_inst = RealClient::create();
-    auto res = client_inst->setup_internal(config);
+    auto res = client_inst->setup_internal(
+        config, /*start_dummy_rpc=*/true, FLAGS_threads, FLAGS_port);
     if (!res) {
         LOG(FATAL) << "Failed to setup client: " << toString(res.error());
         return -1;
     }
 
-    LOG(INFO) << "Starting real client service on 127.0.0.1:" << FLAGS_port;
-
-    return client_inst->run_dummy_rpc_server(FLAGS_threads, FLAGS_port);
+    return client_inst->wait_dummy_rpc_server();
 }

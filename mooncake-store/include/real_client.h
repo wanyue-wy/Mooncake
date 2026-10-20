@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <async_simple/Future.h>
 #include <boost/lockfree/queue.hpp>
 #include <memory>
 #include <future>
@@ -8,8 +9,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <mutex>
-#include <shared_mutex>
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 
 #include "pyclient.h"
@@ -86,17 +85,18 @@ class RealClient : public PyClient {
 
     int setup(const ClientConfig &config);
 
-    int run_dummy_rpc_server(size_t thread_count, uint16_t port);
+    int wait_dummy_rpc_server();
 
     int initAll(const std::string &protocol, const std::string &device_name,
                 size_t mount_segment_size = 1024 * 1024 * 16) override;
 
     uint64_t alloc_from_mem_pool(size_t size) override { return 0; };
 
+    // Local readiness check used by the Python wrapper.
     bool is_initialized() const override {
-        std::shared_lock lock(inflight_lock_);
-        return state_ == State::READY;
+        return state_.load(std::memory_order_acquire) == State::READY;
     }
+    // Compile-time architecture, independent of setup or shutdown.
     DeploymentMode deployment_mode() const override;
     std::shared_ptr<ClientBufferAllocator> GetBufferAllocator() const;
 
@@ -374,24 +374,12 @@ class RealClient : public PyClient {
     tl::expected<void, ErrorCode> unregister_shm_buffer_internal(
         uint64_t dummy_base_addr, const UUID &client_id);
 
-    // Native-result entry points used by the daemon and Dummy RPC.
-    tl::expected<DeploymentMode, ErrorCode> service_ready_internal() {
-        std::shared_lock inflight_guard(inflight_lock_);
-        if (state_ == State::CLOSING || state_ == State::CLOSED) {
-            LOG(ERROR) << "service_ready_internal failed, error="
-                       << ErrorCode::SHUTTING_DOWN;
-            return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-        }
-        // The shared lock also protects the readiness check.
-        if (state_ != State::READY) {
-            LOG(ERROR) << "Real client is not ready";
-            return tl::unexpected(ErrorCode::INVALID_PARAMS);
-        }
-        return deployment_mode();
-    }
+    // Dummy connection handshake: readiness and deployment architecture.
+    tl::expected<DeploymentMode, ErrorCode> service_ready_internal();
 
     tl::expected<void, ErrorCode> setup_internal(
-        const ClientConfig &config);
+        const ClientConfig &config, bool start_dummy_rpc = false,
+        size_t rpc_thread_count = 1, uint16_t rpc_port = 50052);
 
     tl::expected<void, ErrorCode> remove_internal(const std::string &key,
                                                   bool force = false);
@@ -420,8 +408,6 @@ class RealClient : public PyClient {
 
    private:
     friend struct RealClientTestHelper;
-
-    enum class State { UNINITIALIZED, READY, CLOSING, CLOSED };
 
     struct MappedShm {
         std::string shm_name_;
@@ -539,7 +525,9 @@ class RealClient : public PyClient {
 
     ErrorCode start_ipc_server();
     ErrorCode stop_ipc_server();
-    void ipc_server_func();
+    void ipc_server_func(int server_sock);
+
+    ErrorCode start_dummy_rpc_server(size_t thread_count, uint16_t port);
 
     static tl::expected<void, ErrorCode> ValidateWriteOperation(
         WriteOperation operation, const std::optional<WriteConfig> &config);
@@ -554,10 +542,7 @@ class RealClient : public PyClient {
 
     void register_dummy_rpc_handlers();
 
-    // Outlive worker threads that may still observe shutdown during
-    // destruction.
-    mutable std::shared_mutex inflight_lock_;
-    State state_{State::UNINITIALIZED};
+   private:
 
     std::string protocol_;
 
@@ -585,7 +570,15 @@ class RealClient : public PyClient {
     // The alias names the native class itself, not a forwarding wrapper.
     std::shared_ptr<ClientServiceImpl> client_service_;
 
+    // Serializes setup/teardown, including resource initialization and cleanup.
+    // Only setup/teardown holds this mutex.
+    std::mutex lifecycle_mutex_;
+    enum class State { UNINITIALIZED, READY, CLOSING, CLOSED };
+    // Publishes lifecycle state for status queries and business admission without
+    // taking mutex
+    std::atomic<State> state_{State::UNINITIALIZED};
     std::unique_ptr<coro_rpc::coro_rpc_server> dummy_rpc_server_;
+    async_simple::Future<coro_rpc::err_code> dummy_rpc_exit_{nullptr};
 };
 
 }  // namespace mooncake

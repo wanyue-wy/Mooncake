@@ -260,12 +260,16 @@ TEST_F(P2PRealClientTest, SetupAndIdempotentClose) {
     EXPECT_EQ(client->deployment_mode(), DeploymentMode::P2P);
     EXPECT_FALSE(client->get_hostname().empty());
     ASSERT_NE(client->GetBufferAllocator(), nullptr);
+    ASSERT_TRUE(client->service_ready_internal());
 
     EXPECT_EQ(client->tearDownAll(), 0);
     EXPECT_FALSE(client->is_initialized());
-    EXPECT_EQ(client->deployment_mode(), DeploymentMode::UNKNOWN);
+    EXPECT_EQ(client->deployment_mode(), DeploymentMode::P2P);
     EXPECT_TRUE(client->get_hostname().empty());
     EXPECT_EQ(client->tearDownAll(), 0);
+    auto readiness = client->service_ready_internal();
+    ASSERT_FALSE(readiness);
+    EXPECT_EQ(readiness.error(), ErrorCode::SHUTTING_DOWN);
     const std::string value = "closed";
     EXPECT_LT(client->put("after_close", value), 0);
 }
@@ -274,7 +278,7 @@ TEST_F(P2PRealClientTest, LegacyInitAllReportsNotImplemented) {
     RealClient client;
     auto readiness = client.service_ready_internal();
     ASSERT_FALSE(readiness);
-    EXPECT_EQ(readiness.error(), ErrorCode::INVALID_PARAMS);
+    EXPECT_EQ(readiness.error(), ErrorCode::INTERNAL_ERROR);
     EXPECT_EQ(client.initAll("tcp", "", 16 * 1024 * 1024),
               toInt(ErrorCode::NOT_IMPLEMENTED));
     EXPECT_FALSE(client.is_initialized());
