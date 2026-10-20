@@ -623,6 +623,10 @@ std::shared_ptr<BufferHandle> DummyClient::get_buffer(
 
 std::tuple<uint64_t, size_t> DummyClient::get_buffer_info(
     const std::string& key, const std::optional<ReadConfig>& config) {
+    // TODO: Make the returned SHM data lifetime safe for Dummy consumption.
+    // Real returns only an address and size and releases the allocation before
+    // the RPC reply is consumed. It cannot tell when Dummy finishes reading,
+    // so another allocation can overwrite the data.
     auto result =
         invoke_rpc<&RealClient::get_buffer_info_dummy_helper,
                    std::tuple<uint64_t, size_t>>(key, config, client_id_);
@@ -651,6 +655,10 @@ std::string DummyClient::get_hostname() const {
     return "";
 }
 
+// ATTENTION:
+// A RealClient RPC timeout may leave TE transfers reading these SHM buffers.
+// There is currently no TE cancel API; safe buffer reuse after a timeout
+// remains unresolved and needs a future fix.
 std::vector<int> DummyClient::batch_put_from(
     const std::vector<std::string>& keys, const std::vector<void*>& buffer_ptrs,
     const std::vector<size_t>& sizes, const std::optional<WriteConfig>& config,
@@ -678,6 +686,10 @@ int DummyClient::put_from(const std::string& key, void* buffer, size_t size,
     return -1;
 }
 
+// ATTENTION:
+// A RealClient RPC timeout may leave TE transfers writing these SHM buffers.
+// There is currently no TE cancellation API; safe buffer reuse after a timeout
+// remains unresolved and needs a future fix.
 std::vector<int64_t> DummyClient::batch_get_into(
     const std::vector<std::string>& keys, const std::vector<void*>& buffer_ptrs,
     const std::vector<size_t>& sizes, const std::optional<ReadConfig>& config) {
