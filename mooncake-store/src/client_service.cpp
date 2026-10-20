@@ -90,9 +90,17 @@ Client::Client(const std::string& local_hostname,
     }
 }
 
-Client::~Client() {
+Client::~Client() { Stop(); }
+
+void Client::Stop() {
+    if (!local_inflight_tracker_.Close()) {
+        return;
+    }
+    local_inflight_tracker_.Wait();
     StopClientRpcServer();
     file_storage_.reset();
+    // No admitted producer can enqueue more asynchronous writes.
+    write_thread_pool_.stop();
     // Make a copy of mounted_segments_ to avoid modifying while iterating
     std::vector<Segment> segments_to_unmount;
     {
@@ -298,17 +306,28 @@ std::optional<std::shared_ptr<Client>> Client::Create(
 
 tl::expected<void, ErrorCode> Client::Get(const std::string& object_key,
                                           std::vector<Slice>& slices) {
-    auto query_result = Query(object_key);
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "Get rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
+    auto query_result = QueryImpl(object_key);
     if (!query_result) {
         return tl::unexpected(query_result.error());
     }
-    return Get(object_key, query_result.value(), slices);
+    return GetImpl(object_key, query_result.value(), slices);
 }
 
 std::vector<tl::expected<void, ErrorCode>> Client::BatchGet(
     const std::vector<std::string>& object_keys,
     std::unordered_map<std::string, std::vector<Slice>>& slices) {
-    auto batched_query_results = BatchQuery(object_keys);
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "BatchGet rejected: client is shutting down";
+        return std::vector<tl::expected<void, ErrorCode>>(
+            object_keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
+    auto batched_query_results = BatchQueryImpl(object_keys);
 
     // If any queries failed, return error results immediately for failed
     // queries
@@ -342,7 +361,7 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchGet(
         }
 
         auto valid_results =
-            BatchGet(valid_keys, valid_query_results, valid_slices);
+            BatchGetImpl(valid_keys, valid_query_results, valid_slices);
 
         // Merge results back
         for (size_t i = 0; i < valid_indices.size(); ++i) {
@@ -370,6 +389,16 @@ Client::QueryByRegex(const std::string& str) {
 
 tl::expected<QueryResult, ErrorCode> Client::Query(
     const std::string& object_key) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "Query rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
+    return QueryImpl(object_key);
+}
+
+tl::expected<QueryResult, ErrorCode> Client::QueryImpl(
+    const std::string& object_key) {
     std::chrono::steady_clock::time_point start_time =
         std::chrono::steady_clock::now();
     auto result = master_client_.GetReplicaList(object_key);
@@ -382,6 +411,17 @@ tl::expected<QueryResult, ErrorCode> Client::Query(
 }
 
 std::vector<tl::expected<QueryResult, ErrorCode>> Client::BatchQuery(
+    const std::vector<std::string>& object_keys) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "BatchQuery rejected: client is shutting down";
+        return std::vector<tl::expected<QueryResult, ErrorCode>>(
+            object_keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
+    return BatchQueryImpl(object_keys);
+}
+
+std::vector<tl::expected<QueryResult, ErrorCode>> Client::BatchQueryImpl(
     const std::vector<std::string>& object_keys) {
     std::chrono::steady_clock::time_point start_time =
         std::chrono::steady_clock::now();
@@ -425,6 +465,17 @@ tl::expected<std::vector<std::string>, ErrorCode> Client::BatchReplicaClear(
 tl::expected<void, ErrorCode> Client::Get(const std::string& object_key,
                                           const QueryResult& query_result,
                                           std::vector<Slice>& slices) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "Get rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
+    return GetImpl(object_key, query_result, slices);
+}
+
+tl::expected<void, ErrorCode> Client::GetImpl(const std::string& object_key,
+                                              const QueryResult& query_result,
+                                              std::vector<Slice>& slices) {
     // Find the first complete replica
     Replica::Descriptor replica;
     ErrorCode err = FindFirstCompleteReplica(query_result.replicas, replica);
@@ -547,6 +598,21 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchGet(
     const std::vector<QueryResult>& query_results,
     std::unordered_map<std::string, std::vector<Slice>>& slices,
     bool prefer_alloc_in_same_node) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "BatchGet rejected: client is shutting down";
+        return std::vector<tl::expected<void, ErrorCode>>(
+            object_keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
+    return BatchGetImpl(object_keys, query_results, slices,
+                        prefer_alloc_in_same_node);
+}
+
+std::vector<tl::expected<void, ErrorCode>> Client::BatchGetImpl(
+    const std::vector<std::string>& object_keys,
+    const std::vector<QueryResult>& query_results,
+    std::unordered_map<std::string, std::vector<Slice>>& slices,
+    bool prefer_alloc_in_same_node) {
     if (!transfer_submitter_) {
         LOG(ERROR) << "TransferSubmitter not initialized";
         std::vector<tl::expected<void, ErrorCode>> results;
@@ -659,6 +725,11 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchGet(
 tl::expected<void, ErrorCode> Client::Put(
     const ObjectKey& key, std::vector<Slice>& slices,
     const std::optional<ReplicateConfig>& config_opt) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "Put rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     ReplicateConfig default_config;
     const auto& config = config_opt ? *config_opt : default_config;
 
@@ -1228,6 +1299,12 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchPut(
     const std::vector<ObjectKey>& keys,
     std::vector<std::vector<Slice>>& batched_slices,
     const std::optional<ReplicateConfig>& config_opt) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "BatchPut rejected: client is shutting down";
+        return std::vector<tl::expected<void, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     ReplicateConfig default_config;
     const auto& config = config_opt ? *config_opt : default_config;
 
@@ -1263,10 +1340,12 @@ std::vector<tl::expected<void, ErrorCode>> Client::BatchPut(
 }
 
 tl::expected<void, ErrorCode> Client::Remove(const ObjectKey& key, bool force) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "Remove rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto result = master_client_.Remove(key, force);
-    // if (storage_backend_) {
-    //     storage_backend_->RemoveFile(key);
-    // }
     if (!result) {
         return tl::unexpected(result.error());
     }
@@ -1275,10 +1354,12 @@ tl::expected<void, ErrorCode> Client::Remove(const ObjectKey& key, bool force) {
 
 tl::expected<long, ErrorCode> Client::RemoveByRegex(const ObjectKey& str,
                                                     bool force) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "RemoveByRegex rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto result = master_client_.RemoveByRegex(str, force);
-    // if (storage_backend_) {
-    //     storage_backend_->RemoveByRegex(str);
-    // }
     if (!result) {
         return tl::unexpected(result.error());
     }
@@ -1286,9 +1367,11 @@ tl::expected<long, ErrorCode> Client::RemoveByRegex(const ObjectKey& str,
 }
 
 tl::expected<long, ErrorCode> Client::RemoveAll(bool force) {
-    // if (storage_backend_) {
-    //     storage_backend_->RemoveAll();
-    // }
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "RemoveAll rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     return master_client_.RemoveAll(force);
 }
 
@@ -1417,12 +1500,23 @@ tl::expected<void, ErrorCode> Client::unregisterLocalMemory(
 }
 
 tl::expected<bool, ErrorCode> Client::IsExist(const std::string& key) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "IsExist rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     auto result = master_client_.ExistKey(key);
     return result;
 }
 
 std::vector<tl::expected<bool, ErrorCode>> Client::BatchIsExist(
     const std::vector<std::string>& keys) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "BatchIsExist rejected: client is shutting down";
+        return std::vector<tl::expected<bool, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     auto response = master_client_.BatchExistKey(keys);
 
     // Check if we got the expected number of responses
@@ -1503,17 +1597,32 @@ tl::expected<void, ErrorCode> Client::NotifyOffloadSuccess(
 
 tl::expected<UUID, ErrorCode> Client::CreateCopyTask(
     const std::string& key, const std::vector<std::string>& targets) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "CreateCopyTask rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     return master_client_.CreateCopyTask(key, targets);
 }
 
 tl::expected<UUID, ErrorCode> Client::CreateMoveTask(
     const std::string& key, const std::string& source,
     const std::string& target) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "CreateMoveTask rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     return master_client_.CreateMoveTask(key, source, target);
 }
 
 tl::expected<QueryTaskResponse, ErrorCode> Client::QueryTask(
     const UUID& task_id) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "QueryTask rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     return master_client_.QueryTask(task_id);
 }
 
@@ -1964,13 +2073,18 @@ void Client::StopClientRpcServer() {
 
 tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Client::Get(
     const std::string& key, std::shared_ptr<ClientBufferAllocator> allocator) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "Get rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     if (!allocator) {
         LOG(ERROR) << "Client buffer allocator is not provided";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
 
     // Query to get size first
-    auto query_result = Query(key);
+    auto query_result = QueryImpl(key);
     if (!query_result) {
         LOG(ERROR) << "Failed to query key"
                    << ", key:" << key << ", error:" << query_result.error();
@@ -2008,7 +2122,7 @@ tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Client::Get(
     std::vector<Slice> slices;
     allocateSlices(slices, replica, buffer_handle.ptr());
 
-    auto get_result = Get(key, query_result.value(), slices);
+    auto get_result = GetImpl(key, query_result.value(), slices);
     if (!get_result) {
         LOG(ERROR) << "Failed to get key"
                    << ", key:" << key << ", error:" << get_result.error();
@@ -2021,6 +2135,13 @@ tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Client::Get(
 std::vector<tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>>
 Client::BatchGet(const std::vector<std::string>& keys,
                  std::shared_ptr<ClientBufferAllocator> allocator) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "BatchGet rejected: client is shutting down";
+        return std::vector<
+            tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     std::vector<tl::expected<std::shared_ptr<BufferHandle>, ErrorCode>> results(
         keys.size(), tl::unexpected(ErrorCode::INTERNAL_ERROR));
 
@@ -2033,7 +2154,7 @@ Client::BatchGet(const std::vector<std::string>& keys,
     }
 
     // Query all keys
-    auto query_results = BatchQuery(keys);
+    auto query_results = BatchQueryImpl(keys);
 
     // Prepare valid operations for batch get
     struct KeyOp {
@@ -2104,7 +2225,7 @@ Client::BatchGet(const std::vector<std::string>& keys,
         batch_slices[keys[op.original_index]] = op.slices;
     }
 
-    auto batch_results = BatchGet(batch_keys, batch_qr, batch_slices);
+    auto batch_results = BatchGetImpl(batch_keys, batch_qr, batch_slices);
 
     for (size_t j = 0; j < valid_ops.size(); ++j) {
         auto& op = valid_ops[j];
@@ -2122,8 +2243,13 @@ Client::BatchGet(const std::vector<std::string>& keys,
 
 tl::expected<int64_t, ErrorCode> Client::Get(const std::string& key,
                                              void* buffer, size_t size) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "Get rejected: client is shutting down";
+        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
+    }
     // Step 1: Get object info
-    auto query_result = Query(key);
+    auto query_result = QueryImpl(key);
     if (!query_result) {
         if (query_result.error() == ErrorCode::OBJECT_NOT_FOUND ||
             query_result.error() == ErrorCode::REPLICA_IS_NOT_READY) {
@@ -2166,7 +2292,7 @@ tl::expected<int64_t, ErrorCode> Client::Get(const std::string& key,
     allocateSlices(slices, replica, buffer);
 
     // Step 3: Read data directly into user buffer
-    auto get_result = Get(key, query_result.value(), slices);
+    auto get_result = GetImpl(key, query_result.value(), slices);
     if (!get_result) {
         LOG(ERROR) << "Get failed for key: " << key
                    << " with error: " << toString(get_result.error());
@@ -2179,6 +2305,12 @@ tl::expected<int64_t, ErrorCode> Client::Get(const std::string& key,
 std::vector<tl::expected<int64_t, ErrorCode>> Client::BatchGet(
     const std::vector<std::string>& keys, const std::vector<void*>& buffers,
     const std::vector<size_t>& sizes) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "BatchGet rejected: client is shutting down";
+        return std::vector<tl::expected<int64_t, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     auto start_time = std::chrono::steady_clock::now();
     // Validate preconditions
     if (keys.size() != buffers.size() || keys.size() != sizes.size()) {
@@ -2197,7 +2329,7 @@ std::vector<tl::expected<int64_t, ErrorCode>> Client::BatchGet(
     }
 
     // Query metadata for all keys
-    const auto query_results = BatchQuery(keys);
+    const auto query_results = BatchQueryImpl(keys);
 
     // Process each key individually and prepare for batch transfer
     struct ValidKeyInfo {
@@ -2297,7 +2429,7 @@ std::vector<tl::expected<int64_t, ErrorCode>> Client::BatchGet(
     if (!valid_operations.empty()) {
         // Execute batch transfer
         const auto batch_get_results =
-            BatchGet(batch_keys, batch_query_results, batch_slices);
+            BatchGetImpl(batch_keys, batch_query_results, batch_slices);
 
         // Process transfer results
         for (size_t j = 0; j < batch_get_results.size(); ++j) {
@@ -2362,6 +2494,12 @@ std::vector<tl::expected<int64_t, ErrorCode>> Client::BatchGet(
     const std::vector<std::vector<void*>>& all_buffers,
     const std::vector<std::vector<size_t>>& all_sizes,
     bool aggregate_same_segment_task) {
+    auto guard = local_inflight_tracker_.Enter();
+    if (!guard.is_valid()) {
+        LOG(ERROR) << "BatchGet rejected: client is shutting down";
+        return std::vector<tl::expected<int64_t, ErrorCode>>(
+            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
+    }
     // Validate preconditions
     if (keys.size() != all_buffers.size() || keys.size() != all_sizes.size()) {
         LOG(ERROR) << "Input vector sizes mismatch: keys=" << keys.size()
@@ -2378,7 +2516,7 @@ std::vector<tl::expected<int64_t, ErrorCode>> Client::BatchGet(
         return results;
     }
     // Query metadata for all keys
-    const auto query_results = BatchQuery(keys);
+    const auto query_results = BatchQueryImpl(keys);
     // Process each key individually and prepare for batch transfer
     struct ValidKeyInfo {
         std::string key;
@@ -2465,8 +2603,8 @@ std::vector<tl::expected<int64_t, ErrorCode>> Client::BatchGet(
     }
 
     auto batch_get_results =
-        BatchGet(batch_keys, batch_query_results, batch_slices,
-                 aggregate_same_segment_task);
+        BatchGetImpl(batch_keys, batch_query_results, batch_slices,
+                     aggregate_same_segment_task);
 
     // Process transfer results
     for (size_t j = 0; j < batch_get_results.size(); ++j) {

@@ -17,6 +17,7 @@
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include "client_buffer.hpp"
 #include "client_resources.h"
+#include "inflight_tracker.h"
 #include "ha_helper.h"
 #include "master_client.h"
 #include "storage_backend.h"
@@ -85,6 +86,9 @@ class QueryResult {
 class Client {
    public:
     ~Client();
+
+    // Reject new core business calls and drain admitted calls/background work.
+    void Stop();
 
     /**
      * @brief Creates and initializes a new Client instance
@@ -472,6 +476,21 @@ class Client {
                                      const std::vector<int64_t>& sizes);
 
    private:
+    friend struct ClientLifecycleTestHelper;
+
+    // Internal read composition runs under the outer public call's guard.
+    tl::expected<QueryResult, ErrorCode> QueryImpl(const std::string& key);
+    std::vector<tl::expected<QueryResult, ErrorCode>> BatchQueryImpl(
+        const std::vector<std::string>& keys);
+    tl::expected<void, ErrorCode> GetImpl(const std::string& key,
+                                          const QueryResult& query_result,
+                                          std::vector<Slice>& slices);
+    std::vector<tl::expected<void, ErrorCode>> BatchGetImpl(
+        const std::vector<std::string>& keys,
+        const std::vector<QueryResult>& query_results,
+        std::unordered_map<std::string, std::vector<Slice>>& slices,
+        bool prefer_same_node = false);
+
     /**
      * @brief Private constructor to enforce creation through Create() method
      */
@@ -539,6 +558,9 @@ class Client {
         const std::vector<std::string>& object_keys,
         const std::vector<QueryResult>& query_results,
         std::unordered_map<std::string, std::vector<Slice>>& slices);
+
+   private:
+    InflightTracker local_inflight_tracker_{"centralized client requests"};
 
     // Client identification
     const UUID client_id_;
