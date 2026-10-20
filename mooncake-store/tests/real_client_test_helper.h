@@ -30,6 +30,14 @@ struct RealClientTestHelper {
         return client.ipc_thread_.joinable();
     }
 
+    static bool IpcRunning(const RealClient& client) {
+        return client.ipc_running_.load();
+    }
+
+    static bool DummyRpcStopped(RealClient& client) {
+        return client.dummy_rpc_exit_.hasResult();
+    }
+
     static auto NativeClient(const RealClient& client) {
         return client.client_service_;
     }

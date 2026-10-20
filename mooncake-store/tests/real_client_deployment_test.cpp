@@ -19,6 +19,7 @@
 #include <string>
 #include <thread>
 
+#include "dummy_client.h"
 #include "real_client_test_helper.h"
 #if defined(MOONCAKE_STORE_CLIENT_P2P)
 #include "p2p/client/p2p_client_config_builder.h"
@@ -70,6 +71,129 @@ struct ClientOwner {
     ~ClientOwner() {
         EXPECT_EQ(client->tearDownAll(), 0);
         client.reset();
+    }
+};
+
+// Pause a real native batch read at its Master RPC, after native admission.
+// The rest of the endpoint delegates to the existing in-process Master.
+class PausedReadMaster {
+   public:
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+    using Service = P2PMasterRpcService;
+    using ReadRequest = const P2PBatchGetReadRouteRequest&;
+    using ReadResponse = P2PBatchGetReadRouteResponse;
+#else
+    using Service = WrappedMasterService;
+    using ReadRequest = const std::vector<std::string>&;
+    using ReadResponse =
+        std::vector<tl::expected<GetReplicaListResponse, ErrorCode>>;
+#endif
+
+    explicit PausedReadMaster(Service& service)
+        : service_(service),
+          reached_(entered_.get_future()),
+          released_(release_.get_future().share()) {
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+        server_.register_handler<
+            &Service::ServiceReady, &Service::HeartbeatServiceReady,
+            &Service::RegisterClient, &Service::UnregisterClient,
+            &Service::Heartbeat, &Service::BatchSyncRoutes,
+            &Service::PublishRoute, &Service::WithdrawRoute,
+            &Service::BatchWithdrawRoute, &Service::BatchQueryIp,
+            &Service::MountSegment, &Service::UnmountSegment,
+            &Service::ExistKey, &Service::BatchExistKey>(&service_);
+        server_.register_handler<&PausedReadMaster::Read>(
+            this, coro_rpc::func_id<&Service::BatchGetReadRoute>());
+#else
+        server_.register_handler<
+            &Service::ServiceReady, &Service::GetStorageConfig,
+            &Service::GetFsdir, &Service::Ping, &Service::MountSegment,
+            &Service::ReMountSegment, &Service::UnmountSegment,
+            &Service::BatchPutStart, &Service::BatchPutEnd,
+            &Service::BatchPutRevoke, &Service::ExistKey,
+            &Service::BatchExistKey>(&service_);
+        server_.register_handler<&PausedReadMaster::Read>(
+            this, coro_rpc::func_id<&Service::BatchGetReplicaList>());
+#endif
+    }
+
+    ~PausedReadMaster() {
+        Release();
+        server_.stop();
+    }
+
+    bool Start() { return !server_.async_start().hasResult(); }
+    std::string Address() const {
+        return "127.0.0.1:" + std::to_string(server_.port());
+    }
+    bool WaitForRead() {
+        return reached_.wait_for(std::chrono::seconds(5)) ==
+               std::future_status::ready;
+    }
+    void Release() {
+        std::call_once(release_once_, [this] { release_.set_value(); });
+    }
+
+    ReadResponse Read(ReadRequest request) {
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+        const auto& keys = request.keys;
+#else
+        const auto& keys = request;
+#endif
+        if (std::find(keys.begin(), keys.end(), "paused_read") != keys.end()) {
+            // A timeout/retry may produce another call for the same key.
+            std::call_once(enter_once_, [this] { entered_.set_value(); });
+            released_.wait();
+        }
+#if defined(MOONCAKE_STORE_CLIENT_P2P)
+        return service_.BatchGetReadRoute(request);
+#else
+        return service_.BatchGetReplicaList(request);
+#endif
+    }
+
+   private:
+    Service& service_;
+    coro_rpc::coro_rpc_server server_{4, 0, "127.0.0.1"};
+    std::promise<void> entered_, release_;
+    std::future<void> reached_;
+    std::shared_future<void> released_;
+    std::once_flag enter_once_, release_once_;
+};
+
+struct DummyDeployment {
+    ClientOwner real;
+    DummyClient dummy;
+    char* host_buffer = nullptr;
+
+    void Init(ClientConfig config) {
+        const auto id = generate_uuid();
+        config.ipc_socket_path = "dummy_deployment_" +
+                                 std::to_string(getpid()) + "_" +
+                                 std::to_string(id.first);
+        config.local_buffer_size = 0;
+        ASSERT_TRUE(real.client->setup_internal(
+            config, /*start_dummy_rpc=*/true, 4, 0));
+        const auto port =
+            RealClientTestHelper::DummyRpcServer(*real.client)->port();
+        auto dummy_config = ClientConfigBuilder::build_dummy(
+            4 * 1024 * 1024, 4 * 1024 * 1024,
+            "127.0.0.1:" + std::to_string(port), config.ipc_socket_path);
+        ASSERT_EQ(dummy.setup(dummy_config), 0);
+        // This segment models application-owned host pages, separate from the
+        // Dummy local_buffer allocator used by ordinary put/get.
+        host_buffer = reinterpret_cast<char*>(
+            dummy.alloc_from_mem_pool(SharedFile::kSize));
+        ASSERT_NE(host_buffer, nullptr);
+        ASSERT_EQ(dummy.register_buffer(host_buffer, SharedFile::kSize), 0);
+        std::memset(host_buffer, 0x5a, SharedFile::kSize);
+    }
+
+    ~DummyDeployment() {
+        // Real may already be closed; failure of the final unmap RPC is legal.
+        dummy.tearDownAll();
+        EXPECT_EQ(real.client->tearDownAll(), 0);
+        EXPECT_TRUE(ShmHelper::getInstance()->cleanup());
     }
 };
 
@@ -417,8 +541,7 @@ TEST_F(RealClientDeploymentTest, DummyRequestsDoNotWaitForLifecycleWriter) {
 
 namespace {
 
-#if defined(MOONCAKE_STORE_CLIENT_P2P)
-void CheckIpcStop(P2PClientConfig config, bool connect_peer,
+void CheckIpcStop(ClientConfig config, bool connect_peer,
                   bool partial_request) {
     const auto id = generate_uuid();
     config.ipc_socket_path = "ipc_stop_" + std::to_string(getpid()) + "_" +
@@ -435,7 +558,9 @@ void CheckIpcStop(P2PClientConfig config, bool connect_peer,
     auto closed = std::async(std::launch::async, [&] {
         return owner.client->tearDownAll();
     });
-    const auto status = closed.wait_for(std::chrono::seconds(5));
+    // IPC receive alone may take five seconds; allow time for native/monitor
+    // shutdown and thread scheduling as well.
+    const auto status = closed.wait_for(std::chrono::seconds(15));
     EXPECT_EQ(status, std::future_status::ready);
     if (status != std::future_status::ready && peer.fd >= 0) {
         // Let a broken implementation finish so the test can report failure.
@@ -446,8 +571,6 @@ void CheckIpcStop(P2PClientConfig config, bool connect_peer,
     EXPECT_FALSE(owner.client->is_initialized());
     EXPECT_EQ(owner.client->tearDownAll(), 0);
 }
-
-#endif
 
 class PausedDummyRead {
    public:
@@ -498,6 +621,7 @@ void CheckDummyRpcDrain(ClientConfig config, const WriteConfig& write_config,
     // Retain the native object: close must call Stop(), not rely on destruction.
     ASSERT_NE(context, nullptr);
     auto native = RealClientTestHelper::NativeClient(*owner.client);
+    std::weak_ptr<ClientServiceImpl> native_lifetime = native;
     PausedDummyRead handler(*owner.client, id, after_native);
     auto reached = handler.reached.get_future();
     auto finished = handler.finished.get_future();
@@ -551,6 +675,7 @@ void CheckDummyRpcDrain(ClientConfig config, const WriteConfig& write_config,
         SharedMutexLocker lock(&context->mutex_, shared_lock);
         EXPECT_FALSE(context->mapped_shms_.empty());
     }
+    native.reset();
     handler.release.set_value();
     // stop() may close the response connection; server-side completion matters.
     response.get();
@@ -563,10 +688,7 @@ void CheckDummyRpcDrain(ClientConfig config, const WriteConfig& write_config,
         EXPECT_EQ(std::string(static_cast<char*>(file.data), SharedFile::kSize),
                   std::string(SharedFile::kSize, 0x5a));
     }
-#if defined(MOONCAKE_STORE_CLIENT_P2P)
-    EXPECT_EQ(native->GetHealthStatus(), "STOPPED");
-    EXPECT_EQ(native->GetBufferAllocator(), nullptr);
-#endif
+    EXPECT_TRUE(native_lifetime.expired());
     EXPECT_TRUE(context->mapped_shms_.empty());
     EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), nullptr);
     EXPECT_EQ(owner.client->tearDownAll(), 0);
@@ -582,8 +704,160 @@ TEST_F(RealClientDeploymentTest, DummyRpcStopWaitsAfterNativeReturn) {
     CheckDummyRpcDrain(DeploymentConfig(), LocalWriteConfig(), true);
 }
 
-#if defined(MOONCAKE_STORE_CLIENT_P2P)
-TEST_F(RealClientDeploymentTest, P2PReadinessDoesNotWaitForLifecycleWriter) {
+TEST_F(RealClientDeploymentTest, CloseDrainsNativeReadBeforeStoppingDummyRpc) {
+    PausedReadMaster master(master_.GetWrapped());
+    ASSERT_TRUE(master.Start());
+    auto config = DeploymentConfig();
+    config.master_server_entry = master.Address();
+    DummyDeployment deployment;
+    ASSERT_NO_FATAL_FAILURE(deployment.Init(config));
+    auto& real = *deployment.real.client;
+    std::weak_ptr<ClientServiceImpl> native =
+        RealClientTestHelper::NativeClient(real);
+    std::shared_ptr<RealClientTestHelper::ShmContext> context;
+    {
+        std::shared_lock lock(RealClientTestHelper::ShmMutex(real));
+        const auto& contexts = RealClientTestHelper::ShmContexts(real);
+        ASSERT_EQ(contexts.size(), 1);
+        context = contexts.begin()->second;
+    }
+    auto read = std::async(std::launch::async, [&] {
+        return deployment.dummy.batch_get_into(
+            {"paused_read"}, {deployment.host_buffer}, {SharedFile::kSize});
+    });
+    if (!master.WaitForRead()) {
+        master.Release();
+        read.get();
+        FAIL() << "Dummy read did not enter the native Master RPC";
+    }
+    auto closed =
+        std::async(std::launch::async, [&] { return real.tearDownAll(); });
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (real.is_initialized() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    EXPECT_FALSE(real.is_initialized());
+    EXPECT_EQ(closed.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    // Native drain must precede RPC stop, not just wait at RPC stop instead.
+    EXPECT_FALSE(RealClientTestHelper::DummyRpcStopped(real));
+    EXPECT_FALSE(native.expired());
+    {
+        SharedMutexLocker lock(&context->mutex_, shared_lock);
+        EXPECT_EQ(context->mapped_shms_.size(), 2);
+        EXPECT_NE(context->client_buffer_allocator_, nullptr);
+    }
+    auto late = std::async(std::launch::async,
+                           [&] { return deployment.dummy.isExist("late"); });
+    EXPECT_EQ(late.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    // Release the native request even if a regression blocked the late call.
+    master.Release();
+    EXPECT_EQ(late.get(), toInt(ErrorCode::SHUTTING_DOWN));
+    auto results = read.get();
+    EXPECT_EQ(closed.get(), 0);
+    ASSERT_EQ(results.size(), 1);
+    // The key is absent. RPC shutdown may also discard the response.
+    EXPECT_LT(results.front(), 0);
+    EXPECT_EQ(std::string(deployment.host_buffer, SharedFile::kSize),
+              std::string(SharedFile::kSize, 0x5a));
+    EXPECT_TRUE(context->mapped_shms_.empty());
+    EXPECT_TRUE(native.expired());
+}
+
+TEST_F(RealClientDeploymentTest,
+       SameDummyRunsReadsWritesAndQueriesConcurrently) {
+    PausedReadMaster master(master_.GetWrapped());
+    ASSERT_TRUE(master.Start());
+    auto config = DeploymentConfig();
+    config.master_server_entry = master.Address();
+    DummyDeployment deployment;
+    ASSERT_NO_FATAL_FAILURE(deployment.Init(config));
+    auto& dummy = deployment.dummy;
+    auto* source = deployment.host_buffer;
+    auto* write_source = source + 1024;
+    auto* destination = source + 2048;
+    auto* paused_destination = source + 3072;
+    const std::string seed(64, 'r'), written(64, 'w');
+    std::memcpy(source, seed.data(), seed.size());
+    std::memcpy(write_source, written.data(), written.size());
+    const auto write_config = LocalWriteConfig();
+    ASSERT_EQ(
+        dummy.batch_put_from({"seed"}, {source}, {seed.size()}, write_config),
+        std::vector<int>{0});
+    auto paused = std::async(std::launch::async, [&] {
+        return dummy.batch_get_into({"paused_read"}, {paused_destination},
+                                    {64});
+    });
+    if (!master.WaitForRead()) {
+        master.Release();
+        paused.get();
+        FAIL() << "Dummy read did not reach the native pause point";
+    }
+
+    std::promise<void> start;
+    auto ready = start.get_future().share();
+    auto reader = std::async(std::launch::async, [&] {
+        ready.wait();
+        for (int i = 0; i < 8; ++i) {
+            const auto result =
+                dummy.batch_get_into({"seed"}, {destination}, {seed.size()});
+            if (result !=
+                    std::vector<int64_t>{static_cast<int64_t>(seed.size())} ||
+                std::memcmp(destination, seed.data(), seed.size()) != 0) {
+                return false;
+            }
+        }
+        return true;
+    });
+    auto writer = std::async(std::launch::async, [&] {
+        ready.wait();
+        for (int i = 0; i < 8; ++i) {
+            if (dummy.batch_put_from({"written_" + std::to_string(i)},
+                                     {write_source}, {written.size()},
+                                     write_config) != std::vector<int>{0}) {
+                return false;
+            }
+        }
+        return true;
+    });
+    auto queries = std::async(std::launch::async, [&] {
+        ready.wait();
+        for (int i = 0; i < 8; ++i) {
+            if (dummy.isExist("seed") != 1) return false;
+        }
+        return true;
+    });
+    start.set_value();
+    // These must finish while another read on the very same Dummy is paused.
+    // A global business lock would block them behind that read.
+    for (auto* call : {&reader, &writer, &queries}) {
+        const auto status = call->wait_for(std::chrono::seconds(5));
+        EXPECT_EQ(status, std::future_status::ready);
+        if (status != std::future_status::ready) master.Release();
+    }
+    master.Release();
+    EXPECT_TRUE(reader.get());
+    EXPECT_TRUE(writer.get());
+    EXPECT_TRUE(queries.get());
+    auto missing = paused.get();
+    ASSERT_EQ(missing.size(), 1);
+    EXPECT_LT(missing.front(), 0);
+    EXPECT_EQ(std::string(paused_destination, 64), std::string(64, 0x5a));
+    for (int i = 0; i < 8; ++i) {
+        ASSERT_EQ(dummy.batch_get_into({"written_" + std::to_string(i)},
+                                       {destination}, {written.size()}),
+                  std::vector<int64_t>{static_cast<int64_t>(written.size())});
+        EXPECT_EQ(std::string(destination, written.size()), written);
+    }
+    EXPECT_EQ(std::string(source, seed.size()), seed);
+    EXPECT_EQ(std::string(write_source, written.size()), written);
+    EXPECT_EQ(dummy.tearDownAll(), 0);
+}
+
+TEST_F(RealClientDeploymentTest, ReadinessDoesNotWaitForLifecycleWriter) {
     ClientOwner owner;
     ASSERT_EQ(owner.client->setup(DeploymentConfig()), 0);
     std::unique_lock writer(
@@ -598,39 +872,45 @@ TEST_F(RealClientDeploymentTest, P2PReadinessDoesNotWaitForLifecycleWriter) {
     writer.unlock();
     auto result = readiness.get();
     ASSERT_TRUE(result);
-    EXPECT_EQ(result.value(), DeploymentMode::P2P);
+    EXPECT_EQ(result.value(), owner.client->deployment_mode());
     EXPECT_TRUE(owner.client->service_ready_internal());
 }
 
-TEST_F(RealClientDeploymentTest, P2PIpcStopWithoutConnections) {
+TEST_F(RealClientDeploymentTest, IpcStopWithoutConnections) {
     CheckIpcStop(DeploymentConfig(), false, false);
 }
 
-TEST_F(RealClientDeploymentTest, P2PIpcStopWithEmptyRequest) {
+TEST_F(RealClientDeploymentTest, IpcStopWithEmptyRequest) {
     CheckIpcStop(DeploymentConfig(), true, false);
 }
 
-TEST_F(RealClientDeploymentTest, P2PIpcStopWithPartialRequest) {
+TEST_F(RealClientDeploymentTest, IpcStopWithPartialRequest) {
     CheckIpcStop(DeploymentConfig(), true, true);
 }
 
-TEST_F(RealClientDeploymentTest, P2PCloseWaitsForRegisteredShmPublication) {
+TEST_F(RealClientDeploymentTest, CloseWaitsForRegisteredShmPublication) {
     SharedFile file;
     ASSERT_NO_FATAL_FAILURE(file.Init());
-    ClientResources transport;
-    ASSERT_EQ(transport.InitTransferEngine("127.0.0.1", "P2PHANDSHAKE", "tcp",
-                                           std::nullopt),
-              ErrorCode::OK);
     auto config = DeploymentConfig();
-    config.transfer_engine = transport.GetTransferEngine();
-    config.local_hostname = transport.GetLocalEndpoint();
+    {
+        ClientResources transport;
+        ASSERT_EQ(transport.InitTransferEngine("127.0.0.1", "P2PHANDSHAKE",
+                                               "tcp", std::nullopt),
+                  ErrorCode::OK);
+        config.transfer_engine = transport.GetTransferEngine();
+        config.local_hostname = transport.GetLocalEndpoint();
+    }
     const auto id = generate_uuid();
     config.ipc_socket_path = "ipc_publish_" + std::to_string(getpid()) + "_" +
                              std::to_string(id.first);
     ClientOwner owner;
     ASSERT_EQ(owner.client->setup(config), 0);
-    auto native = RealClientTestHelper::NativeClient(*owner.client);
+    std::weak_ptr<ClientServiceImpl> native =
+        RealClientTestHelper::NativeClient(*owner.client);
+    std::weak_ptr<TransferEngine> engine = config.transfer_engine;
     auto metadata = config.transfer_engine->getMetadata();
+    // Let native own TE through shutdown; the test only observes its lifetime.
+    config.transfer_engine.reset();
     ASSERT_NE(metadata, nullptr);
     auto before = metadata->getSegmentDescByID(LOCAL_SEGMENT_ID);
     ASSERT_NE(before, nullptr);
@@ -679,28 +959,22 @@ TEST_F(RealClientDeploymentTest, P2PCloseWaitsForRegisteredShmPublication) {
               std::future_status::timeout);
     const auto stop_deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (native->GetHealthStatus() != "STOPPED" &&
+    while (RealClientTestHelper::IpcRunning(*owner.client) &&
            std::chrono::steady_clock::now() < stop_deadline) {
         std::this_thread::yield();
     }
-    EXPECT_EQ(native->GetHealthStatus(), "STOPPED");
-    if (native->GetHealthStatus() == "STOPPED") {
-        EXPECT_EQ(native->GetBufferAllocator(), nullptr);
-    }
+    EXPECT_FALSE(RealClientTestHelper::IpcRunning(*owner.client));
+    EXPECT_FALSE(native.expired());
+    EXPECT_FALSE(engine.expired());
     pause_publish.unlock();
     EXPECT_EQ(closed.get(), 0);
     EXPECT_FALSE(RealClientTestHelper::IpcThreadJoinable(*owner.client));
     EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), nullptr);
-    EXPECT_EQ(native->GetHealthStatus(), "STOPPED");
-    auto after = metadata->getSegmentDescByID(LOCAL_SEGMENT_ID);
-    ASSERT_NE(after, nullptr);
-    EXPECT_TRUE(std::none_of(after->buffers.begin(), after->buffers.end(),
-                             [&](const auto& buffer) {
-                                 return buffer.addr == registered_addr;
-                             }));
+    EXPECT_TRUE(native.expired());
+    EXPECT_TRUE(engine.expired());
 }
 
-TEST_F(RealClientDeploymentTest, P2PRpcWaitReturnsAfterShmCleanup) {
+TEST_F(RealClientDeploymentTest, RpcWaitReturnsAfterShmCleanup) {
     SharedFile file;
     ASSERT_NO_FATAL_FAILURE(file.Init());
     ClientOwner owner;
@@ -738,7 +1012,7 @@ TEST_F(RealClientDeploymentTest, P2PRpcWaitReturnsAfterShmCleanup) {
     EXPECT_TRUE(context->mapped_shms_.empty());
 }
 
-TEST_F(RealClientDeploymentTest, P2PRpcBindFailureClosesClient) {
+TEST_F(RealClientDeploymentTest, RpcBindFailureClosesClient) {
     coro_rpc::coro_rpc_server occupied(1, 0, "127.0.0.1");
     auto exited = occupied.async_start();
     ASSERT_FALSE(exited.hasResult());
@@ -752,6 +1026,5 @@ TEST_F(RealClientDeploymentTest, P2PRpcBindFailureClosesClient) {
     EXPECT_EQ(RealClientTestHelper::NativeClient(*owner.client), nullptr);
     EXPECT_EQ(owner.client->tearDownAll(), 0);
 }
-#endif
 
 }  // namespace mooncake::testing
