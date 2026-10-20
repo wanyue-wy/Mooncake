@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
 
     auto client_inst = RealClient::create();
     auto res = client_inst->setup_internal(
-        config, /*start_dummy_rpc=*/true, FLAGS_threads, FLAGS_port);
+        config, /*enable_dummy_service=*/true, FLAGS_threads, FLAGS_port);
     if (!res) {
         LOG(FATAL) << "Failed to setup client: " << toString(res.error());
         return -1;

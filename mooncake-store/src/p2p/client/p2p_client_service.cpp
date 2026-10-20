@@ -1935,6 +1935,13 @@ std::vector<tl::expected<int64_t, ErrorCode>> P2PClientService::BatchGet(
 
     std::vector<std::vector<Slice>> all_slices(keys.size());
     for (size_t i = 0; i < keys.size(); ++i) {
+        if (all_buffers[i].size() != all_sizes[i].size()) {
+            LOG(ERROR) << "Input buffer sizes mismatch, key=" << keys[i]
+                       << ", buffers=" << all_buffers[i].size()
+                       << ", sizes=" << all_sizes[i].size();
+            return std::vector<tl::expected<int64_t, ErrorCode>>(
+                keys.size(), tl::unexpected(ErrorCode::INVALID_PARAMS));
+        }
         all_slices[i].reserve(all_buffers[i].size());
         for (size_t j = 0; j < all_buffers[i].size(); ++j) {
             all_slices[i].emplace_back(
@@ -2289,8 +2296,10 @@ tl::expected<ReadTaskHandle, ErrorCode> P2PClientService::CreateRemoteGetHandle(
     const P2PReadRouteConfig& config, std::vector<ResolvedRoute> pre_fetched) {
     auto iter = BuildRouteIter(key, config, std::move(pre_fetched));
     if (!iter) {
-        LOG(ERROR) << "Failed to build route iterator, key=" << key
-                   << ", error=" << iter.error();
+        if (iter.error() != ErrorCode::OBJECT_NOT_FOUND) {
+            LOG(ERROR) << "Failed to build route iterator, key=" << key
+                       << ", error=" << iter.error();
+        }
         return tl::unexpected(iter.error());
     }
 

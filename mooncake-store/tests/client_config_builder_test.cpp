@@ -40,17 +40,6 @@ TEST(ClientConfigBuilderTest, CentralizedClientRejectsRedisMasterDiscovery) {
                      .has_value());
 }
 
-TEST(ClientConfigBuilderTest, CentralizedRejectsExplicitRuntimeConfig) {
-    std::unordered_map<std::string, std::string> config = {
-        {"local_hostname", "127.0.0.1:12345"},
-        {"metadata_server", "P2PHANDSHAKE"},
-        {"runtime_config", R"({"write":{"replica_num":3}})"},
-    };
-    EXPECT_THROW(
-        CentralizedClientConfigBuilder::build_centralized_real_client(config),
-        std::invalid_argument);
-}
-
 TEST(ClientConfigBuilderTest, RuntimeEnvironmentBelongsToP2P) {
     const char* old = std::getenv("MC_RUNTIME_CONFIG");
     struct RestoreRuntimeEnv {

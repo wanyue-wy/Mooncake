@@ -197,8 +197,8 @@ int RealClient::setup(const ClientConfig& config) {
 }
 
 tl::expected<void, ErrorCode> RealClient::setup_internal(
-    const ClientConfig& config, bool start_dummy_rpc, size_t rpc_thread_count,
-    uint16_t rpc_port) {
+    const ClientConfig& config, bool enable_dummy_service,
+    size_t rpc_thread_count, uint16_t rpc_port) {
     auto startup_result = ErrorCode::OK;
     {
         std::lock_guard lock(lifecycle_mutex_);
@@ -219,10 +219,11 @@ tl::expected<void, ErrorCode> RealClient::setup_internal(
         }
         if (startup_result != ErrorCode::OK) {
             LOG(ERROR) << "Failed to start IPC server: " << startup_result;
-        } else if ((startup_result = start_dummy_client_monitor()) !=
-                   ErrorCode::OK) {
+        } else if (enable_dummy_service &&
+                   (startup_result = start_dummy_client_monitor()) !=
+                       ErrorCode::OK) {
             LOG(ERROR) << "Failed to start Dummy monitor: " << startup_result;
-        } else if (start_dummy_rpc &&
+        } else if (enable_dummy_service &&
                    (startup_result = start_dummy_rpc_server(
                         rpc_thread_count, rpc_port)) != ErrorCode::OK) {
             LOG(ERROR) << "Failed to start Dummy RPC server: "
@@ -1674,7 +1675,6 @@ void RealClient::dummy_client_monitor_func() {
 }
 
 ErrorCode RealClient::start_dummy_client_monitor() {
-    // Start client monitor thread in all modes so TTL/heartbeat works
     dummy_client_monitor_running_ = true;
     try {
         dummy_client_monitor_thread_ =

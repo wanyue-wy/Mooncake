@@ -173,7 +173,7 @@ struct DummyDeployment {
                                  std::to_string(id.first);
         config.local_buffer_size = 0;
         ASSERT_TRUE(real.client->setup_internal(
-            config, /*start_dummy_rpc=*/true, 4, 0));
+            config, /*enable_dummy_service=*/true, 4, 0));
         const auto port =
             RealClientTestHelper::DummyRpcServer(*real.client)->port();
         auto dummy_config = ClientConfigBuilder::build_dummy(
@@ -979,7 +979,7 @@ TEST_F(RealClientDeploymentTest, RpcWaitReturnsAfterShmCleanup) {
     ASSERT_NO_FATAL_FAILURE(file.Init());
     ClientOwner owner;
     ASSERT_TRUE(owner.client->setup_internal(
-        DeploymentConfig(), /*start_dummy_rpc=*/true, 2, 0));
+        DeploymentConfig(), /*enable_dummy_service=*/true, 2, 0));
     ASSERT_NE(RealClientTestHelper::DummyRpcServer(*owner.client), nullptr);
     EXPECT_NE(RealClientTestHelper::DummyRpcServer(*owner.client)->port(), 0);
     const auto id = generate_uuid();
@@ -1019,10 +1019,11 @@ TEST_F(RealClientDeploymentTest, RpcBindFailureClosesClient) {
     ClientOwner owner;
     EXPECT_EQ(RealClientTestHelper::DummyRpcServer(*owner.client), nullptr);
     auto result = owner.client->setup_internal(
-        DeploymentConfig(), /*start_dummy_rpc=*/true, 1, occupied.port());
+        DeploymentConfig(), /*enable_dummy_service=*/true, 1, occupied.port());
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error(), ErrorCode::RPC_FAIL);
     EXPECT_FALSE(owner.client->is_initialized());
+    EXPECT_FALSE(RealClientTestHelper::DummyMonitorRunning(*owner.client));
     EXPECT_EQ(RealClientTestHelper::NativeClient(*owner.client), nullptr);
     EXPECT_EQ(owner.client->tearDownAll(), 0);
 }

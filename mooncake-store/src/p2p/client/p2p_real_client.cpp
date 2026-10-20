@@ -91,8 +91,10 @@ std::shared_ptr<BufferHandle> RealClient::get_buffer_internal(
 
     auto result = client_service_->Get(key, client_buffer_allocator, config);
     if (!result) {
-        LOG(ERROR) << "Get failed for key: " << key
-                   << " with error: " << toString(result.error());
+        if (result.error() != ErrorCode::OBJECT_NOT_FOUND) {
+            LOG(ERROR) << "Get failed for key: " << key
+                       << " with error: " << toString(result.error());
+        }
         return nullptr;
     }
     return result.value();
@@ -120,7 +122,7 @@ RealClient::batch_get_buffer_internal(const std::vector<std::string>& keys,
     for (size_t i = 0; i < keys.size(); ++i) {
         if (results[i]) {
             final_results[i] = results[i].value();
-        } else {
+        } else if (results[i].error() != ErrorCode::OBJECT_NOT_FOUND) {
             LOG(ERROR) << "BatchGet failed for key '" << keys[i]
                        << "': " << toString(results[i].error());
         }
@@ -140,7 +142,7 @@ tl::expected<int64_t, ErrorCode> RealClient::get_into_internal(
     }
 
     auto result = client_service_->Get(key, {buffer}, {size}, config);
-    if (!result) {
+    if (!result && result.error() != ErrorCode::OBJECT_NOT_FOUND) {
         LOG(ERROR) << "Get failed, key=" << key << ", error=" << result.error();
     }
     return result;
@@ -179,7 +181,7 @@ RealClient::batch_get_into_internal(const std::vector<std::string>& keys,
     auto results =
         client_service_->BatchGet(keys, all_buffers, all_sizes, config);
     for (size_t i = 0; i < results.size(); ++i) {
-        if (!results[i]) {
+        if (!results[i] && results[i].error() != ErrorCode::OBJECT_NOT_FOUND) {
             LOG(ERROR) << "BatchGet failed, key=" << keys[i]
                        << ", error=" << results[i].error();
         }
@@ -215,7 +217,7 @@ RealClient::batch_get_into_multi_buffers_internal(
     auto results = client_service_->BatchGet(keys, all_buffers, all_sizes,
                                              config, prefer_alloc_in_same_node);
     for (size_t i = 0; i < results.size(); ++i) {
-        if (!results[i]) {
+        if (!results[i] && results[i].error() != ErrorCode::OBJECT_NOT_FOUND) {
             LOG(ERROR) << "BatchGet failed, key=" << keys[i]
                        << ", error=" << results[i].error();
         }
@@ -234,10 +236,7 @@ std::vector<ObjectDescriptor> RealClient::get_replica_desc(
     auto query_result = client_service_->Query(key);
     if (!query_result) {
         std::vector<ObjectDescriptor> replica_list = {};
-        if (query_result.error() == ErrorCode::OBJECT_NOT_FOUND ||
-            query_result.error() == ErrorCode::REPLICA_IS_NOT_READY) {
-            LOG(ERROR) << "Object not found for key: " << key;
-        } else {
+        if (query_result.error() != ErrorCode::OBJECT_NOT_FOUND) {
             LOG(ERROR) << "Query failed for key: " << key
                        << " with error: " << toString(query_result.error());
         }
@@ -270,7 +269,7 @@ RealClient::batch_get_replica_desc(const std::vector<std::string>& keys) {
     for (size_t i = 0; i < query_results.size(); ++i) {
         if (query_results[i]) {
             replica_map[keys[i]] = *query_results[i];
-        } else {
+        } else if (query_results[i].error() != ErrorCode::OBJECT_NOT_FOUND) {
             LOG(ERROR) << "batch_get_replica failed for key: " << keys[i]
                        << " with error: " << toString(query_results[i].error());
         }
@@ -329,8 +328,10 @@ tl::expected<int64_t, ErrorCode> RealClient::getSize_internal(
     }
     auto result = client_service_->Query(key);
     if (!result) {
-        LOG(ERROR) << "Query failed, key=" << key
-                   << ", error=" << result.error();
+        if (result.error() != ErrorCode::OBJECT_NOT_FOUND) {
+            LOG(ERROR) << "Query failed, key=" << key
+                       << ", error=" << result.error();
+        }
         return tl::unexpected(result.error());
     }
     const auto& entries = *result;

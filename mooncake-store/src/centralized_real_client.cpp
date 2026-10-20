@@ -38,10 +38,8 @@ void RealClient::register_dummy_rpc_handlers() {
 
 tl::expected<std::shared_ptr<ClientServiceImpl>, ErrorCode>
 RealClient::CreateService(const ClientConfig &config) {
-    if (config.heartbeat_rpc_port != 0 ||
-        config.master_server_entry.rfind("redis://", 0) == 0) {
-        LOG(ERROR) << "Centralized setup does not support Redis discovery or a "
-                      "dedicated heartbeat port";
+    if (config.master_server_entry.rfind("redis://", 0) == 0) {
+        LOG(ERROR) << "Centralized setup does not support Redis discovery";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
     auto client = Client::Create(
@@ -135,8 +133,11 @@ std::shared_ptr<BufferHandle> RealClient::get_buffer_internal(
 
     auto result = client_service_->Get(key, client_buffer_allocator);
     if (!result) {
-        LOG(ERROR) << "Get failed for key: " << key
-                   << " with error: " << toString(result.error());
+        if (result.error() != ErrorCode::OBJECT_NOT_FOUND &&
+            result.error() != ErrorCode::REPLICA_IS_NOT_READY) {
+            LOG(ERROR) << "Get failed for key: " << key
+                       << " with error: " << toString(result.error());
+        }
         return nullptr;
     }
     return result.value();
@@ -165,7 +166,8 @@ RealClient::batch_get_buffer_internal(
     for (size_t i = 0; i < keys.size(); ++i) {
         if (results[i]) {
             final_results[i] = results[i].value();
-        } else {
+        } else if (results[i].error() != ErrorCode::OBJECT_NOT_FOUND &&
+                   results[i].error() != ErrorCode::REPLICA_IS_NOT_READY) {
             LOG(ERROR) << "BatchGet failed for key '" << keys[i]
                        << "': " << toString(results[i].error());
         }
@@ -185,7 +187,8 @@ tl::expected<int64_t, ErrorCode> RealClient::get_into_internal(
     }
 
     auto result = client_service_->Get(key, buffer, size);
-    if (!result) {
+    if (!result && result.error() != ErrorCode::OBJECT_NOT_FOUND &&
+        result.error() != ErrorCode::REPLICA_IS_NOT_READY) {
         LOG(ERROR) << "Get failed, key=" << key << ", error=" << result.error();
     }
     return result;
@@ -217,7 +220,8 @@ RealClient::batch_get_into_internal(
 
     auto results = client_service_->BatchGet(keys, buffers, sizes);
     for (size_t i = 0; i < results.size(); ++i) {
-        if (!results[i]) {
+        if (!results[i] && results[i].error() != ErrorCode::OBJECT_NOT_FOUND &&
+            results[i].error() != ErrorCode::REPLICA_IS_NOT_READY) {
             LOG(ERROR) << "BatchGet failed, key=" << keys[i]
                        << ", error=" << results[i].error();
         }
@@ -254,7 +258,8 @@ RealClient::batch_get_into_multi_buffers_internal(
     auto results = client_service_->BatchGet(keys, all_buffers, all_sizes,
                                              prefer_alloc_in_same_node);
     for (size_t i = 0; i < results.size(); ++i) {
-        if (!results[i]) {
+        if (!results[i] && results[i].error() != ErrorCode::OBJECT_NOT_FOUND &&
+            results[i].error() != ErrorCode::REPLICA_IS_NOT_READY) {
             LOG(ERROR) << "BatchGet failed, key=" << keys[i]
                        << ", error=" << results[i].error();
         }
@@ -400,8 +405,11 @@ tl::expected<int64_t, ErrorCode> RealClient::getSize_internal(
     }
     auto result = client_service_->Query(key);
     if (!result) {
-        LOG(ERROR) << "Query failed, key=" << key
-                   << ", error=" << result.error();
+        if (result.error() != ErrorCode::OBJECT_NOT_FOUND &&
+            result.error() != ErrorCode::REPLICA_IS_NOT_READY) {
+            LOG(ERROR) << "Query failed, key=" << key
+                       << ", error=" << result.error();
+        }
         return tl::unexpected(result.error());
     }
     const auto& entries = result->replicas;

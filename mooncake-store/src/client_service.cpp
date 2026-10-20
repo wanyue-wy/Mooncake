@@ -2086,8 +2086,11 @@ tl::expected<std::shared_ptr<BufferHandle>, ErrorCode> Client::Get(
     // Query to get size first
     auto query_result = QueryImpl(key);
     if (!query_result) {
-        LOG(ERROR) << "Failed to query key"
-                   << ", key:" << key << ", error:" << query_result.error();
+        if (query_result.error() != ErrorCode::OBJECT_NOT_FOUND &&
+            query_result.error() != ErrorCode::REPLICA_IS_NOT_READY) {
+            LOG(ERROR) << "Failed to query key"
+                       << ", key:" << key << ", error:" << query_result.error();
+        }
         return tl::unexpected(query_result.error());
     }
 

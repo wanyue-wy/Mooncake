@@ -1794,9 +1794,7 @@ void BindCentralizedMethods(StoreBinding& store) {
                const std::string& rdma_devices = "",
                const std::string& master_server_addr = "127.0.0.1:50051",
                const py::object& engine = py::none(),
-               bool enable_offload = false,
-               const std::string& runtime_config = "",
-               uint16_t heartbeat_rpc_port = 0, uint16_t client_rpc_port = 0) {
+               bool enable_offload = false, uint16_t client_rpc_port = 0) {
                 auto real_client = self.init_real_client();
                 std::shared_ptr<mooncake::TransferEngine> transfer_engine =
                     nullptr;
@@ -1812,8 +1810,7 @@ void BindCentralizedMethods(StoreBinding& store) {
                             : std::optional<std::string>(rdma_devices),
                         master_server_addr, global_segment_size,
                         local_buffer_size, transfer_engine, "", enable_offload,
-                        {}, runtime_config, heartbeat_rpc_port,
-                        client_rpc_port);
+                        {}, client_rpc_port);
 
                 auto ret = real_client->setup(config);
                 return ret;
@@ -1822,8 +1819,7 @@ void BindCentralizedMethods(StoreBinding& store) {
             py::arg("global_segment_size"), py::arg("local_buffer_size"),
             py::arg("protocol"), py::arg("rdma_devices"),
             py::arg("master_server_addr"), py::arg("engine") = py::none(),
-            py::arg("enable_offload") = false, py::arg("runtime_config") = "",
-            py::arg("heartbeat_rpc_port") = 0, py::arg("client_rpc_port") = 0)
+            py::arg("enable_offload") = false, py::arg("client_rpc_port") = 0)
         .def(
             "setup",
             [](MooncakeStorePyWrapper& self, const py::dict& config_dict) {
@@ -1855,9 +1851,7 @@ void BindCentralizedMethods(StoreBinding& store) {
             "  ipc_socket_path: IPC socket path.\n"
             "  enable_offload: Enable file offload (default false).\n"
             "  client_rpc_port: Native client RPC port (0 selects a free "
-            "port).\n"
-            "  runtime_config: Must be empty.\n"
-            "  heartbeat_rpc_port: Must be zero.")
+            "port).")
         .def(
             "create_copy_task",
             [](MooncakeStorePyWrapper& self, const std::string& key,

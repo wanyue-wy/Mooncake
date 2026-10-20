@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <csignal>
 #include <async_simple/Future.h>
 #include <boost/lockfree/queue.hpp>
 #include <boost/functional/hash.hpp>
@@ -379,10 +380,10 @@ class RealClient : public PyClient {
     // Dummy connection handshake: readiness and deployment architecture.
     tl::expected<DeploymentMode, ErrorCode> service_ready_internal();
 
-    tl::expected<void, ErrorCode> setup_internal(const ClientConfig& config,
-                                                 bool start_dummy_rpc = false,
-                                                 size_t rpc_thread_count = 1,
-                                                 uint16_t rpc_port = 50052);
+    // Standalone deployment enables both Dummy RPC and heartbeat monitoring.
+    tl::expected<void, ErrorCode> setup_internal(
+        const ClientConfig& config, bool enable_dummy_service = false,
+        size_t rpc_thread_count = 1, uint16_t rpc_port = 50052);
 
     tl::expected<void, ErrorCode> remove_internal(const std::string& key,
                                                   bool force = false);

@@ -38,6 +38,10 @@ struct RealClientTestHelper {
         return client.dummy_rpc_exit_.hasResult();
     }
 
+    static bool DummyMonitorRunning(const RealClient& client) {
+        return client.dummy_client_monitor_running_.load();
+    }
+
     static auto NativeClient(const RealClient& client) {
         return client.client_service_;
     }

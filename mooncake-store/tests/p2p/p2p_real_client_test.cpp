@@ -467,6 +467,38 @@ TEST_F(P2PRealClientTest, ScatterReadPreservesUnusedDestinationBytes) {
     }
 }
 
+TEST_F(P2PRealClientTest, ScatterReadRejectsMismatchedInnerSizes) {
+    ASSERT_NO_FATAL_FAILURE(StartClients(1));
+    const std::string key = "scatter_shape";
+    const std::string value = "shape validation";
+    P2PWriteRouteConfig local;
+    local.remote_weight = 0.0;
+    ASSERT_EQ(clients_[0]->put(key, value, local), 0);
+    auto buffer = clients_[0]->GetBufferAllocator()->allocate(4096);
+    ASSERT_TRUE(buffer.has_value());
+    std::memset(buffer->ptr(), 0x5a, buffer->size());
+
+    for (const auto& sizes :
+         std::vector<std::vector<size_t>>{{}, {4096, 4096}}) {
+        SCOPED_TRACE(sizes.size());
+        EXPECT_EQ(clients_[0]->batch_get_into_multi_buffers(
+                      {key}, {{buffer->ptr()}}, {sizes}, false),
+                  (std::vector<int>{toInt(ErrorCode::INVALID_PARAMS)}));
+        ExpectSentinel(*buffer);
+    }
+
+    // Reject the entire batch before writing even the valid first entry.
+    auto native = RealClientTestHelper::NativeClient(*clients_[0]);
+    auto results = native->BatchGet(
+        {key, key}, {{buffer->ptr()}, {buffer->ptr()}}, {{4096}, {}});
+    ASSERT_EQ(results.size(), 2);
+    for (const auto& result : results) {
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error(), ErrorCode::INVALID_PARAMS);
+    }
+    ExpectSentinel(*buffer);
+}
+
 TEST_F(P2PRealClientTest, PeerReadRequiresExactTransferLength) {
     ASSERT_NO_FATAL_FAILURE(StartClients(1));
     const std::string key = "peer_capacity";

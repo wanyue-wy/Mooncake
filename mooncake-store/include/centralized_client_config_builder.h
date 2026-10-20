@@ -5,9 +5,6 @@
 namespace mooncake {
 
 struct CentralizedClientConfig : RealClientConfigBase {
-    // Compatibility input; centralized setup only accepts zero.
-    uint16_t heartbeat_rpc_port = 0;
-
     // Size of global segment to mount (0 to skip)
     uint64_t global_segment_size = 0;
 
@@ -30,13 +27,7 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
         const std::shared_ptr<TransferEngine>& transfer_engine = nullptr,
         const std::string& ipc_socket_path = "", bool enable_offload = false,
         const std::map<std::string, std::string>& labels = {},
-        const std::string& runtime_config = "", uint16_t heartbeat_rpc_port = 0,
         uint16_t client_rpc_port = 0) {
-        if (!runtime_config.empty()) {
-            LOG(ERROR) << "Centralized clients do not support runtime_config";
-            throw std::invalid_argument(
-                "Centralized clients do not support runtime_config");
-        }
         CentralizedClientConfig config;
         fill_real_client_config_base(
             config, local_hostname, metadata_connstring, protocol, rdma_devices,
@@ -44,7 +35,6 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
             ipc_socket_path, labels);
         config.global_segment_size = global_segment_size;
         config.enable_offload = enable_offload;
-        config.heartbeat_rpc_port = heartbeat_rpc_port;
         config.client_rpc_port = client_rpc_port;
         return config;
     }
@@ -53,9 +43,6 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
         const std::unordered_map<std::string, std::string>& config) {
         auto devices = get_config_str(config, DictCommon::kRdmaDevices);
         auto client_port = get_config_port(config, "client_rpc_port");
-        auto heartbeat_port = static_cast<uint16_t>(
-            get_config_size(config, DictCentralized::kHeartbeatRpcPort,
-                            DictCentralized::kDefaultHeartbeatRpcPort));
         return build_centralized_real_client(
             get_config_str(config, DictCommon::kLocalHostname),
             get_config_str(config, DictCommon::kMetadataServer),
@@ -70,9 +57,7 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
             get_config_size(config, DictCommon::kLocalBufferSize,
                             DictCommon::kDefaultLocalBufferSize),
             nullptr, get_config_str(config, DictCommon::kIpcSocketPath),
-            get_config_bool(config, "enable_offload", false), {},
-            get_config_str(config, DictCentralized::kRuntimeConfig),
-            heartbeat_port, client_port);
+            get_config_bool(config, "enable_offload", false), {}, client_port);
     }
 
    private:
@@ -81,10 +66,6 @@ class CentralizedClientConfigBuilder : private ClientConfigBuilder {
         static constexpr const char* kGlobalSegmentSize = "global_segment_size";
         // Defaults
         static constexpr size_t kDefaultGlobalSegmentSize = 1024 * 1024 * 16;
-
-        static constexpr const char* kRuntimeConfig = "runtime_config";
-        static constexpr const char* kHeartbeatRpcPort = "heartbeat_rpc_port";
-        static constexpr uint16_t kDefaultHeartbeatRpcPort = 0;
     };
 
     static uint16_t get_config_port(
