@@ -18,6 +18,7 @@
 #include "p2p/client/v1/data_manager_v1.h"
 #include "p2p/client/tiered_cache/tiered_backend.h"
 #include "../utils/common.h"
+#include "topology.h"
 #include "transfer_engine.h"
 #include "types.h"
 #include "utils.h"
@@ -1578,44 +1579,65 @@ TEST_F(DataManagerTest, TransferDataToRemoteDestBuffersTooSmall) {
               << static_cast<int>(transfer_result.error());
 }
 
-// Test real RDMA loopback transfer (requires RDMA hardware and metadata server)
+namespace {
+
+// Declare this before the DataManager so fatal assertions also release its
+// registrations only after the DataManager has finished using the buffers.
+struct RealRdmaResources {
+    void Init(size_t buffer_size) {
+        engine = std::make_shared<TransferEngine>(false);
+        auto topology = engine->getLocalTopology();
+        ASSERT_EQ(topology->discover(), 0);
+        if (topology->getHcaList().empty()) {
+            LOG(WARNING) << "Skipping real RDMA test: no accessible RDMA device "
+                            "with an active port";
+            GTEST_SKIP() << "No accessible RDMA device with an active port";
+        }
+
+        ASSERT_EQ(engine->init("P2PHANDSHAKE", "127.0.0.1:0"), 0);
+        // Install RDMA explicitly so these tests cannot fall back to TCP.
+        ASSERT_NE(engine->installTransport("rdma", nullptr), nullptr);
+        LOG(INFO) << "Real RDMA test endpoint: " << engine->getLocalIpAndPort();
+
+        buffer = allocate_buffer_allocator_memory(buffer_size);
+        ASSERT_NE(buffer, nullptr) << "Failed to allocate RDMA test buffer";
+        const int result =
+            engine->registerLocalMemory(buffer, buffer_size, "cpu:0");
+        registered = result == 0;
+        ASSERT_EQ(result, 0) << "Failed to register RDMA test buffer";
+    }
+
+    ~RealRdmaResources() {
+        if (registered) {
+            const int result = engine->unregisterLocalMemory(buffer);
+            if (result != 0) {
+                LOG(ERROR) << "Failed to unregister RDMA test buffer: " << result;
+            }
+            EXPECT_EQ(result, 0);
+        }
+        engine.reset();
+        if (buffer) free_memory("", buffer);
+    }
+
+    std::shared_ptr<TransferEngine> engine;
+    void* buffer = nullptr;
+    bool registered = false;
+};
+
+}  // namespace
+
+// Test real RDMA loopback transfer (requires usable RDMA hardware)
 // This test initializes TransferEngine with RDMA support and performs actual
 // RDMA data transfer on the same node
 TEST_F(DataManagerTest, RealRDMALoopbackTransfer) {
-    // Check environment variables
-    const char* metadata_addr = std::getenv("MC_METADATA_ADDR");
-    const char* local_hostname = std::getenv("MC_LOCAL_HOSTNAME");
-
-    if (!metadata_addr || !local_hostname) {
-        GTEST_SKIP() << "Skipping real RDMA test: MC_METADATA_ADDR and "
-                        "MC_LOCAL_HOSTNAME environment variables not set. "
-                        "Set these to enable real RDMA transfer testing.";
-    }
-
-    LOG(INFO) << "=== Starting Real RDMA Loopback Transfer Test ===";
-    LOG(INFO) << "Metadata address: " << metadata_addr;
-    LOG(INFO) << "Local hostname: " << local_hostname;
-
-    // Create TransferEngine with RDMA support
-    auto rdma_transfer_engine = std::make_shared<TransferEngine>(true);
-    int init_result =
-        rdma_transfer_engine->init(metadata_addr, local_hostname, "", 12350);
-
-    if (init_result != 0) {
-        GTEST_SKIP() << "Failed to initialize TransferEngine (error code: "
-                     << init_result
-                     << "). RDMA environment may not be configured.";
-    }
-    LOG(INFO) << "TransferEngine initialized successfully";
-
     // Allocate memory for RDMA transfer (single buffer, use different regions)
     // Note: allocate_buffer_allocator_memory requires minimum 16MB
     const size_t test_size = 16 * 1024 * 1024;  // 16MB (minimum required)
-    void* rdma_buffer = allocate_buffer_allocator_memory(test_size * 2);
-
-    if (!rdma_buffer) {
-        GTEST_SKIP() << "Failed to allocate memory for RDMA test";
-    }
+    RealRdmaResources resources;
+    resources.Init(test_size * 2);
+    if (HasFatalFailure() || IsSkipped()) return;
+    auto rdma_transfer_engine = resources.engine;
+    void* rdma_buffer = resources.buffer;
 
     // Use first half as source reference, second half as destination
     void* dst_area = static_cast<char*>(rdma_buffer) + test_size;
@@ -1624,17 +1646,6 @@ TEST_F(DataManagerTest, RealRDMALoopbackTransfer) {
     std::memset(dst_area, 0, test_size);
 
     LOG(INFO) << "Allocated RDMA buffer (" << test_size * 2 << " bytes)";
-
-    // Register memory with TransferEngine using "cpu:0" as location hint
-    int reg_result = rdma_transfer_engine->registerLocalMemory(
-        rdma_buffer, test_size * 2, "cpu:0");
-
-    if (reg_result != 0) {
-        free_memory("", rdma_buffer);
-        GTEST_SKIP() << "Failed to register memory with TransferEngine. "
-                     << "RDMA device may not be available.";
-    }
-    LOG(INFO) << "Memory registered for RDMA access";
 
     // Create TieredBackend and DataManagerV1 with RDMA-enabled TransferEngine
     std::string json_config_str = R"({
@@ -1678,10 +1689,9 @@ TEST_F(DataManagerTest, RealRDMALoopbackTransfer) {
     ASSERT_TRUE(rdma_data_manager->Exist(key)) << "Key not found after Put";
     LOG(INFO) << "Data stored in DataManagerV1";
 
-    // Use hostname as segment name (this is how TransferEngine registers
-    // segments) The destination address must be within the registered memory
-    // region
-    std::string segment_name = std::string(local_hostname);
+    // P2PHANDSHAKE assigns the endpoint during initialization. The destination
+    // must be within the registered memory region.
+    std::string segment_name = rdma_transfer_engine->getLocalIpAndPort();
     std::vector<RemoteBufferDesc> dest_buffers = {
         {segment_name, reinterpret_cast<uint64_t>(dst_area), test_size}};
 
@@ -1692,14 +1702,8 @@ TEST_F(DataManagerTest, RealRDMALoopbackTransfer) {
     // Perform RDMA transfer via DataManagerV1
     auto transfer_result = rdma_data_manager->ReadRemoteData(key, dest_buffers);
 
-    if (!transfer_result.has_value()) {
-        LOG(WARNING) << "RDMA transfer failed: "
-                     << toString(transfer_result.error());
-        rdma_transfer_engine->unregisterLocalMemory(rdma_buffer);
-        free_memory("", rdma_buffer);
-        GTEST_SKIP()
-            << "RDMA transfer failed, may need additional configuration";
-    }
+    ASSERT_TRUE(transfer_result.has_value())
+        << "RDMA transfer failed: " << toString(transfer_result.error());
 
     LOG(INFO) << "RDMA transfer completed!";
 
@@ -1722,10 +1726,6 @@ TEST_F(DataManagerTest, RealRDMALoopbackTransfer) {
 
     EXPECT_TRUE(data_matches) << "RDMA transferred data does not match source";
 
-    // Cleanup
-    rdma_transfer_engine->unregisterLocalMemory(rdma_buffer);
-    free_memory("", rdma_buffer);
-
     LOG(INFO) << "=== Real RDMA Loopback Transfer Test Completed ===";
 }
 
@@ -1733,32 +1733,6 @@ TEST_F(DataManagerTest, RealRDMALoopbackTransfer) {
 // This test verifies batch submission and unified waiting with multiple
 // segments
 TEST_F(DataManagerTest, RealRDMAMultiBatchTransfer) {
-    // Check environment variables
-    const char* metadata_addr = std::getenv("MC_METADATA_ADDR");
-    const char* local_hostname = std::getenv("MC_LOCAL_HOSTNAME");
-
-    if (!metadata_addr || !local_hostname) {
-        GTEST_SKIP() << "Skipping real RDMA test: MC_METADATA_ADDR and "
-                        "MC_LOCAL_HOSTNAME environment variables not set. "
-                        "Set these to enable real RDMA transfer testing.";
-    }
-
-    LOG(INFO) << "=== Starting Real RDMA Multi-Batch Partial Transfer Test ===";
-    LOG(INFO) << "Metadata address: " << metadata_addr;
-    LOG(INFO) << "Local hostname: " << local_hostname;
-
-    // Create TransferEngine with RDMA support
-    auto rdma_transfer_engine = std::make_shared<TransferEngine>(true);
-    int init_result =
-        rdma_transfer_engine->init(metadata_addr, local_hostname, "", 12350);
-
-    if (init_result != 0) {
-        GTEST_SKIP() << "Failed to initialize TransferEngine (error code: "
-                     << init_result
-                     << "). RDMA environment may not be configured.";
-    }
-    LOG(INFO) << "TransferEngine initialized successfully";
-
     // Allocate memory for RDMA transfer - larger buffer to accommodate multiple
     // segments
     // Note: allocate_buffer_allocator_memory requires minimum 16MB
@@ -1766,11 +1740,11 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchTransfer) {
     const int num_segments = 4;                   // 4 segments
     const size_t total_buffer_size =
         segment_size * num_segments * 2;  // Double for source + dest
-    void* rdma_buffer = allocate_buffer_allocator_memory(total_buffer_size);
-
-    if (!rdma_buffer) {
-        GTEST_SKIP() << "Failed to allocate memory for RDMA test";
-    }
+    RealRdmaResources resources;
+    resources.Init(total_buffer_size);
+    if (HasFatalFailure() || IsSkipped()) return;
+    auto rdma_transfer_engine = resources.engine;
+    void* rdma_buffer = resources.buffer;
 
     // Use first half as source reference, second half as destination areas
     void* src_base = rdma_buffer;
@@ -1784,17 +1758,6 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchTransfer) {
               << reinterpret_cast<uint64_t>(src_base) << std::dec;
     LOG(INFO) << "Destination base: 0x" << std::hex
               << reinterpret_cast<uint64_t>(dst_base) << std::dec;
-
-    // Register memory with TransferEngine using "cpu:0" as location hint
-    int reg_result = rdma_transfer_engine->registerLocalMemory(
-        rdma_buffer, total_buffer_size, "cpu:0");
-
-    if (reg_result != 0) {
-        free_memory("", rdma_buffer);
-        GTEST_SKIP() << "Failed to register memory with TransferEngine. "
-                     << "RDMA device may not be available.";
-    }
-    LOG(INFO) << "Memory registered for RDMA access";
 
     // Create TieredBackend and DataManagerV1 with RDMA-enabled TransferEngine
     std::string json_config_str = R"({
@@ -1841,9 +1804,8 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchTransfer) {
     LOG(INFO) << "Data stored in DataManagerV1 (" << total_data_size
               << " bytes)";
 
-    // Use hostname as segment name (this is how TransferEngine registers
-    // segments)
-    std::string segment_name = std::string(local_hostname);
+    // Use the endpoint assigned by P2PHANDSHAKE.
+    std::string segment_name = rdma_transfer_engine->getLocalIpAndPort();
 
     // Create multiple destination buffers across different memory regions
     // This simulates scatter-gather with multiple batches
@@ -1865,14 +1827,8 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchTransfer) {
     // This will submit all batches first, then wait for all to complete
     auto transfer_result = rdma_data_manager->ReadRemoteData(key, dest_buffers);
 
-    if (!transfer_result.has_value()) {
-        LOG(WARNING) << "RDMA multi-batch transfer failed: "
-                     << toString(transfer_result.error());
-        rdma_transfer_engine->unregisterLocalMemory(rdma_buffer);
-        free_memory("", rdma_buffer);
-        GTEST_SKIP()
-            << "RDMA transfer failed, may need additional configuration";
-    }
+    ASSERT_TRUE(transfer_result.has_value())
+        << "RDMA transfer failed: " << toString(transfer_result.error());
 
     LOG(INFO) << "RDMA multi-batch transfer completed!";
 
@@ -1926,67 +1882,26 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchTransfer) {
     EXPECT_TRUE(all_segments_match)
         << "RDMA transferred data does not match source for all segments";
 
-    // Cleanup
-    rdma_transfer_engine->unregisterLocalMemory(rdma_buffer);
-    free_memory("", rdma_buffer);
-
     LOG(INFO) << "=== Real RDMA Multi-Batch Transfer Test Completed ===";
 }
 
 // Test ReadRemoteData with invalid segment - should fail
 // This test verifies that any segment failure results in error
 TEST_F(DataManagerTest, RealRDMAMultiBatchPartialFailure) {
-    // Check environment variables
-    const char* metadata_addr = std::getenv("MC_METADATA_ADDR");
-    const char* local_hostname = std::getenv("MC_LOCAL_HOSTNAME");
-
-    if (!metadata_addr || !local_hostname) {
-        GTEST_SKIP() << "Skipping real RDMA test: MC_METADATA_ADDR and "
-                        "MC_LOCAL_HOSTNAME environment variables not set. "
-                        "Set these to enable real RDMA transfer testing.";
-    }
-
-    LOG(INFO) << "=== Starting Real RDMA Multi-Batch Partial Failure Test ===";
-    LOG(INFO) << "Metadata address: " << metadata_addr;
-    LOG(INFO) << "Local hostname: " << local_hostname;
-
-    // Create TransferEngine with RDMA support
-    auto rdma_transfer_engine = std::make_shared<TransferEngine>(true);
-    int init_result =
-        rdma_transfer_engine->init(metadata_addr, local_hostname, "", 12350);
-
-    if (init_result != 0) {
-        GTEST_SKIP() << "Failed to initialize TransferEngine (error code: "
-                     << init_result
-                     << "). RDMA environment may not be configured.";
-    }
-    LOG(INFO) << "TransferEngine initialized successfully";
-
     // Allocate memory for RDMA transfer
     const size_t segment_size = 4 * 1024 * 1024;  // 4MB per segment
     const int num_segments = 3;  // 3 segments: 2 valid, 1 invalid
     const size_t total_buffer_size = segment_size * num_segments * 2;
-    void* rdma_buffer = allocate_buffer_allocator_memory(total_buffer_size);
-
-    if (!rdma_buffer) {
-        GTEST_SKIP() << "Failed to allocate memory for RDMA test";
-    }
+    RealRdmaResources resources;
+    resources.Init(total_buffer_size);
+    if (HasFatalFailure() || IsSkipped()) return;
+    auto rdma_transfer_engine = resources.engine;
+    void* rdma_buffer = resources.buffer;
 
     void* dst_base = static_cast<char*>(rdma_buffer) + (total_buffer_size / 2);
     std::memset(dst_base, 0, total_buffer_size / 2);
 
     LOG(INFO) << "Allocated RDMA buffer (" << total_buffer_size << " bytes)";
-
-    // Register memory with TransferEngine
-    int reg_result = rdma_transfer_engine->registerLocalMemory(
-        rdma_buffer, total_buffer_size, "cpu:0");
-
-    if (reg_result != 0) {
-        free_memory("", rdma_buffer);
-        GTEST_SKIP() << "Failed to register memory with TransferEngine. "
-                     << "RDMA device may not be available.";
-    }
-    LOG(INFO) << "Memory registered for RDMA access";
 
     // Create TieredBackend and DataManagerV1
     std::string json_config_str = R"({
@@ -2031,8 +1946,9 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchPartialFailure) {
     LOG(INFO) << "Data stored in DataManagerV1 (" << total_data_size
               << " bytes)";
 
-    std::string valid_segment = std::string(local_hostname);
-    std::string invalid_segment = "non_existent_segment_12345";
+    std::string valid_segment = rdma_transfer_engine->getLocalIpAndPort();
+    // Port zero cannot be a listening peer; keep the failure local.
+    std::string invalid_segment = "127.0.0.1:0";
 
     // Create destination buffers: 2 valid segments, 1 invalid segment
     // This simulates partial batch failure scenario
@@ -2055,12 +1971,8 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchPartialFailure) {
 
     auto transfer_result = rdma_data_manager->ReadRemoteData(key, dest_buffers);
 
-    EXPECT_FALSE(transfer_result.has_value());
+    ASSERT_FALSE(transfer_result.has_value());
     EXPECT_EQ(transfer_result.error(), ErrorCode::TRANSFER_FAIL);
-
-    // Cleanup
-    rdma_transfer_engine->unregisterLocalMemory(rdma_buffer);
-    free_memory("", rdma_buffer);
 
     LOG(INFO) << "=== Real RDMA Multi-Batch Partial Failure Test Completed ===";
 }
@@ -2068,43 +1980,17 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchPartialFailure) {
 // Test WriteRemoteData with multiple batch transfer
 // This test verifies batch submission and unified waiting for WriteRemoteData
 TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteData) {
-    // Check environment variables
-    const char* metadata_addr = std::getenv("MC_METADATA_ADDR");
-    const char* local_hostname = std::getenv("MC_LOCAL_HOSTNAME");
-
-    if (!metadata_addr || !local_hostname) {
-        GTEST_SKIP() << "Skipping real RDMA test: MC_METADATA_ADDR and "
-                        "MC_LOCAL_HOSTNAME environment variables not set. "
-                        "Set these to enable real RDMA transfer testing.";
-    }
-
-    LOG(INFO) << "=== Starting Real RDMA Multi-Batch WriteRemoteData Test ===";
-    LOG(INFO) << "Metadata address: " << metadata_addr;
-    LOG(INFO) << "Local hostname: " << local_hostname;
-
-    // Create TransferEngine with RDMA support
-    auto rdma_transfer_engine = std::make_shared<TransferEngine>(true);
-    int init_result =
-        rdma_transfer_engine->init(metadata_addr, local_hostname, "", 12350);
-
-    if (init_result != 0) {
-        GTEST_SKIP() << "Failed to initialize TransferEngine (error code: "
-                     << init_result
-                     << "). RDMA environment may not be configured.";
-    }
-    LOG(INFO) << "TransferEngine initialized successfully";
-
     // Allocate memory for RDMA transfer - larger buffer to accommodate multiple
     // segments
     const size_t segment_size = 4 * 1024 * 1024;  // 4MB per segment
     const int num_segments = 4;                   // 4 segments
     const size_t total_buffer_size =
         segment_size * num_segments * 2;  // Double for source + dest
-    void* rdma_buffer = allocate_buffer_allocator_memory(total_buffer_size);
-
-    if (!rdma_buffer) {
-        GTEST_SKIP() << "Failed to allocate memory for RDMA test";
-    }
+    RealRdmaResources resources;
+    resources.Init(total_buffer_size);
+    if (HasFatalFailure() || IsSkipped()) return;
+    auto rdma_transfer_engine = resources.engine;
+    void* rdma_buffer = resources.buffer;
 
     // Use first half as source data, second half as destination areas
     void* src_base = rdma_buffer;
@@ -2122,17 +2008,6 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteData) {
               << reinterpret_cast<uint64_t>(src_base) << std::dec;
     LOG(INFO) << "Destination base: 0x" << std::hex
               << reinterpret_cast<uint64_t>(dst_base) << std::dec;
-
-    // Register memory with TransferEngine using "cpu:0" as location hint
-    int reg_result = rdma_transfer_engine->registerLocalMemory(
-        rdma_buffer, total_buffer_size, "cpu:0");
-
-    if (reg_result != 0) {
-        free_memory("", rdma_buffer);
-        GTEST_SKIP() << "Failed to register memory with TransferEngine. "
-                     << "RDMA device may not be available.";
-    }
-    LOG(INFO) << "Memory registered for RDMA access";
 
     // Create TieredBackend and DataManagerV1 with RDMA-enabled TransferEngine
     std::string json_config_str = R"({
@@ -2161,9 +2036,8 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteData) {
         local_transfer_config);
     LOG(INFO) << "DataManagerV1 created with RDMA-enabled TransferEngine";
 
-    // Use hostname as segment name (this is how TransferEngine registers
-    // segments)
-    std::string segment_name = std::string(local_hostname);
+    // Use the endpoint assigned by P2PHANDSHAKE.
+    std::string segment_name = rdma_transfer_engine->getLocalIpAndPort();
 
     // Create multiple source buffers across different memory regions
     // This simulates scatter-gather with multiple batches for WriteRemoteData
@@ -2186,14 +2060,8 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteData) {
     // This will submit all batches first, then wait for all to complete
     auto write_result = rdma_data_manager->WriteRemoteData(key, src_buffers);
 
-    if (!write_result.has_value()) {
-        LOG(WARNING) << "RDMA multi-batch WriteRemoteData failed: "
-                     << toString(write_result.error());
-        rdma_transfer_engine->unregisterLocalMemory(rdma_buffer);
-        free_memory("", rdma_buffer);
-        GTEST_SKIP()
-            << "RDMA transfer failed, may need additional configuration";
-    }
+    ASSERT_TRUE(write_result.has_value())
+        << "RDMA write failed: " << toString(write_result.error());
 
     LOG(INFO) << "RDMA multi-batch WriteRemoteData completed!";
 
@@ -2228,52 +2096,21 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteData) {
     EXPECT_TRUE(all_segments_match)
         << "RDMA written data does not match source pattern";
 
-    // Cleanup
-    rdma_transfer_engine->unregisterLocalMemory(rdma_buffer);
-    free_memory("", rdma_buffer);
-
     LOG(INFO) << "=== Real RDMA Multi-Batch WriteRemoteData Test Completed ===";
 }
 
 // Test WriteRemoteData with invalid segment - should fail and not commit
 // This test verifies that any segment failure results in error and no commit
 TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteDataPartialFailure) {
-    // Check environment variables
-    const char* metadata_addr = std::getenv("MC_METADATA_ADDR");
-    const char* local_hostname = std::getenv("MC_LOCAL_HOSTNAME");
-
-    if (!metadata_addr || !local_hostname) {
-        GTEST_SKIP() << "Skipping real RDMA test: MC_METADATA_ADDR and "
-                        "MC_LOCAL_HOSTNAME environment variables not set. "
-                        "Set these to enable real RDMA transfer testing.";
-    }
-
-    LOG(INFO) << "=== Starting Real RDMA Multi-Batch WriteRemoteData Partial "
-                 "Failure Test ===";
-    LOG(INFO) << "Metadata address: " << metadata_addr;
-    LOG(INFO) << "Local hostname: " << local_hostname;
-
-    // Create TransferEngine with RDMA support
-    auto rdma_transfer_engine = std::make_shared<TransferEngine>(true);
-    int init_result =
-        rdma_transfer_engine->init(metadata_addr, local_hostname, "", 12350);
-
-    if (init_result != 0) {
-        GTEST_SKIP() << "Failed to initialize TransferEngine (error code: "
-                     << init_result
-                     << "). RDMA environment may not be configured.";
-    }
-    LOG(INFO) << "TransferEngine initialized successfully";
-
     const size_t segment_size = 4 * 1024 * 1024;  // 4MB per segment
     const int num_segments = 3;                   // 2 valid + 1 invalid
     const size_t total_buffer_size =
         segment_size * num_segments * 2;  // Double for source + dest
-    void* rdma_buffer = allocate_buffer_allocator_memory(total_buffer_size);
-
-    if (!rdma_buffer) {
-        GTEST_SKIP() << "Failed to allocate memory for RDMA test";
-    }
+    RealRdmaResources resources;
+    resources.Init(total_buffer_size);
+    if (HasFatalFailure() || IsSkipped()) return;
+    auto rdma_transfer_engine = resources.engine;
+    void* rdma_buffer = resources.buffer;
 
     void* src_base = rdma_buffer;
     const std::string pattern = "RDMA_WRITE_PARTIAL_FAIL_PATTERN_";
@@ -2284,17 +2121,6 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteDataPartialFailure) {
     }
 
     LOG(INFO) << "Allocated RDMA buffer (" << total_buffer_size << " bytes)";
-
-    // Register memory with TransferEngine
-    int reg_result = rdma_transfer_engine->registerLocalMemory(
-        rdma_buffer, total_buffer_size, "cpu:0");
-
-    if (reg_result != 0) {
-        free_memory("", rdma_buffer);
-        GTEST_SKIP() << "Failed to register memory with TransferEngine. "
-                     << "RDMA device may not be available.";
-    }
-    LOG(INFO) << "Memory registered for RDMA access";
 
     // Create TieredBackend and DataManagerV1
     std::string json_config_str = R"({
@@ -2323,8 +2149,9 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteDataPartialFailure) {
         local_transfer_config);
     LOG(INFO) << "DataManagerV1 created with RDMA-enabled TransferEngine";
 
-    std::string valid_segment = std::string(local_hostname);
-    std::string invalid_segment = "non_existent_segment_12345";
+    std::string valid_segment = rdma_transfer_engine->getLocalIpAndPort();
+    // Port zero cannot be a listening peer; keep the failure local.
+    std::string invalid_segment = "127.0.0.1:0";
     const std::string key = "rdma_partial_failure_write_test_key";
 
     std::vector<RemoteBufferDesc> src_buffers = {
@@ -2345,15 +2172,11 @@ TEST_F(DataManagerTest, RealRDMAMultiBatchWriteRemoteDataPartialFailure) {
 
     auto write_result = rdma_data_manager->WriteRemoteData(key, src_buffers);
 
-    EXPECT_FALSE(write_result.has_value());
+    ASSERT_FALSE(write_result.has_value());
     EXPECT_EQ(write_result.error(), ErrorCode::TRANSFER_FAIL);
 
     // Verify key was NOT committed (any segment failure should prevent commit)
     EXPECT_FALSE(rdma_data_manager->Exist(key));
-
-    // Cleanup
-    rdma_transfer_engine->unregisterLocalMemory(rdma_buffer);
-    free_memory("", rdma_buffer);
 
     LOG(INFO)
         << "=== Real RDMA Multi-Batch WriteRemoteData Partial Failure Test "
