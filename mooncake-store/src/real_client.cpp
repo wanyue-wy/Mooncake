@@ -357,13 +357,6 @@ tl::expected<void, ErrorCode> RealClient::tearDownAll_internal() {
 
 int RealClient::tearDownAll() { return to_py_ret(tearDownAll_internal()); }
 
-std::shared_ptr<RealClient::ShmContext> RealClient::find_shm_context(
-    const UUID& client_id) {
-    SharedMutexLocker lock(&dummy_client_mutex_, shared_lock);
-    auto it = shm_contexts_.find(client_id);
-    return it == shm_contexts_.end() ? nullptr : it->second;
-}
-
 tl::expected<void, ErrorCode> RealClient::put_internal(
     const std::string& key, std::span<const char> value,
     const std::optional<WriteConfig>& config,
@@ -400,6 +393,13 @@ tl::expected<void, ErrorCode> RealClient::put_internal(
     }
 
     return {};
+}
+
+std::shared_ptr<RealClient::ShmContext> RealClient::find_shm_context(
+    const UUID& client_id) {
+    SharedMutexLocker lock(&dummy_client_mutex_, shared_lock);
+    auto it = shm_contexts_.find(client_id);
+    return it == shm_contexts_.end() ? nullptr : it->second;
 }
 
 tl::expected<void, ErrorCode> RealClient::put_dummy_helper(

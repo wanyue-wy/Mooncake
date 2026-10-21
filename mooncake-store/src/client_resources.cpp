@@ -160,6 +160,11 @@ ErrorCode ClientResources::InitTransferEngine(
 
     bool auto_discover = false;
     if (!use_tent_) {
+        if (protocol != "tcp" && protocol != "rdma" && protocol != "ascend" &&
+            protocol != "cxl") {
+            LOG(ERROR) << "unsupported_protocol protocol=" << protocol;
+            return ErrorCode::INVALID_PARAMS;
+        }
         // Get auto_discover and filters from env (non-TENT only)
         std::optional<bool> env_auto_discover = get_auto_discover();
         if (env_auto_discover.has_value()) {
@@ -387,9 +392,6 @@ ErrorCode ClientResources::InnerInitTransferEngine(
                 LOG(ERROR) << "Failed to install CXL transport";
                 return ErrorCode::INTERNAL_ERROR;
             }
-        } else {
-            LOG(ERROR) << "unsupported_protocol protocol=" << protocol;
-            return ErrorCode::INVALID_PARAMS;
         }
     }
 
@@ -405,6 +407,10 @@ tl::expected<void, ErrorCode> ClientResources::RegisterLocalMemory(
                    << ", length=" << length << ", location=" << location
                    << ", error=" << toString(check_result.error());
         return tl::unexpected(check_result.error());
+    }
+    if (!transfer_engine_) {
+        LOG(ERROR) << "Memory registration requires a transfer engine";
+        return tl::unexpected(ErrorCode::INVALID_PARAMS);
     }
     if (transfer_engine_->registerLocalMemory(
             addr, length, location, remote_accessible, update_metadata) != 0) {
