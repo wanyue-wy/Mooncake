@@ -575,8 +575,8 @@ class RealClient : public PyClient {
     // Only setup/teardown holds this mutex.
     std::mutex lifecycle_mutex_;
     enum class State { UNINITIALIZED, READY, CLOSING, CLOSED };
-    // Publishes lifecycle state for status queries and business admission
-    // without taking mutex
+    // Publishes lifecycle state for status queries and deployment management
+    // without taking the lifecycle mutex.
     std::atomic<State> state_{State::UNINITIALIZED};
     std::unique_ptr<coro_rpc::coro_rpc_server> dummy_rpc_server_;
     async_simple::Future<coro_rpc::err_code> dummy_rpc_exit_{nullptr};

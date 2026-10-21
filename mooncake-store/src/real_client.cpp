@@ -405,12 +405,6 @@ std::shared_ptr<RealClient::ShmContext> RealClient::find_shm_context(
 tl::expected<void, ErrorCode> RealClient::put_dummy_helper(
     const std::string& key, std::span<const char> value,
     const std::optional<WriteConfig>& config, const UUID& client_id) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "put_dummy_helper failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
@@ -501,12 +495,6 @@ tl::expected<void, ErrorCode> RealClient::put_batch_dummy_helper(
     const std::vector<std::string>& keys,
     const std::vector<std::span<const char>>& values,
     const std::optional<WriteConfig>& config, const UUID& client_id) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "put_batch_dummy_helper failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
@@ -596,12 +584,6 @@ tl::expected<void, ErrorCode> RealClient::put_parts_dummy_helper(
     const std::string& key, std::vector<std::span<const char>> values,
     const std::optional<WriteConfig>& config, const UUID& client_id,
     WriteOperation operation) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "put_parts_dummy_helper failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
@@ -623,12 +605,6 @@ int RealClient::put_parts(const std::string& key,
 
 tl::expected<void, ErrorCode> RealClient::remove_internal(
     const std::string& key, bool force) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "remove_internal failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -648,12 +624,6 @@ int RealClient::remove(const std::string& key, bool force) {
 
 tl::expected<long, ErrorCode> RealClient::removeByRegex_internal(
     const std::string& str, bool force) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "removeByRegex_internal failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -671,12 +641,6 @@ long RealClient::removeByRegex(const std::string& str, bool force) {
 }
 
 tl::expected<int64_t, ErrorCode> RealClient::removeAll_internal(bool force) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "removeAll_internal failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -703,12 +667,6 @@ int RealClient::removeLocal(const std::string& key) {
 
 tl::expected<bool, ErrorCode> RealClient::isExist_internal(
     const std::string& key) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "isExist_internal failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return tl::unexpected(ErrorCode::INVALID_PARAMS);
@@ -1043,12 +1001,6 @@ tl::expected<std::tuple<uint64_t, size_t>, ErrorCode>
 RealClient::get_buffer_info_dummy_helper(
     const std::string& key, const std::optional<ReadConfig>& config,
     const UUID& client_id) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "get_buffer_info_dummy_helper failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return tl::unexpected(ErrorCode::SHUTTING_DOWN);
-    }
     auto context_ptr = find_shm_context(client_id);
     if (!context_ptr) {
         LOG(ERROR) << "client_id=" << client_id << ", error=shm_not_mapped";
@@ -1154,13 +1106,6 @@ RealClient::batch_put_from_dummy_helper(
     const std::vector<uint64_t>& dummy_buffers,
     const std::vector<size_t>& sizes, const std::optional<WriteConfig>& config,
     const UUID& client_id, WriteOperation operation) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "batch_put_from_dummy_helper failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return std::vector<tl::expected<void, ErrorCode>>(
-            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
-    }
     if (keys.size() != dummy_buffers.size() || keys.size() != sizes.size()) {
         LOG(ERROR) << "Input vector sizes mismatch: keys=" << keys.size()
                    << ", buffers=" << dummy_buffers.size()
@@ -1363,13 +1308,6 @@ RealClient::batch_get_into_dummy_helper(
     const std::vector<uint64_t>& dummy_buffers,
     const std::vector<size_t>& sizes, const std::optional<ReadConfig>& config,
     const UUID& client_id) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "batch_get_into_dummy_helper failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return std::vector<tl::expected<int64_t, ErrorCode>>(
-            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
-    }
     if (keys.size() != dummy_buffers.size() || keys.size() != sizes.size()) {
         LOG(ERROR) << "Input vector sizes mismatch: keys=" << keys.size()
                    << ", buffers=" << dummy_buffers.size()
@@ -1433,13 +1371,6 @@ RealClient::batch_get_into_dummy_helper(
 
 std::vector<tl::expected<bool, ErrorCode>> RealClient::batchIsExist_internal(
     const std::vector<std::string>& keys) {
-    const auto state = state_.load(std::memory_order_acquire);
-    if (state == State::CLOSING || state == State::CLOSED) {
-        LOG(ERROR) << "batchIsExist_internal failed, error="
-                   << ErrorCode::SHUTTING_DOWN;
-        return std::vector<tl::expected<bool, ErrorCode>>(
-            keys.size(), tl::unexpected(ErrorCode::SHUTTING_DOWN));
-    }
     if (!client_service_) {
         LOG(ERROR) << "Client is not initialized";
         return std::vector<tl::expected<bool, ErrorCode>>(

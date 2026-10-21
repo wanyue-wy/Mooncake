@@ -494,6 +494,8 @@ TEST_F(RealClientDeploymentTest, DummyRequestsDoNotWaitForLifecycleWriter) {
     EXPECT_TRUE(ping_while_locked.get());
     if (!writer.owns_lock()) writer.lock();
     RealClientTestHelper::CloseAdmission(*owner.client);
+    // Native service owns business admission during shutdown.
+    RealClientTestHelper::NativeClient(*owner.client)->Stop();
     auto requests = std::async(std::launch::async, [&] {
         EXPECT_NE(owner.client->deployment_mode(), DeploymentMode::UNKNOWN);
         EXPECT_FALSE(owner.client->is_initialized());
@@ -608,6 +610,8 @@ void CheckDummyRpcDrain(ClientConfig config, const WriteConfig& write_config,
                         bool after_native) {
     SharedFile file;
     ASSERT_NO_FATAL_FAILURE(file.Init());
+    SharedFile local_buffer;
+    ASSERT_NO_FATAL_FAILURE(local_buffer.Init());
     ClientOwner owner;
     ASSERT_EQ(owner.client->setup(config), 0);
     const auto id = generate_uuid();
@@ -615,6 +619,10 @@ void CheckDummyRpcDrain(ClientConfig config, const WriteConfig& write_config,
     ASSERT_GE(fd, 0);
     ASSERT_TRUE(RealClientTestHelper::MapShm(
         *owner.client, fd, 0x100000, SharedFile::kSize, false, id));
+    const int local_fd = dup(local_buffer.fd());
+    ASSERT_GE(local_fd, 0);
+    ASSERT_TRUE(RealClientTestHelper::MapShm(
+        *owner.client, local_fd, 0x200000, SharedFile::kSize, true, id));
     const std::string value = "drain the complete Dummy handler";
     ASSERT_EQ(owner.client->put("drain_key", value, write_config), 0);
     auto context = RealClientTestHelper::FindShmContext(*owner.client, id);
@@ -673,7 +681,49 @@ void CheckDummyRpcDrain(ClientConfig config, const WriteConfig& write_config,
     EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), context);
     {
         SharedMutexLocker lock(&context->mutex_, shared_lock);
-        EXPECT_FALSE(context->mapped_shms_.empty());
+        EXPECT_EQ(context->mapped_shms_.size(), 2);
+        EXPECT_NE(context->client_buffer_allocator_, nullptr);
+        EXPECT_NE(context->client_buffer_allocator_,
+                  native->GetBufferAllocator());
+    }
+    // Native Stop has completed, but RPC stop is waiting for the paused
+    // handler. Dummy allocation and address translation must remain safe.
+    const auto expect_shutdown = [](const auto& result) {
+        EXPECT_FALSE(result);
+        if (!result) EXPECT_EQ(result.error(), ErrorCode::SHUTTING_DOWN);
+    };
+    const std::span<const char> payload(value.data(), value.size());
+    expect_shutdown(owner.client->put_dummy_helper(
+        "late_put", payload, write_config, id));
+    expect_shutdown(owner.client->put_batch_dummy_helper(
+        {"late_batch_put"}, {payload}, write_config, id));
+    expect_shutdown(owner.client->put_parts_dummy_helper(
+        "late_put_parts", {payload}, write_config, id));
+    auto late_writes = owner.client->batch_put_from_dummy_helper(
+        {"late_put_from"}, {0x100000}, {value.size()}, write_config, id);
+    EXPECT_EQ(late_writes.size(), 1);
+    for (const auto& result : late_writes) expect_shutdown(result);
+    auto late_reads = owner.client->batch_get_into_dummy_helper(
+        {"drain_key"}, {0x100000}, {SharedFile::kSize}, std::nullopt, id);
+    EXPECT_EQ(late_reads.size(), 1);
+    for (const auto& result : late_reads) expect_shutdown(result);
+    auto late_buffer = owner.client->get_buffer_info_dummy_helper(
+        "drain_key", std::nullopt, id);
+    EXPECT_FALSE(late_buffer);
+    if (!late_buffer) {
+        // This wrapper converts an unavailable buffer into INVALID_PARAMS.
+        EXPECT_EQ(late_buffer.error(), ErrorCode::INVALID_PARAMS);
+    }
+    EXPECT_EQ(std::string(static_cast<char*>(local_buffer.data), value.size()),
+              value);
+    {
+        SharedMutexLocker lock(&context->mutex_, shared_lock);
+        if (context->client_buffer_allocator_) {
+            // All temporary write buffers must have been returned to the pool.
+            auto whole_pool =
+                context->client_buffer_allocator_->allocate(SharedFile::kSize);
+            EXPECT_TRUE(whole_pool.has_value());
+        }
     }
     native.reset();
     handler.release.set_value();
@@ -690,6 +740,7 @@ void CheckDummyRpcDrain(ClientConfig config, const WriteConfig& write_config,
     }
     EXPECT_TRUE(native_lifetime.expired());
     EXPECT_TRUE(context->mapped_shms_.empty());
+    EXPECT_EQ(context->client_buffer_allocator_, nullptr);
     EXPECT_EQ(RealClientTestHelper::FindShmContext(*owner.client, id), nullptr);
     EXPECT_EQ(owner.client->tearDownAll(), 0);
 }
