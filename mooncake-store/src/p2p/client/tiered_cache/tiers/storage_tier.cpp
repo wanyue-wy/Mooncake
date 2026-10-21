@@ -552,6 +552,11 @@ tl::expected<void, ErrorCode> StorageTier::FlushInternal() {
 
         if (!res) {
             LOG(ERROR) << "Flush failed: " << res.error();
+            // Known V1 limitation: physical space/quota exhaustion does not
+            // trigger bucket reclaim here. Deleted keys lower live usage but
+            // leave files behind, so Allocate may never trigger eviction and
+            // these pending writes can eventually exhaust the staging pool.
+            // Intentionally deferred: retire V1 after V2 validation/deployment.
             // Restore pending entries on failure
             for (auto& kv : snapshot) {
                 kv.second->SetFlushing(false);

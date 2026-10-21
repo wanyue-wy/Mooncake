@@ -583,6 +583,11 @@ tl::expected<size_t, ErrorCode> BucketStorageBackend::EvictBucket(
         auto bucket_meta = bucket_it->second;
         key_count = bucket_meta->keys.size();
 
+        // Known V1 limitation: a deleted key can be rewritten into a newer
+        // bucket, but this loop erases its current mapping without checking
+        // the bucket ID. NotifyBucketEviction also identifies replicas only
+        // by key and tier. This can remove the newer replica and its route.
+        // Intentionally deferred: retire V1 after V2 is validated and deployed.
         // Remove all live keys from object_bucket_map_ and calculate freed size
         for (const auto& key : bucket_meta->keys) {
             auto obj_it = object_bucket_map_.find(key);
@@ -630,6 +635,9 @@ tl::expected<void, ErrorCode> BucketStorageBackend::MarkKeyDeleted(
     const std::string& key) {
     SharedMutexLocker lock(&mutex_);
 
+    // Known V1 limitation: a delayed Free of an old buffer can erase a newer
+    // mapping for the same key because no expected bucket ID is supplied.
+    // Intentionally deferred with V1 retirement after V2 validation/deployment.
     // Find which bucket this key belongs to
     auto obj_it = object_bucket_map_.find(key);
     if (obj_it == object_bucket_map_.end()) {
@@ -729,6 +737,10 @@ void BucketStorageBackend::StopDeletionWorker() {
 
 void BucketStorageBackend::EnqueueBucketDeletion(PendingBucketDeletion task) {
     const uint64_t queued_bytes = task.queued_bytes;
+    // Known V1 race: the worker can consume this task after the queue unlock
+    // but before the counters are incremented. Its decrement can transiently
+    // underflow the counters and incorrectly block offload as deletion backlog.
+    // Intentionally deferred: retire V1 after V2 is validated and deployed.
     {
         std::lock_guard<std::mutex> lock(deletion_mutex_);
         pending_bucket_deletions_.push_back(std::move(task));
