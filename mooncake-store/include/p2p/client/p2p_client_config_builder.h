@@ -56,6 +56,9 @@ struct P2PClientConfig : RealClientConfigBase {
     // Parsed custom tiered backend configuration
     Json::Value tiered_backend_config;
 
+    // Select the local data-plane implementation through the tier JSON.
+    std::string data_manager_version = "v1";
+
     // Number of TieredBackend metadata index shards (and matching DataManager
     // pending-write/pinned-key lease shards). Higher values reduce contention.
     size_t lock_shard_count = 1024;
@@ -199,6 +202,12 @@ class P2PClientConfigBuilder : private ClientConfigBuilder {
                 "via tiered_backend_config_json parameter.");
         }
         config.tiered_backend_config = tiered_config;
+
+        if (tiered_config.isMember("data_manager_version") &&
+            tiered_config["data_manager_version"].isString()) {
+            config.data_manager_version =
+                tiered_config["data_manager_version"].asString();
+        }
 
         if (p2p_key_lease_duration_ms > 0) {
             config.p2p_key_lease_duration_ms = p2p_key_lease_duration_ms;

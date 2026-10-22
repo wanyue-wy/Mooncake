@@ -33,6 +33,7 @@
 #include <ylt/coro_http/coro_http_server.hpp>
 #include <ylt/coro_rpc/coro_rpc_server.hpp>
 #include "p2p/client/data_manager.h"
+#include "p2p/client/data_manager_factory.h"
 #include "p2p/client/client_rpc_service.h"
 #include "p2p/ha/metadata_recovery_worker.h"
 #include "p2p/ha/p2p_master_view.h"

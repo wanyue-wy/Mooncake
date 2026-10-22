@@ -72,6 +72,31 @@ TEST(ClientConfigBuilderTest, BuildP2PClientConfigUsesDefaults) {
     EXPECT_EQ(config.redis_heartbeat_interval_sec, 1);
 }
 
+TEST(ClientConfigBuilderTest, DataManagerVersionDefaultsToV1) {
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
+        "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
+        std::nullopt, "127.0.0.1:50051", kTieredConfigJson);
+    EXPECT_EQ(config.data_manager_version, "v1");
+}
+
+TEST(ClientConfigBuilderTest, DataManagerVersionIsReadFromTheTierConfig) {
+    static constexpr const char* kV2Config = R"({
+  "data_manager_version": "v2",
+  "tiers": [
+    {
+      "type": "DRAM",
+      "capacity": 1048576,
+      "priority": 10
+    }
+  ]
+})";
+    auto config = P2PClientConfigBuilder::build_p2p_real_client(
+        "127.0.0.1:12345", "http://127.0.0.1:8080/metadata", "tcp",
+        std::nullopt, "127.0.0.1:50051", kV2Config);
+    EXPECT_EQ(config.data_manager_version, "v2");
+    EXPECT_EQ(config.tiered_backend_config["tiers"].size(), 1u);
+}
+
 TEST(ClientConfigBuilderTest, PreservesAscendAddressForTransferEngine) {
     const std::pair<const char*, const char*> addresses[] = {
         {"127.0.0.1:12345:npu_2", "127.0.0.1"},
