@@ -31,7 +31,7 @@ endfunction()
 function(add_p2p_store_test_with_custom_main name)
     add_executable(${name} ${ARGN})
     target_link_libraries(${name} PUBLIC
-        ${MOONCAKE_STORE_LIBS}
+        mooncake_store
         transfer_engine
         cachelib_memory_allocator
         ${ETCD_WRAPPER_LIB}
