@@ -41,7 +41,7 @@ if(USE_3FS)
   set(EXTRA_LIBS ${HF3FS_API_LIB})
 endif()
 
-# TODO(P2P-010.3): Verify production, UT and benchmark artifacts per architecture.
+# TODO(P2P-010.5): Verify production, UT and benchmark artifacts per architecture.
 # The cache_allocator library
 include_directories(${Python3_INCLUDE_DIRS})
 add_library(mooncake_store ${MOONCAKE_STORE_SOURCES})

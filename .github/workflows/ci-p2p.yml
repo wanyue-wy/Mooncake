@@ -269,7 +269,7 @@ jobs:
         mooncake_http_metadata_server --port 8080 &
       shell: bash
 
-    # TODO(P2P-010.3): Adapt installed tier/service/HA workloads from run_tests.sh
+    # TODO(P2P-010.4): Adapt installed tier/service/HA workloads from run_tests.sh
     # and validate the applicable TCP/RDMA paths.
     - name: Prepare P2P test configurations
       run: |
