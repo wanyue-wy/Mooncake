@@ -110,7 +110,9 @@ TEST_F(StorageTierTest, StagingAllocationAccountingAndRecovery) {
         std::make_shared<StorageTier>(id, std::vector<std::string>{}, 8192);
     ASSERT_TRUE(tier->Init(nullptr, nullptr, config).has_value());
     TierMetric metrics;
-    metrics.RegisterTier(id, "staging", tier, 5);
+    metrics.RegisterTier(id, "staging", tier->GetMemoryType(), 5,
+                         tier->GetCapacity(),
+                         [tier = tier.get()] { return tier->GetUsage(); });
     const std::array<std::string, 1> label{"staging"};
     const auto expect_usage = [&](int64_t used) {
         std::string serialized;
